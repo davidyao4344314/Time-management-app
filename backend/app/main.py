@@ -27,7 +27,19 @@ def get_clomuns(connection, table_name):
             columns.append(comumn_name)
 
     return columns
+def print_all_activities(connection):
+    cursor = connection.execute("SELECT * FROM activities")
+    activities = cursor.fetchall()
 
+    for activity in activities:
+        print(f"ID: {activity[0]}")
+        print(f"Name: {activity[1]}")
+        print(f"Category: {activity[2]}")
+        print(f"Subject: {activity[3]}")
+        print(f"Date: {activity[4]}")
+        print(f"Start time: {activity[5]}")
+        print(f"End time: {activity[6]}")
+        print()
 
 
 project_dir = Path(__file__).resolve().parents[2]
@@ -75,4 +87,5 @@ while True:
 
     print("Activity added successfully.\n")
 
+    print_all_activities(connection)
 connection.close()

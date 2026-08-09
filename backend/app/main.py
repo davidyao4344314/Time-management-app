@@ -1,91 +1,14 @@
 import sqlite3
 from pathlib import Path
 
+from backend.app.database import create_connection, create_tables
+from backend.app.activities import print_all_activities
 
-def get_user_values(columns):
-    values = []
-
-    for column in columns:
-        user_value = input(f"Enter {column}: ").strip()
-
-        if user_value.lower() == "quit":
-            return None
-
-        values.append(user_value)
-
-    return values
-
-def get_clomuns(connection, table_name):
-    cursor = connection.execute(f"PRAGMA table_info({table_name})")
-    table_data = cursor.fetchall()
-
-    columns = []
-    for column in table_data:
-        comumn_name = column[1]
-
-        if comumn_name != "id":
-            columns.append(comumn_name)
-
-    return columns
-def print_all_activities(connection):
-    cursor = connection.execute("SELECT * FROM activities")
-    activities = cursor.fetchall()
-
-    for activity in activities:
-        print(f"ID: {activity[0]}")
-        print(f"Name: {activity[1]}")
-        print(f"Category: {activity[2]}")
-        print(f"Subject: {activity[3]}")
-        print(f"Date: {activity[4]}")
-        print(f"Start time: {activity[5]}")
-        print(f"End time: {activity[6]}")
-        print()
+conection =create_connection()
+create_tables(conection)
+print_all_activities(conection)
 
 
-project_dir = Path(__file__).resolve().parents[2]
-backend_dir = Path(__file__).resolve().parent.parent
-
-sql_file = project_dir / "activities.sql"
-db_file = backend_dir / "study_app.db"
-
-connection = sqlite3.connect(db_file)
-
-with open(sql_file, "r") as file:
-    sql_code = file.read()
-
-connection.executescript(sql_code)
-
-columns = [
-    "name",
-    "category",
-    "subject",
-    "date",
-    "start_time",
-    "end_time"
-]
 
 while True:
-    columns = get_clomuns(connection, "activities")
-    values = get_user_values(columns)
-
-    if values is None:
-        break
-
-    connection.execute("""
-        INSERT INTO activities (
-            name,
-            category,
-            subject,
-            date,
-            start_time,
-            end_time
-        )
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, values)
-
-    connection.commit()
-
-    print("Activity added successfully.\n")
-
-    print_all_activities(connection)
-connection.close()
+    user_choice = input("Please enter your choice: ")

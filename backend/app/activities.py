@@ -82,7 +82,17 @@ def search_activity(connection, value_name):
             print(f"Start time: {activity[5]}")
             print(f"End time: {activity[6]}")
             print("----------------------")
+            return activity[0]
     else:
         print(f"No activity found for {value_name}")
+
+def delete_activity(connection, activity_id):
+    connection.execute(
+        "DELETE FROM activities WHERE id = ?",
+        (activity_id,)
+    )
+
+    connection.commit()
+
 
 

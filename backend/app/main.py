@@ -3,7 +3,7 @@ from pathlib import Path
 
 from backend.app import activities
 from backend.app.database import create_connection, create_tables
-from backend.app.activities import print_all_activities , search_activity, get_user_values, get_clomuns,add_activity
+from backend.app.activities import print_all_activities , search_activity, get_user_values, get_clomuns,add_activity,delete_activity
 
 conection =create_connection()
 create_tables(conection)
@@ -26,7 +26,10 @@ while True:
         print_all_activities(conection)
     elif user_choice == "3":
         user_input_name = input("Please input the thing you want to delte")
-        search_activity(conection, user_input_name)
+        target_id=search_activity(conection, user_input_name)
+        delete_activity(conection, target_id)
+
+
 
 
 

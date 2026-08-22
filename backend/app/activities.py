@@ -30,6 +30,21 @@ def get_user_values(columns):
         values.append(user_value)
 
     return values
+def add_activity(connection, values):
+    if values is not None:
+        connection.execute("""
+            INSERT INTO activities (
+                name,
+                category,
+                subject,
+                date,
+                start_time,
+                end_time
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, values)
+
+        connection.commit()
 
 """
 print all the activities in the database
@@ -49,5 +64,25 @@ def print_all_activities(connection):
         print(f"Start time: {activity[5]}")
         print(f"End time: {activity[6]}")
         print()
+
+
+def search_activity(connection, value_name):
+    cursor = connection.execute("SELECT * FROM activities where name = ?", (value_name,))
+    results = cursor.fetchall()
+    if results != []:
+        for activity in results:
+            print("\n----------------------")
+            print("Activity found")
+            print("----------------------")
+            print(f"ID: {activity[0]}")
+            print(f"Name: {activity[1]}")
+            print(f"Category: {activity[2]}")
+            print(f"Subject: {activity[3]}")
+            print(f"Date: {activity[4]}")
+            print(f"Start time: {activity[5]}")
+            print(f"End time: {activity[6]}")
+            print("----------------------")
+    else:
+        print(f"No activity found for {value_name}")
 
 

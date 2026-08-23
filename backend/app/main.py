@@ -9,19 +9,26 @@ conection =create_connection()
 create_tables(conection)
 
 
-
 while True:
-    date=get_current_date()
-    time=get_current_time()
-    activity_id=0
-    i = 1
+    date = get_current_date()
+    time = get_current_time()
+
+    actvities_today = []
+
+    activity_id = 1
+
     while True:
-        schedule = get_activity_schedule(conection,activity_id)
-        print(i)
+        schedule = get_activity_schedule(conection, activity_id)
+
         if schedule is None:
             break
-        i = i + 1
 
+        print(schedule)
+        if str(date) == schedule[0]:
+            actvities_today.append(activity_id)
+
+        activity_id += 1
+    print(actvities_today)
 
     print("""
     1. Add activity

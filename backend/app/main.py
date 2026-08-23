@@ -3,14 +3,26 @@ from pathlib import Path
 
 from backend.app import activities
 from backend.app.database import create_connection, create_tables
-from backend.app.activities import print_all_activities , search_activity, get_user_values, get_clomuns,add_activity,delete_activity, edit_activity
-
+from backend.app.activities import print_all_activities , search_activity, get_user_values, get_clomuns,add_activity,delete_activity, edit_activity,get_activity_schedule
+from backend.app.calender import get_current_date, get_current_time
 conection =create_connection()
 create_tables(conection)
 
 
 
 while True:
+    date=get_current_date()
+    time=get_current_time()
+    activity_id=0
+    i = 1
+    while True:
+        schedule = get_activity_schedule(conection,activity_id)
+        print(i)
+        if schedule is None:
+            break
+        i = i + 1
+
+
     print("""
     1. Add activity
     2. View activities
@@ -21,7 +33,7 @@ while True:
     if user_choice == "1":
         columns =get_clomuns(conection, "activities")
         values=get_user_values(columns)
-        add_activity(conection,values )
+        add_activity(conection,columns ,values )
     elif user_choice == "2":
         print_all_activities(conection)
     elif user_choice == "3":
@@ -39,7 +51,10 @@ while True:
         edit_activity(conection, target_id, columns_name, new_values)
 
 
-
+    elif user_choice == "6":
+        conection.execute("DELETE FROM activities")
+        conection.execute("DELETE FROM sqlite_sequence WHERE name = 'activities'")
+        conection.commit()
     elif user_choice == "q":
         break
 

@@ -30,21 +30,17 @@ def get_user_values(columns):
         values.append(user_value)
 
     return values
-def add_activity(connection, values):
-    if values is not None:
-        connection.execute("""
-            INSERT INTO activities (
-                name,
-                category,
-                subject,
-                date,
-                start_time,
-                end_time
-            )
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, values)
+def add_activity(connection, columns, values):
+    column_names = ", ".join(columns)
+    placeholders = ", ".join(["?"] * len(columns))
 
-        connection.commit()
+    sql = f"""
+        INSERT INTO activities ({column_names})
+        VALUES ({placeholders})
+    """
+
+    connection.execute(sql, values)
+    connection.commit()
 
 """
 print all the activities in the database
@@ -104,5 +100,26 @@ def edit_activity(connection, activity_id, column_name, new_value):
     connection.execute(sql, (new_value, activity_id))
     connection.commit()
 
+def get_end_time(connection, activity_id):
+    cursor = connection.execute(
+        "SELECT end_time FROM activities WHERE id = ?",
+        (activity_id,)
+    )
 
+    result = cursor.fetchone()
 
+    if result:
+        return result[0]
+
+    return None
+def get_activity_schedule(connection, activity_id):
+    cursor = connection.execute(
+        """
+        SELECT date, start_time, end_time
+        FROM activities
+        WHERE id = ?
+        """,
+        (activity_id,)
+    )
+
+    return cursor.fetchone()

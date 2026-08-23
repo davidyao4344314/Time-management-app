@@ -3,7 +3,10 @@ CREATE TABLE IF NOT EXISTS activities(
     name TEXT NOT NULL,
     category TEXT NOT NULL,
     subject TEXT,
-    date TEXT NOT NULL,
+
+    activity_type TEXT NOT NULL,
+
+    date TEXT,
     start_time TEXT NOT NULL,
     end_time TEXT NOT NULL
 );

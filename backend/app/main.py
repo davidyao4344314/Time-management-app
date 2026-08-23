@@ -3,7 +3,7 @@ from pathlib import Path
 
 from backend.app import activities
 from backend.app.database import create_connection, create_tables
-from backend.app.activities import print_all_activities , search_activity, get_user_values, get_clomuns,add_activity,delete_activity
+from backend.app.activities import print_all_activities , search_activity, get_user_values, get_clomuns,add_activity,delete_activity, edit_activity
 
 conection =create_connection()
 create_tables(conection)
@@ -28,6 +28,20 @@ while True:
         user_input_name = input("Please input the thing you want to delte")
         target_id=search_activity(conection, user_input_name)
         delete_activity(conection, target_id)
+    elif user_choice == "4":
+        user_input_name = input("Please input the thing you want to delte")
+        target_id=search_activity(conection, user_input_name)
+    elif user_choice == "5":
+        user_input_name = input("Please input the thing you want to delte")
+        target_id=search_activity(conection, user_input_name)
+        columns_name = input("Which field do you want to edit? ")
+        new_values= input("Please input the new value")
+        edit_activity(conection, target_id, columns_name, new_values)
+
+
+
+    elif user_choice == "q":
+        break
 
 
 

@@ -94,5 +94,15 @@ def delete_activity(connection, activity_id):
 
     connection.commit()
 
+def edit_activity(connection, activity_id, column_name, new_value):
+    sql = f"""
+        UPDATE activities
+        SET {column_name} = ?
+        WHERE id = ?
+    """
+
+    connection.execute(sql, (new_value, activity_id))
+    connection.commit()
+
 
 

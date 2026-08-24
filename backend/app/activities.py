@@ -123,3 +123,23 @@ def get_activity_schedule(connection, activity_id):
     )
 
     return cursor.fetchone()
+
+def get_activity_name_by_id(connection, activity_id):
+    cursor = connection.execute(
+        "SELECT name FROM activities WHERE id = ?",
+        (activity_id,)
+    )
+
+    result = cursor.fetchone()
+
+    if result is None:
+        return None
+
+    return result[0]
+
+def get_all_activities(connection):
+    cursor = connection.execute(
+        "SELECT * FROM activities"
+    )
+
+    return cursor.fetchall()

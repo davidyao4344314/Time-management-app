@@ -4,7 +4,7 @@ from pathlib import Path
 from backend.app import activities
 from backend.app.database import create_connection, create_tables
 from backend.app.activities import print_all_activities , search_activity, get_user_values, get_clomuns,add_activity,delete_activity, edit_activity,get_activity_schedule
-from backend.app.calender import get_current_date, get_current_time
+from backend.app.calender import get_current_date, get_current_time , daily_activities,print_all_dailies
 conection =create_connection()
 create_tables(conection)
 
@@ -12,23 +12,9 @@ create_tables(conection)
 while True:
     date = get_current_date()
     time = get_current_time()
+    activities_today =daily_activities( conection, date)
+    activities_today_name=print_all_dailies(conection, activities_today)
 
-    actvities_today = []
-
-    activity_id = 1
-
-    while True:
-        schedule = get_activity_schedule(conection, activity_id)
-
-        if schedule is None:
-            break
-
-        print(schedule)
-        if str(date) == schedule[0]:
-            actvities_today.append(activity_id)
-
-        activity_id += 1
-    print(actvities_today)
 
     print("""
     1. Add activity

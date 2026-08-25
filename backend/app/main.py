@@ -1,7 +1,3 @@
-import sqlite3
-from pathlib import Path
-
-from backend.app import activities
 from backend.app.database import create_connection, create_tables
 from backend.app.activities import print_all_activities , search_activity, get_user_values, get_clomuns,add_activity,delete_activity, edit_activity,get_activity_schedule, search_by_id
 from backend.app.calender import get_current_date, get_current_time ,print_all_dailies, get_current_day,get_todays_activities, check_activity_current

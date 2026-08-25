@@ -4,18 +4,18 @@ from activities import get_activity_schedule, get_activity_name_by_id, get_all_a
 def get_current_date():
     now = datetime.now()
     current_date = now.date()
-    print(current_date)
+    #print(current_date)
     return current_date
 
 def get_current_time():
     now = datetime.now()
     current_time = now.time()
-    print(current_time)
+    #print(current_time)
     return current_time
 
 def get_current_day():
     return datetime.now().strftime("%A")
-
+"""
 def daily_activities(conection, date):
     actvities_today = []
 
@@ -33,7 +33,7 @@ def daily_activities(conection, date):
 
         activity_id += 1
     return actvities_today
-
+"""
 def print_all_dailies(connection, activit_list):
     name_list = []
     print("The activties today is:")
@@ -58,7 +58,6 @@ def is_activity_today(activity_type, activity_date, activity_day):
         return activity_day == current_day
 
     return False
-
 
 def get_todays_activities(connection):
     activities = get_all_activities(connection)

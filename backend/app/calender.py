@@ -9,7 +9,7 @@ def get_current_date():
 
 def get_current_time():
     now = datetime.now()
-    current_time = now.time()
+    current_time = now.time().strftime("%H:%M")
     #print(current_time)
     return current_time
 
@@ -35,14 +35,15 @@ def daily_activities(conection, date):
     return actvities_today
 """
 def print_all_dailies(connection, activit_list):
-    name_list = []
-    print("The activties today is:")
     for activity in activit_list:
-        print(activity)
-        name=get_activity_name_by_id(connection, activity)
-        name_list.append(name)
-        print(name)
-    return name_list
+        print(f"ID: {activity[0]}")
+        print(f"Name: {activity[1]}")
+        print(f"Type: {activity[2]}")
+        print(f"Date: {activity[3]}")
+        print(f"Day: {activity[4]}")
+        print(f"Start time: {activity[5]}")
+        print(f"End time: {activity[6]}")
+
 
 def is_activity_today(activity_type, activity_date, activity_day):
     today = str(get_current_date())
@@ -77,3 +78,8 @@ def get_todays_activities(connection):
             activities_today.append(activity)
 
     return activities_today
+
+def check_activity_start_time(activity_list, time_now):
+    for activity in activity_list:
+        if activity[5] == time_now:
+            return activity[0]

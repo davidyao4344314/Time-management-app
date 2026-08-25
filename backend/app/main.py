@@ -4,7 +4,7 @@ from pathlib import Path
 from backend.app import activities
 from backend.app.database import create_connection, create_tables
 from backend.app.activities import print_all_activities , search_activity, get_user_values, get_clomuns,add_activity,delete_activity, edit_activity,get_activity_schedule
-from backend.app.calender import get_current_date, get_current_time ,print_all_dailies, get_current_day,get_todays_activities
+from backend.app.calender import get_current_date, get_current_time ,print_all_dailies, get_current_day,get_todays_activities, check_activity_start_time
 conection =create_connection()
 create_tables(conection)
 
@@ -12,6 +12,7 @@ create_tables(conection)
 while True:
     date = get_current_date()
     time = get_current_time()
+    print(time)
     activities_today =get_todays_activities(conection)
     print(activities_today)
     #print_all_dailies(conection, ac)
@@ -19,6 +20,10 @@ while True:
     #activities_today_name=print_all_dailies(conection, activities_today)
     day_today =get_current_day()
     print(day_today)
+    print_all_dailies(conection, activities_today)
+    id =check_activity_start_time(activities_today, time)
+    print(f"current is {id}")
+
 
 
     print("""

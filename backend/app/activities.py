@@ -143,3 +143,23 @@ def get_all_activities(connection):
     )
 
     return cursor.fetchall()
+
+def search_by_id(connection, value_name):
+    cursor = connection.execute("SELECT * FROM activities where id = ?", (value_name,))
+    results = cursor.fetchall()
+    if results != []:
+        for activity in results:
+            print("\n----------------------")
+            print("Activity found")
+            print("----------------------")
+            print(f"ID: {activity[0]}")
+            print(f"Name: {activity[1]}")
+            print(f"Category: {activity[2]}")
+            print(f"Subject: {activity[3]}")
+            print(f"Date: {activity[4]}")
+            print(f"Start time: {activity[5]}")
+            print(f"End time: {activity[6]}")
+            print("----------------------")
+            return activity[0]
+    else:
+        print(f"No activity found for {value_name}")

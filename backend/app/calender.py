@@ -79,7 +79,14 @@ def get_todays_activities(connection):
 
     return activities_today
 
-def check_activity_start_time(activity_list, time_now):
-    for activity in activity_list:
-        if activity[5] == time_now:
-            return activity[0]
+def check_activity_current(activities_today, current_time):
+    current_activities = []
+
+    for activity in activities_today:
+        start_time = activity[5]
+        end_time = activity[6]
+
+        if start_time <= current_time < end_time:
+            current_activities.append(activity[0])
+
+    return current_activities

@@ -1,6 +1,5 @@
 from datetime import datetime
-from activities import get_activity_schedule, get_activity_name_by_id, get_all_activities
-
+from backend.app.activities import get_activity_schedule, get_activity_name_by_id, get_all_activities
 def get_current_date():
     now = datetime.now()
     current_date = now.date()

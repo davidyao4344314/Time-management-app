@@ -70,3 +70,4 @@ def check_activity_current(activities_today, current_time):
             current_activities.append(activity[0])
 
     return current_activities
+

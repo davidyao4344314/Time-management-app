@@ -20,3 +20,15 @@
   font-size: 28px;
   cursor: pointer;
 }
+
+.sidebar {
+  width: 240px;
+  min-height: calc(100vh - 69px);
+  padding: 24px;
+  border-right: 1px solid #dddddd;
+  background: #f5f5f5;
+}
+
+.sidebar h2 {
+  margin: 0;
+}

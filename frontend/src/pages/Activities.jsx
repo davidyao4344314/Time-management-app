@@ -13,9 +13,22 @@ function formatActivities(data) {
   }))
 }
 
+function formatWeeklyActivities(data) {
+  return data.map((activity) => ({
+    id: activity[0],
+    name: activity[1],
+    category: activity[2],
+    subject: activity[3],
+    startTime: activity[5],
+    endTime: activity[6],
+    scheduledDate: activity[7],
+  }))
+}
+
 function Activities() {
   const [activities, setActivities] = useState([])
   const [currentActivities, setCurrentActivities] = useState([])
+  const [weeklyActivities, setWeeklyActivities] = useState([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -24,20 +37,23 @@ function Activities() {
 
     async function loadActivities() {
       try {
-        const [todayResponse, currentResponse] = await Promise.all([
+        const [todayResponse, currentResponse, weekResponse] = await Promise.all([
           fetch('/api/activities/today', { signal: controller.signal }),
           fetch('/api/activities/current', { signal: controller.signal }),
+          fetch('/api/activities/week', { signal: controller.signal }),
         ])
 
-        if (!todayResponse.ok || !currentResponse.ok) {
+        if (!todayResponse.ok || !currentResponse.ok || !weekResponse.ok) {
           throw new Error('The server could not load the activities.')
         }
 
         const todayData = await todayResponse.json()
         const currentData = await currentResponse.json()
+        const weekData = await weekResponse.json()
 
         setActivities(formatActivities(todayData))
         setCurrentActivities(formatActivities(currentData))
+        setWeeklyActivities(formatWeeklyActivities(weekData))
       } catch (requestError) {
         if (requestError.name !== 'AbortError') {
           setError('Could not load today\'s activities.')
@@ -101,6 +117,33 @@ function Activities() {
                       {activity.category && <p>Category: {activity.category}</p>}
                       {activity.subject && <p>Subject: {activity.subject}</p>}
                       {activity.date && <p>Date: {activity.date}</p>}
+                    </div>
+                    <p className="activities-time">
+                      {activity.startTime} – {activity.endTime}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section className="activities-section" aria-labelledby="weekly-activities-heading">
+            <h3 id="weekly-activities-heading">Weekly Activities</h3>
+
+            {weeklyActivities.length === 0 ? (
+              <p>No activities scheduled this week.</p>
+            ) : (
+              <ul className="activities-list">
+                {weeklyActivities.map((activity) => (
+                  <li
+                    className="activities-card"
+                    key={`${activity.id}-${activity.scheduledDate}`}
+                  >
+                    <div>
+                      <h4>{activity.name}</h4>
+                      {activity.category && <p>Category: {activity.category}</p>}
+                      {activity.subject && <p>Subject: {activity.subject}</p>}
+                      <p>Date: {activity.scheduledDate}</p>
                     </div>
                     <p className="activities-time">
                       {activity.startTime} – {activity.endTime}

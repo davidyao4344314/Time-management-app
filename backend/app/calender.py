@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from backend.app.activities import get_activity_schedule, get_activity_name_by_id, get_all_activities
 def get_current_date():
     now = datetime.now()
@@ -70,3 +70,34 @@ def check_activity_current(activities_today, current_time):
 
     return current_activities
 
+def get_current_week():
+    today = get_current_date()
+
+    monday = today - timedelta(days=today.weekday())
+
+    week = []
+
+    for i in range(7):
+        day = monday + timedelta(days=i)
+        week.append(day)
+
+    return week
+def is_activity_on_date(
+    activity_type,
+    activity_date,
+    activity_day,
+    chosen_date
+):
+    chosen_date_string = str(chosen_date)
+    chosen_day = chosen_date.strftime("%A")
+
+    if activity_type == "one_time":
+        return activity_date == chosen_date_string
+
+    elif activity_type == "daily":
+        return True
+
+    elif activity_type == "weekly":
+        return activity_day == chosen_day
+
+    return False

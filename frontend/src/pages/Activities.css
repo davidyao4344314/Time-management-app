@@ -1,0 +1,49 @@
+.activities-section {
+  width: 100%;
+  max-width: 48rem;
+  margin-top: 2rem;
+}
+
+.activities-section h3 {
+  margin: 0 0 1rem;
+}
+
+.activities-list {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.activities-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1rem;
+  align-items: center;
+  padding: 1rem;
+  border: 1px solid #dddddd;
+  border-radius: 0.25rem;
+  background: #ffffff;
+}
+
+.activities-card h4,
+.activities-card p {
+  margin: 0;
+}
+
+.activities-card h4 ~ p {
+  margin-top: 0.25rem;
+  color: #666666;
+}
+
+.activities-time {
+  white-space: nowrap;
+}
+
+@media (max-width: 36rem) {
+  .activities-card {
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+  }
+}

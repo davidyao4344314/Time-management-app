@@ -18,7 +18,11 @@ while True:
     )
 
     print(f"current is {current_activity}")
-
+    current_activities = check_activity_current(
+        activities_today,
+        time
+    )
+    print(f"current is {current_activities}")
     print("""
     1. Add activity
     2. View activities
@@ -62,6 +66,9 @@ while True:
     elif user_choice == "8":
         user_input_name = input("Please input the thing you want to delte")
         target_id = search_by_id(conection, user_input_name)
+    elif user_choice == "9":
+
+        user_input_name = input("Please input the thing you want to delte")
     elif user_choice == "q":
         break
 

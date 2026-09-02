@@ -101,3 +101,4 @@ def is_activity_on_date(
         return activity_day == chosen_day
 
     return False
+

@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta
 from backend.app.activities import get_activity_schedule, get_activity_name_by_id, get_all_activities
+
+
 def get_current_date():
     now = datetime.now()
     current_date = now.date()
@@ -88,17 +90,105 @@ def is_activity_on_date(
     activity_day,
     chosen_date
 ):
-    chosen_date_string = str(chosen_date)
-    chosen_day = chosen_date.strftime("%A")
+    if not isinstance(activity_type, str):
+        return False
+
+    activity_type = activity_type.strip().lower()
 
     if activity_type == "one_time":
-        return activity_date == chosen_date_string
+        if not isinstance(activity_date, str):
+            return False
+
+        try:
+            stored_date = datetime.strptime(
+                activity_date.strip(),
+                "%Y-%m-%d",
+            ).date()
+        except ValueError:
+            return False
+
+        return stored_date == chosen_date
 
     elif activity_type == "daily":
         return True
 
     elif activity_type == "weekly":
-        return activity_day == chosen_day
+        if not isinstance(activity_day, str):
+            return False
+
+        valid_weekdays = {
+            "monday",
+            "tuesday",
+            "wednesday",
+            "thursday",
+            "friday",
+            "saturday",
+            "sunday",
+        }
+        stored_weekday = activity_day.strip().lower()
+
+        if stored_weekday not in valid_weekdays:
+            return False
+
+        return stored_weekday == chosen_date.strftime("%A").lower()
 
     return False
 
+
+def is_valid_activity_time(start_time, end_time):
+    if not isinstance(start_time, str) or not isinstance(end_time, str):
+        return False
+
+    try:
+        parsed_start = datetime.strptime(start_time.strip(), "%H:%M")
+        parsed_end = datetime.strptime(end_time.strip(), "%H:%M")
+    except ValueError:
+        return False
+
+    return parsed_start < parsed_end
+
+
+def get_week_activities(connection):
+    activities = get_all_activities(connection)
+    current_week = get_current_week()
+    week_activities = []
+
+    for calendar_date in current_week:
+        for activity in activities:
+            if len(activity) < 7:
+                continue
+
+            activity_type = activity[2]
+            stored_date = activity[3]
+            stored_weekday = activity[4]
+            start_time = activity[5]
+            end_time = activity[6]
+
+            if not is_valid_activity_time(start_time, end_time):
+                continue
+
+            if not is_activity_on_date(
+                activity_type,
+                stored_date,
+                stored_weekday,
+                calendar_date,
+            ):
+                continue
+
+            week_activities.append({
+                "id": activity[0],
+                "name": activity[1],
+                "activity_type": activity_type.strip().lower(),
+                "calendar_date": str(calendar_date),
+                "start_time": start_time.strip(),
+                "end_time": end_time.strip(),
+            })
+
+    return sorted(
+        week_activities,
+        key=lambda activity: (
+            activity["calendar_date"],
+            activity["start_time"],
+            activity["name"],
+        ),
+    )

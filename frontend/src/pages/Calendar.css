@@ -1,22 +1,27 @@
-.calendar-grid {
-  display: grid;
-  grid-template-columns: repeat(7, minmax(11rem, 1fr));
-  gap: 0.75rem;
+.calendar-scroll {
   margin-top: 2rem;
-  padding-bottom: 0.5rem;
-  overflow-x: auto;
-}
-
-.calendar-day {
-  min-height: 18rem;
+  overflow: auto;
   border: 1px solid #dddddd;
   border-radius: 0.25rem;
-  background: #f5f5f5;
 }
 
+.calendar-layout {
+  display: grid;
+  grid-template-columns: 4.5rem repeat(7, minmax(11rem, 1fr));
+  min-width: 82rem;
+  --calendar-hour-height: 3.25rem;
+  --calendar-day-height: 78rem;
+}
+
+.calendar-corner,
 .calendar-day-header {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  min-height: 4rem;
   padding: 0.75rem;
   border-bottom: 1px solid #dddddd;
+  border-right: 1px solid #dddddd;
   background: #ffffff;
 }
 
@@ -36,21 +41,42 @@
   font-size: 0.875rem;
 }
 
-.calendar-day-activities {
-  display: grid;
-  gap: 0.5rem;
-  padding: 0.5rem;
+.calendar-time-column,
+.calendar-day-timeline {
+  position: relative;
+  height: var(--calendar-day-height);
 }
 
-.calendar-empty {
-  margin: 0;
+.calendar-time-column {
+  border-right: 1px solid #dddddd;
+  background: #ffffff;
+}
+
+.calendar-time-label {
+  position: absolute;
+  right: 0.5rem;
   color: #666666;
-  font-size: 0.875rem;
+  font-size: 0.75rem;
+  transform: translateY(-50%);
+}
+
+.calendar-day-timeline {
+  border-right: 1px solid #dddddd;
+  background-color: #fafafa;
+  background-image: linear-gradient(#dddddd 1px, transparent 1px);
+  background-size: 100% var(--calendar-hour-height);
 }
 
 .calendar-activity {
-  padding: 0.75rem;
-  border: 1px solid #cccccc;
+  position: absolute;
+  right: 0.25rem;
+  left: 0.25rem;
+  z-index: 1;
+  min-height: 1.75rem;
+  padding: 0.35rem 0.5rem;
+  overflow: hidden;
+  border: 1px solid #9b9ac0;
+  border-left: 0.25rem solid #11104f;
   border-radius: 0.25rem;
   background: #ffffff;
   cursor: grab;
@@ -65,8 +91,12 @@
   margin: 0;
 }
 
-.calendar-activity p {
-  margin-top: 0.25rem;
-  color: #666666;
+.calendar-activity h4 {
   font-size: 0.875rem;
+}
+
+.calendar-activity p {
+  margin-top: 0.125rem;
+  color: #555555;
+  font-size: 0.75rem;
 }

@@ -5,9 +5,8 @@ from backend.app.database import create_connection
 from backend.app.calender import (
     check_activity_current,
     get_current_time,
-    get_current_week,
     get_todays_activities,
-    is_activity_on_date,
+    get_week_activities,
 )
 
 app = FastAPI()
@@ -72,26 +71,7 @@ def current_activities():
 def weekly_activities():
     connection = create_connection()
 
-    activities = get_all_activities(connection)
-    current_week = get_current_week()
-    activities_week = []
-
-    for chosen_date in current_week:
-        for activity in activities:
-            activity_type = activity[2]
-            activity_date = activity[3]
-            activity_day = activity[4]
-
-            if is_activity_on_date(
-                activity_type,
-                activity_date,
-                activity_day,
-                chosen_date,
-            ):
-                activities_week.append([
-                    *activity,
-                    str(chosen_date),
-                ])
+    activities_week = get_week_activities(connection)
 
     connection.close()
 

@@ -15,13 +15,12 @@ function formatActivities(data) {
 
 function formatWeeklyActivities(data) {
   return data.map((activity) => ({
-    id: activity[0],
-    name: activity[1],
-    category: activity[2],
-    subject: activity[3],
-    startTime: activity[5],
-    endTime: activity[6],
-    scheduledDate: activity[7],
+    id: activity.id,
+    name: activity.name,
+    category: activity.activity_type,
+    startTime: activity.start_time,
+    endTime: activity.end_time,
+    scheduledDate: activity.calendar_date,
   }))
 }
 

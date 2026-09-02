@@ -11,6 +11,9 @@ const dayNames = [
   'Sunday',
 ]
 
+const hours = Array.from({ length: 24 }, (_, hour) => hour)
+const minutesPerDay = 24 * 60
+
 function formatDate(date) {
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, '0')
@@ -43,47 +46,62 @@ function getCurrentWeek() {
 
 function formatWeeklyActivities(data) {
   return data.map((activity) => ({
-    calendarId: `${activity[0]}-${activity[7]}`,
-    id: activity[0],
-    name: activity[1],
-    category: activity[2],
-    subject: activity[3],
-    startTime: activity[5],
-    endTime: activity[6],
-    scheduledDate: activity[7],
+    calendarId: `${activity.id}-${activity.calendar_date}`,
+    id: activity.id,
+    name: activity.name,
+    calendarDate: activity.calendar_date,
+    startTime: activity.start_time,
+    endTime: activity.end_time,
   }))
 }
 
+function timeToMinutes(time) {
+  const [hoursPart, minutesPart] = time.split(':').map(Number)
+
+  return hoursPart * 60 + minutesPart
+}
+
+function CalendarActivity({ activity, onDragStart }) {
+  const startMinutes = timeToMinutes(activity.startTime)
+  const endMinutes = timeToMinutes(activity.endTime)
+  const top = (startMinutes / minutesPerDay) * 100
+  const height = ((endMinutes - startMinutes) / minutesPerDay) * 100
+
+  return (
+    <article
+      className="calendar-activity"
+      draggable
+      onDragStart={(event) => onDragStart(event, activity.calendarId)}
+      style={{
+        top: `${top}%`,
+        height: `${height}%`,
+      }}
+    >
+      <h4>{activity.name}</h4>
+      <p>{activity.startTime} – {activity.endTime}</p>
+    </article>
+  )
+}
+
 function CalendarDay({ day, activities, onDragStart, onDrop }) {
+  const orderedActivities = [...activities].sort((first, second) =>
+    first.startTime.localeCompare(second.startTime),
+  )
+
   return (
     <section
-      className="calendar-day"
+      aria-label={`${day.name}, ${day.dateLabel}`}
+      className="calendar-day-timeline"
       onDragOver={(event) => event.preventDefault()}
       onDrop={(event) => onDrop(event, day.date)}
     >
-      <header className="calendar-day-header">
-        <h3>{day.name}</h3>
-        <time dateTime={day.date}>{day.dateLabel}</time>
-      </header>
-
-      <div className="calendar-day-activities">
-        {activities.length === 0 ? (
-          <p className="calendar-empty">No activities</p>
-        ) : (
-          activities.map((activity) => (
-            <article
-              className="calendar-activity"
-              draggable="true"
-              key={activity.calendarId}
-              onDragStart={(event) => onDragStart(event, activity.calendarId)}
-            >
-              <h4>{activity.name}</h4>
-              <p>{activity.startTime} – {activity.endTime}</p>
-              {activity.subject && <p>{activity.subject}</p>}
-            </article>
-          ))
-        )}
-      </div>
+      {orderedActivities.map((activity) => (
+        <CalendarActivity
+          activity={activity}
+          key={activity.calendarId}
+          onDragStart={onDragStart}
+        />
+      ))}
     </section>
   )
 }
@@ -138,7 +156,7 @@ function Calendar() {
     setActivities((currentActivities) =>
       currentActivities.map((activity) =>
         activity.calendarId === calendarId
-          ? { ...activity, scheduledDate: newDate }
+          ? { ...activity, calendarDate: newDate }
           : activity,
       ),
     )
@@ -153,18 +171,41 @@ function Calendar() {
       {error && <p role="alert">{error}</p>}
 
       {!isLoading && !error && (
-        <div className="calendar-grid">
-          {weekDays.map((day) => (
-            <CalendarDay
-              activities={activities.filter(
-                (activity) => activity.scheduledDate === day.date,
-              )}
-              day={day}
-              key={day.date}
-              onDragStart={handleDragStart}
-              onDrop={handleDrop}
-            />
-          ))}
+        <div className="calendar-scroll">
+          <div className="calendar-layout">
+            <div className="calendar-corner" aria-hidden="true" />
+
+            {weekDays.map((day) => (
+              <header className="calendar-day-header" key={day.date}>
+                <h3>{day.name}</h3>
+                <time dateTime={day.date}>{day.dateLabel}</time>
+              </header>
+            ))}
+
+            <div className="calendar-time-column" aria-hidden="true">
+              {hours.map((hour) => (
+                <span
+                  className="calendar-time-label"
+                  key={hour}
+                  style={{ top: `${(hour / 24) * 100}%` }}
+                >
+                  {String(hour).padStart(2, '0')}:00
+                </span>
+              ))}
+            </div>
+
+            {weekDays.map((day) => (
+              <CalendarDay
+                activities={activities.filter(
+                  (activity) => activity.calendarDate === day.date,
+                )}
+                day={day}
+                key={day.date}
+                onDragStart={handleDragStart}
+                onDrop={handleDrop}
+              />
+            ))}
+          </div>
         </div>
       )}
     </main>

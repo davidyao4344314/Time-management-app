@@ -13,6 +13,28 @@ from backend.app.calender import (
 app = FastAPI()
 
 
+@app.get("/activities")
+def all_activities():
+    connection = create_connection()
+
+    activity_rows = get_all_activities(connection)
+
+    connection.close()
+
+    return [
+        {
+            "id": activity[0],
+            "name": activity[1],
+            "category": activity[2],
+            "subject": activity[3],
+            "date": activity[4],
+            "start_time": activity[5],
+            "end_time": activity[6],
+        }
+        for activity in activity_rows
+    ]
+
+
 @app.get("/activities/today")
 def todays_activities():
     connection = create_connection()

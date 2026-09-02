@@ -26,6 +26,7 @@ function formatWeeklyActivities(data) {
 }
 
 function Activities() {
+  const [allActivities, setAllActivities] = useState([])
   const [activities, setActivities] = useState([])
   const [currentActivities, setCurrentActivities] = useState([])
   const [weeklyActivities, setWeeklyActivities] = useState([])
@@ -37,20 +38,28 @@ function Activities() {
 
     async function loadActivities() {
       try {
-        const [todayResponse, currentResponse, weekResponse] = await Promise.all([
+        const [allResponse, todayResponse, currentResponse, weekResponse] = await Promise.all([
+          fetch('/api/activities', { signal: controller.signal }),
           fetch('/api/activities/today', { signal: controller.signal }),
           fetch('/api/activities/current', { signal: controller.signal }),
           fetch('/api/activities/week', { signal: controller.signal }),
         ])
 
-        if (!todayResponse.ok || !currentResponse.ok || !weekResponse.ok) {
+        if (
+          !allResponse.ok
+          || !todayResponse.ok
+          || !currentResponse.ok
+          || !weekResponse.ok
+        ) {
           throw new Error('The server could not load the activities.')
         }
 
+        const allData = await allResponse.json()
         const todayData = await todayResponse.json()
         const currentData = await currentResponse.json()
         const weekData = await weekResponse.json()
 
+        setAllActivities(allData)
         setActivities(formatActivities(todayData))
         setCurrentActivities(formatActivities(currentData))
         setWeeklyActivities(formatWeeklyActivities(weekData))
@@ -80,6 +89,30 @@ function Activities() {
 
       {!isLoading && !error && (
         <>
+          <section className="activities-section" aria-labelledby="all-activities-heading">
+            <h3 id="all-activities-heading">All Activities</h3>
+
+            {allActivities.length === 0 ? (
+              <p>No activities found.</p>
+            ) : (
+              <ul className="activities-list">
+                {allActivities.map((activity) => (
+                  <li className="activities-card" key={activity.id}>
+                    <div>
+                      <h4>{activity.name}</h4>
+                      {activity.category && <p>Category: {activity.category}</p>}
+                      {activity.subject && <p>Subject: {activity.subject}</p>}
+                      {activity.date && <p>Date: {activity.date}</p>}
+                    </div>
+                    <p className="activities-time">
+                      {activity.start_time} – {activity.end_time}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
           <section className="activities-section" aria-labelledby="current-activities-heading">
             <h3 id="current-activities-heading">Activities Due Now</h3>
 

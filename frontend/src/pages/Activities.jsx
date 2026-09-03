@@ -114,6 +114,8 @@ function Activities() {
   const [deleteForm, setDeleteForm] = useState(emptyDeleteForm)
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState('')
+  const [isDeletingAll, setIsDeletingAll] = useState(false)
+  const [deleteAllError, setDeleteAllError] = useState('')
 
   function updateActivityLists(activityData) {
     setAllActivities(activityData.allActivities)
@@ -163,6 +165,7 @@ function Activities() {
   function openAddForm() {
     setIsDeleteFormOpen(false)
     setDeleteError('')
+    setDeleteAllError('')
     setDeleteForm(emptyDeleteForm)
     setIsFormOpen(true)
   }
@@ -178,6 +181,7 @@ function Activities() {
 
   function openDeleteForm() {
     closeForm()
+    setDeleteAllError('')
     setIsDeleteFormOpen(true)
   }
 
@@ -276,6 +280,44 @@ function Activities() {
     }
   }
 
+  async function handleDeleteAll() {
+    setDeleteAllError('')
+
+    const confirmed = window.confirm(
+      'Are you sure you want to permanently delete all activities? This cannot be undone.',
+    )
+
+    if (!confirmed) {
+      return
+    }
+
+    setIsDeletingAll(true)
+
+    try {
+      const response = await fetch('/api/activities/all', {
+        method: 'DELETE',
+      })
+
+      if (!response.ok) {
+        const responseBody = await response.json()
+        const errorMessage = typeof responseBody.detail === 'string'
+          ? responseBody.detail
+          : 'Could not delete all activities.'
+
+        throw new Error(errorMessage)
+      }
+
+      const activityData = await fetchActivityData()
+      updateActivityLists(activityData)
+      closeForm()
+      closeDeleteForm()
+    } catch (requestError) {
+      setDeleteAllError(requestError.message)
+    } finally {
+      setIsDeletingAll(false)
+    }
+  }
+
   return (
     <main className="page">
       <div className="activities-heading-row">
@@ -298,7 +340,17 @@ function Activities() {
         >
           -
         </button>
+        <button
+          className="delete-all-activities-button"
+          disabled={isDeletingAll}
+          onClick={handleDeleteAll}
+          type="button"
+        >
+          {isDeletingAll ? 'Deleting...' : 'Delete All'}
+        </button>
       </div>
+
+      {deleteAllError && <p role="alert">{deleteAllError}</p>}
 
       {isFormOpen && (
         <form className="add-activity-form" onSubmit={handleSubmit}>

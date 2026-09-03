@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from backend.app.activities import (
     add_activity,
     delete_activity,
+    delte_all_activities,
     get_activity_name_by_id,
     get_all_activities,
     move_activity,
@@ -174,6 +175,22 @@ def create_activity(activity_request: AddActivityRequest):
         connection.close()
 
     return activity_to_dict(created_activity)
+
+
+@app.delete("/activities/all")
+def remove_all_activities():
+    connection = create_connection()
+
+    try:
+        deleted_count = len(get_all_activities(connection))
+        delte_all_activities(connection)
+    finally:
+        connection.close()
+
+    return {
+        "message": "All activities deleted.",
+        "deleted_count": deleted_count,
+    }
 
 
 @app.delete("/activities/by-name/{activity_name}")

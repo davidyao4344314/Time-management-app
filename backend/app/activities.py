@@ -236,3 +236,8 @@ def search_by_id(connection, value_name):
             return activity[0]
     else:
         print(f"No activity found for {value_name}")
+
+def delte_all_activities(connection):
+    connection.execute("DELETE FROM activities")
+    connection.execute("DELETE FROM sqlite_sequence WHERE name = 'activities'")
+    connection.commit()

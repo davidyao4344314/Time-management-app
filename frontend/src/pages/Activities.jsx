@@ -12,6 +12,12 @@ const emptyActivityForm = {
   end_time: '',
 }
 
+const emptyDeleteForm = {
+  method: 'id',
+  activityId: '',
+  activityName: '',
+}
+
 function formatActivities(data) {
   return data.map((activity) => ({
     id: activity.id,
@@ -104,6 +110,10 @@ function Activities() {
   const [activityForm, setActivityForm] = useState(emptyActivityForm)
   const [isSaving, setIsSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
+  const [isDeleteFormOpen, setIsDeleteFormOpen] = useState(false)
+  const [deleteForm, setDeleteForm] = useState(emptyDeleteForm)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
 
   function updateActivityLists(activityData) {
     setAllActivities(activityData.allActivities)
@@ -150,6 +160,33 @@ function Activities() {
     setActivityForm(emptyActivityForm)
   }
 
+  function openAddForm() {
+    setIsDeleteFormOpen(false)
+    setDeleteError('')
+    setDeleteForm(emptyDeleteForm)
+    setIsFormOpen(true)
+  }
+
+  function handleDeleteFormChange(event) {
+    const { name, value } = event.target
+
+    setDeleteForm((currentForm) => ({
+      ...currentForm,
+      [name]: value,
+    }))
+  }
+
+  function openDeleteForm() {
+    closeForm()
+    setIsDeleteFormOpen(true)
+  }
+
+  function closeDeleteForm() {
+    setIsDeleteFormOpen(false)
+    setDeleteError('')
+    setDeleteForm(emptyDeleteForm)
+  }
+
   async function handleSubmit(event) {
     event.preventDefault()
     setIsSaving(true)
@@ -188,6 +225,57 @@ function Activities() {
     }
   }
 
+  async function handleDeleteSubmit(event) {
+    event.preventDefault()
+    setDeleteError('')
+
+    const deleteById = deleteForm.method === 'id'
+    const enteredValue = deleteById
+      ? deleteForm.activityId.trim()
+      : deleteForm.activityName.trim()
+
+    if (!enteredValue) {
+      setDeleteError(
+        deleteById ? 'Enter an activity ID.' : 'Enter an activity name.',
+      )
+      return
+    }
+
+    const confirmed = window.confirm(
+      `Permanently delete the activity with ${deleteById ? 'ID' : 'name'} "${enteredValue}"?`,
+    )
+
+    if (!confirmed) {
+      return
+    }
+
+    setIsDeleting(true)
+
+    try {
+      const endpoint = deleteById
+        ? `/api/activities/${enteredValue}`
+        : `/api/activities/by-name/${encodeURIComponent(enteredValue)}`
+      const response = await fetch(endpoint, { method: 'DELETE' })
+
+      if (!response.ok) {
+        const responseBody = await response.json()
+        const errorMessage = typeof responseBody.detail === 'string'
+          ? responseBody.detail
+          : 'Could not delete the activity.'
+
+        throw new Error(errorMessage)
+      }
+
+      const activityData = await fetchActivityData()
+      updateActivityLists(activityData)
+      closeDeleteForm()
+    } catch (requestError) {
+      setDeleteError(requestError.message)
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
   return (
     <main className="page">
       <div className="activities-heading-row">
@@ -196,10 +284,19 @@ function Activities() {
           aria-expanded={isFormOpen}
           aria-label="Add activity"
           className="add-activity-button"
-          onClick={() => setIsFormOpen(true)}
+          onClick={openAddForm}
           type="button"
         >
           +
+        </button>
+        <button
+          aria-expanded={isDeleteFormOpen}
+          aria-label="Delete activity"
+          className="add-activity-button"
+          onClick={openDeleteForm}
+          type="button"
+        >
+          -
         </button>
       </div>
 
@@ -315,6 +412,63 @@ function Activities() {
               {isSaving ? 'Saving...' : 'Save Activity'}
             </button>
             <button onClick={closeForm} type="button">Cancel</button>
+          </div>
+        </form>
+      )}
+
+      {isDeleteFormOpen && (
+        <form className="add-activity-form" onSubmit={handleDeleteSubmit}>
+          <h3>Delete Activity</h3>
+
+          <div className="add-activity-fields">
+            <label>
+              Delete method
+              <select
+                name="method"
+                onChange={handleDeleteFormChange}
+                value={deleteForm.method}
+              >
+                <option value="id">Delete by ID</option>
+                <option value="name">Delete by name</option>
+              </select>
+            </label>
+
+            {deleteForm.method === 'id' && (
+              <label>
+                Activity ID
+                <input
+                  min="1"
+                  name="activityId"
+                  onChange={handleDeleteFormChange}
+                  required
+                  step="1"
+                  type="number"
+                  value={deleteForm.activityId}
+                />
+              </label>
+            )}
+
+            {deleteForm.method === 'name' && (
+              <label>
+                Activity name
+                <input
+                  name="activityName"
+                  onChange={handleDeleteFormChange}
+                  required
+                  type="text"
+                  value={deleteForm.activityName}
+                />
+              </label>
+            )}
+          </div>
+
+          {deleteError && <p role="alert">{deleteError}</p>}
+
+          <div className="add-activity-actions">
+            <button disabled={isDeleting} type="submit">
+              {isDeleting ? 'Deleting...' : 'Delete Activity'}
+            </button>
+            <button onClick={closeDeleteForm} type="button">Cancel</button>
           </div>
         </form>
       )}

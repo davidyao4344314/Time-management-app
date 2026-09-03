@@ -3,7 +3,14 @@ from datetime import date, datetime
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from backend.app.activities import add_activity, get_all_activities, move_activity
+from backend.app.activities import (
+    add_activity,
+    delete_activity,
+    get_activity_name_by_id,
+    get_all_activities,
+    move_activity,
+    search_activity,
+)
 from backend.app.database import create_connection
 from backend.app.calender import (
     check_activity_current,
@@ -167,6 +174,51 @@ def create_activity(activity_request: AddActivityRequest):
         connection.close()
 
     return activity_to_dict(created_activity)
+
+
+@app.delete("/activities/by-name/{activity_name}")
+def remove_activity_by_name(activity_name: str):
+    requested_name = activity_name.strip()
+
+    if not requested_name:
+        raise HTTPException(status_code=400, detail="Activity name is required.")
+
+    connection = create_connection()
+
+    try:
+        activity_id = search_activity(connection, requested_name)
+
+        if activity_id is None:
+            raise HTTPException(status_code=404, detail="Activity name not found.")
+
+        delete_activity(connection, activity_id)
+    finally:
+        connection.close()
+
+    return {
+        "message": "Activity deleted.",
+        "activity_id": activity_id,
+    }
+
+
+@app.delete("/activities/{activity_id}")
+def remove_activity_by_id(activity_id: int):
+    connection = create_connection()
+
+    try:
+        activity_name = get_activity_name_by_id(connection, activity_id)
+
+        if activity_name is None:
+            raise HTTPException(status_code=404, detail="Activity ID not found.")
+
+        delete_activity(connection, activity_id)
+    finally:
+        connection.close()
+
+    return {
+        "message": "Activity deleted.",
+        "activity_id": activity_id,
+    }
 
 
 @app.get("/activities/today")

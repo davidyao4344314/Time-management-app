@@ -59,9 +59,11 @@ def print_all_activities(connection):
         print(f"Name: {activity[1]}")
         print(f"Category: {activity[2]}")
         print(f"Subject: {activity[3]}")
-        print(f"Date: {activity[4]}")
-        print(f"Start time: {activity[5]}")
-        print(f"End time: {activity[6]}")
+        print(f"Activity type: {activity[4]}")
+        print(f"Date: {activity[5]}")
+        print(f"Weekday: {activity[6]}")
+        print(f"Start time: {activity[7]}")
+        print(f"End time: {activity[8]}")
         print()
 
 
@@ -77,9 +79,11 @@ def search_activity(connection, value_name):
             print(f"Name: {activity[1]}")
             print(f"Category: {activity[2]}")
             print(f"Subject: {activity[3]}")
-            print(f"Date: {activity[4]}")
-            print(f"Start time: {activity[5]}")
-            print(f"End time: {activity[6]}")
+            print(f"Activity type: {activity[4]}")
+            print(f"Date: {activity[5]}")
+            print(f"Weekday: {activity[6]}")
+            print(f"Start time: {activity[7]}")
+            print(f"End time: {activity[8]}")
             print("----------------------")
             return activity[0]
     else:
@@ -118,7 +122,7 @@ def get_end_time(connection, activity_id):
 def get_activity_schedule(connection, activity_id):
     cursor = connection.execute(
         """
-        SELECT date, start_time, end_time
+        SELECT activity_type, date, weekday, start_time, end_time
         FROM activities
         WHERE id = ?
         """,
@@ -156,7 +160,7 @@ def move_activity(
     destination_weekday,
 ):
     cursor = connection.execute(
-        "SELECT id, category, subject, date FROM activities WHERE id = ?",
+        "SELECT id, activity_type, date, weekday FROM activities WHERE id = ?",
         (activity_id,),
     )
     activity = cursor.fetchone()
@@ -185,12 +189,11 @@ def move_activity(
 
     updated = False
 
-    # The existing database stores one-time dates in subject and weekly days in date.
     if stored_activity_type == "one_time":
         edit_activity(
             connection,
             activity_id,
-            "subject",
+            "date",
             str(parsed_destination_date),
         )
         updated = True
@@ -199,7 +202,7 @@ def move_activity(
         edit_activity(
             connection,
             activity_id,
-            "date",
+            "weekday",
             correct_weekday,
         )
         updated = True
@@ -224,9 +227,11 @@ def search_by_id(connection, value_name):
             print(f"Name: {activity[1]}")
             print(f"Category: {activity[2]}")
             print(f"Subject: {activity[3]}")
-            print(f"Date: {activity[4]}")
-            print(f"Start time: {activity[5]}")
-            print(f"End time: {activity[6]}")
+            print(f"Activity type: {activity[4]}")
+            print(f"Date: {activity[5]}")
+            print(f"Weekday: {activity[6]}")
+            print(f"Start time: {activity[7]}")
+            print(f"End time: {activity[8]}")
             print("----------------------")
             return activity[0]
     else:

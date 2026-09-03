@@ -3,10 +3,9 @@ CREATE TABLE IF NOT EXISTS activities(
     name TEXT NOT NULL,
     category TEXT NOT NULL,
     subject TEXT,
-
-    activity_type TEXT NOT NULL,
-
+    activity_type TEXT NOT NULL CHECK (activity_type IN ('one_time', 'daily', 'weekly')),
     date TEXT,
+    weekday TEXT,
     start_time TEXT NOT NULL,
     end_time TEXT NOT NULL
 );

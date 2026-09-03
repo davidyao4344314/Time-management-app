@@ -19,27 +19,22 @@ def print_all_dailies(connection, activit_list):
     for activity in activit_list:
         print(f"ID: {activity[0]}")
         print(f"Name: {activity[1]}")
-        print(f"Type: {activity[2]}")
-        print(f"Date: {activity[3]}")
-        print(f"Day: {activity[4]}")
-        print(f"Start time: {activity[5]}")
-        print(f"End time: {activity[6]}")
+        print(f"Category: {activity[2]}")
+        print(f"Subject: {activity[3]}")
+        print(f"Type: {activity[4]}")
+        print(f"Date: {activity[5]}")
+        print(f"Weekday: {activity[6]}")
+        print(f"Start time: {activity[7]}")
+        print(f"End time: {activity[8]}")
 
 
 def is_activity_today(activity_type, activity_date, activity_day):
-    today = str(get_current_date())
-    current_day = get_current_day()
-
-    if activity_type == "one_time":
-        return activity_date == today
-
-    elif activity_type == "daily":
-        return True
-
-    elif activity_type == "weekly":
-        return activity_day == current_day
-
-    return False
+    return is_activity_on_date(
+        activity_type,
+        activity_date,
+        activity_day,
+        get_current_date(),
+    )
 
 def get_todays_activities(connection):
     activities = get_all_activities(connection)
@@ -47,9 +42,9 @@ def get_todays_activities(connection):
     activities_today = []
 
     for activity in activities:
-        activity_type = activity[2]
-        activity_date = activity[3]
-        activity_day = activity[4]
+        activity_type = activity[4]
+        activity_date = activity[5]
+        activity_day = activity[6]
 
         if is_activity_today(
             activity_type,
@@ -64,8 +59,8 @@ def check_activity_current(activities_today, current_time):
     current_activities = []
 
     for activity in activities_today:
-        start_time = activity[5]
-        end_time = activity[6]
+        start_time = activity[7]
+        end_time = activity[8]
 
         if start_time <= current_time < end_time:
             current_activities.append(activity[0])
@@ -155,14 +150,14 @@ def get_week_activities(connection):
 
     for calendar_date in current_week:
         for activity in activities:
-            if len(activity) < 7:
+            if len(activity) < 9:
                 continue
 
-            activity_type = activity[2]
-            stored_date = activity[3]
-            stored_weekday = activity[4]
-            start_time = activity[5]
-            end_time = activity[6]
+            activity_type = activity[4]
+            stored_date = activity[5]
+            stored_weekday = activity[6]
+            start_time = activity[7]
+            end_time = activity[8]
 
             if not is_valid_activity_time(start_time, end_time):
                 continue
@@ -178,6 +173,8 @@ def get_week_activities(connection):
             week_activities.append({
                 "id": activity[0],
                 "name": activity[1],
+                "category": activity[2],
+                "subject": activity[3],
                 "activity_type": activity_type.strip().lower(),
                 "calendar_date": str(calendar_date),
                 "start_time": start_time.strip(),

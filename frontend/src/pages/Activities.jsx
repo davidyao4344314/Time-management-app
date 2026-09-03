@@ -5,7 +5,7 @@ const emptyActivityForm = {
   name: '',
   category: '',
   subject: '',
-  activity_type: 'one_time',
+  activity_type: 'daily',
   date: '',
   weekday: 'Monday',
   start_time: '',
@@ -247,8 +247,8 @@ function Activities() {
                 onChange={handleFormChange}
                 value={activityForm.activity_type}
               >
-                <option value="one_time">One time</option>
                 <option value="daily">Daily</option>
+                <option value="one_time">One time</option>
                 <option value="weekly">Weekly</option>
               </select>
             </label>

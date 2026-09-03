@@ -1,6 +1,7 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 
-from backend.app.activities import get_all_activities
+from backend.app.activities import get_all_activities, move_activity
 from backend.app.database import create_connection
 from backend.app.calender import (
     check_activity_current,
@@ -10,6 +11,13 @@ from backend.app.calender import (
 )
 
 app = FastAPI()
+
+
+class MoveActivityRequest(BaseModel):
+    activity_id: int
+    activity_type: str
+    destination_date: str
+    destination_weekday: str
 
 
 @app.get("/activities")
@@ -76,3 +84,32 @@ def weekly_activities():
     connection.close()
 
     return activities_week
+
+
+@app.put("/activities/{activity_id}/move")
+def move_calendar_activity(activity_id: int, move_request: MoveActivityRequest):
+    if move_request.activity_id != activity_id:
+        raise HTTPException(
+            status_code=400,
+            detail="The activity ID in the URL and request body must match.",
+        )
+
+    connection = create_connection()
+
+    try:
+        moved_activity = move_activity(
+            connection,
+            activity_id,
+            move_request.activity_type,
+            move_request.destination_date,
+            move_request.destination_weekday,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    finally:
+        connection.close()
+
+    if moved_activity is None:
+        raise HTTPException(status_code=404, detail="Activity not found.")
+
+    return moved_activity

@@ -1,3 +1,6 @@
+from datetime import date
+
+
 """
 this function gets the clomun the table and put it into an list got columns
 """
@@ -143,6 +146,71 @@ def get_all_activities(connection):
     )
 
     return cursor.fetchall()
+
+
+def move_activity(
+    connection,
+    activity_id,
+    activity_type,
+    destination_date,
+    destination_weekday,
+):
+    cursor = connection.execute(
+        "SELECT id, category, subject, date FROM activities WHERE id = ?",
+        (activity_id,),
+    )
+    activity = cursor.fetchone()
+
+    if activity is None:
+        return None
+
+    stored_activity_type = activity[1].strip().lower()
+    requested_activity_type = activity_type.strip().lower()
+
+    if requested_activity_type != stored_activity_type:
+        raise ValueError("The requested activity type does not match the stored activity.")
+
+    if stored_activity_type not in {"one_time", "weekly", "daily"}:
+        raise ValueError("The stored activity type cannot be moved.")
+
+    try:
+        parsed_destination_date = date.fromisoformat(destination_date.strip())
+    except (AttributeError, ValueError):
+        raise ValueError("The destination date must use YYYY-MM-DD format.") from None
+
+    correct_weekday = parsed_destination_date.strftime("%A")
+
+    if destination_weekday.strip().lower() != correct_weekday.lower():
+        raise ValueError("The destination weekday does not match the destination date.")
+
+    updated = False
+
+    # The existing database stores one-time dates in subject and weekly days in date.
+    if stored_activity_type == "one_time":
+        edit_activity(
+            connection,
+            activity_id,
+            "subject",
+            str(parsed_destination_date),
+        )
+        updated = True
+
+    elif stored_activity_type == "weekly":
+        edit_activity(
+            connection,
+            activity_id,
+            "date",
+            correct_weekday,
+        )
+        updated = True
+
+    return {
+        "activity_id": activity_id,
+        "activity_type": stored_activity_type,
+        "destination_date": str(parsed_destination_date),
+        "destination_weekday": correct_weekday,
+        "updated": updated,
+    }
 
 def search_by_id(connection, value_name):
     cursor = connection.execute("SELECT * FROM activities where id = ?", (value_name,))

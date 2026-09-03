@@ -49,10 +49,23 @@ function formatWeeklyActivities(data) {
     calendarId: `${activity.id}-${activity.calendar_date}`,
     id: activity.id,
     name: activity.name,
+    activityType: activity.activity_type,
     calendarDate: activity.calendar_date,
     startTime: activity.start_time,
     endTime: activity.end_time,
   }))
+}
+
+async function fetchWeeklyActivities(signal) {
+  const response = await fetch('/api/activities/week', { signal })
+
+  if (!response.ok) {
+    throw new Error('The server could not load the weekly activities.')
+  }
+
+  const data = await response.json()
+
+  return formatWeeklyActivities(data)
 }
 
 function timeToMinutes(time) {
@@ -93,7 +106,7 @@ function CalendarDay({ day, activities, onDragStart, onDrop }) {
       aria-label={`${day.name}, ${day.dateLabel}`}
       className="calendar-day-timeline"
       onDragOver={(event) => event.preventDefault()}
-      onDrop={(event) => onDrop(event, day.date)}
+      onDrop={(event) => onDrop(event, day)}
     >
       {orderedActivities.map((activity) => (
         <CalendarActivity
@@ -111,22 +124,15 @@ function Calendar() {
   const [activities, setActivities] = useState([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState('')
+  const [moveError, setMoveError] = useState('')
 
   useEffect(() => {
     const controller = new AbortController()
 
     async function loadWeeklyActivities() {
       try {
-        const response = await fetch('/api/activities/week', {
-          signal: controller.signal,
-        })
-
-        if (!response.ok) {
-          throw new Error('The server could not load the weekly activities.')
-        }
-
-        const data = await response.json()
-        setActivities(formatWeeklyActivities(data))
+        const weeklyActivities = await fetchWeeklyActivities(controller.signal)
+        setActivities(weeklyActivities)
       } catch (requestError) {
         if (requestError.name !== 'AbortError') {
           setError('Could not load the weekly activities.')
@@ -148,18 +154,44 @@ function Calendar() {
     event.dataTransfer.effectAllowed = 'move'
   }
 
-  function handleDrop(event, newDate) {
+  async function handleDrop(event, destinationDay) {
     event.preventDefault()
 
     const calendarId = event.dataTransfer.getData('text/plain')
-
-    setActivities((currentActivities) =>
-      currentActivities.map((activity) =>
-        activity.calendarId === calendarId
-          ? { ...activity, calendarDate: newDate }
-          : activity,
-      ),
+    const activity = activities.find(
+      (calendarActivity) => calendarActivity.calendarId === calendarId,
     )
+
+    if (!activity) {
+      return
+    }
+
+    setMoveError('')
+
+    try {
+      const response = await fetch(`/api/activities/${activity.id}/move`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          activity_id: activity.id,
+          activity_type: activity.activityType,
+          destination_date: destinationDay.date,
+          destination_weekday: destinationDay.name,
+        }),
+      })
+
+      if (!response.ok) {
+        const responseBody = await response.json()
+        throw new Error(responseBody.detail || 'Could not save the calendar change.')
+      }
+
+      const refreshedActivities = await fetchWeeklyActivities()
+      setActivities(refreshedActivities)
+    } catch (requestError) {
+      setMoveError(requestError.message)
+    }
   }
 
   return (
@@ -169,6 +201,8 @@ function Calendar() {
       {isLoading && <p>Loading calendar...</p>}
 
       {error && <p role="alert">{error}</p>}
+
+      {moveError && <p role="alert">{moveError}</p>}
 
       {!isLoading && !error && (
         <div className="calendar-scroll">

@@ -152,6 +152,14 @@ def get_activity_name_by_id(connection, activity_id):
 
     return result[0]
 
+def get_activity_by_id(connection, activity_id):
+    cursor = connection.execute(
+        "SELECT * FROM activities WHERE id = ?",
+        (activity_id,),
+    )
+
+    return cursor.fetchone()
+
 def get_all_activities(connection):
     cursor = connection.execute(
         "SELECT * FROM activities"

@@ -218,6 +218,40 @@
   opacity: 0.6;
 }
 
+.edit-activity-overlay {
+  position: fixed;
+  z-index: 20;
+  inset: 0;
+  display: grid;
+  padding: 1rem;
+  place-items: center;
+  background: rgb(0 0 0 / 45%);
+}
+
+.edit-activity-form {
+  max-height: calc(100vh - 2rem);
+  margin: 0;
+  overflow-y: auto;
+}
+
+.edit-current-value {
+  display: grid;
+  gap: 0.375rem;
+}
+
+.edit-current-value span {
+  font-weight: 600;
+}
+
+.edit-current-value strong {
+  min-height: 2.625rem;
+  padding: 0.625rem;
+  border: 1px solid #cccccc;
+  border-radius: 0.25rem;
+  background: #eeeeee;
+  font-weight: 400;
+}
+
 .activities-section {
   width: 100%;
   max-width: 48rem;

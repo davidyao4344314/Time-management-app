@@ -13,8 +13,8 @@ CREATE TABLE IF NOT EXISTS exams(
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     category TEXT NOT NULL,
-    SUJECT TEXT,
+    subject TEXT,
     date TEXT NOT NULL,
-    start_time TEXT not null,
+    start_time TEXT NOT NULL,
     end_time TEXT NOT NULL
-)
+);

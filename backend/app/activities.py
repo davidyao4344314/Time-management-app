@@ -89,6 +89,14 @@ def search_activity(connection, value_name):
     else:
         print(f"No activity found for {value_name}")
 
+def get_activities_by_name(connection, value_name):
+    cursor = connection.execute(
+        "SELECT * FROM activities WHERE name = ? ORDER BY id",
+        (value_name,),
+    )
+
+    return cursor.fetchall()
+
 def delete_activity(connection, activity_id):
     connection.execute(
         "DELETE FROM activities WHERE id = ?",

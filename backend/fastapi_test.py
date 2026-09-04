@@ -7,10 +7,10 @@ from backend.app.activities import (
     add_activity,
     delete_activity,
     delte_all_activities,
+    get_activities_by_name,
     get_activity_name_by_id,
     get_all_activities,
     move_activity,
-    search_activity,
 )
 from backend.app.database import create_connection
 from backend.app.calender import (
@@ -193,9 +193,9 @@ def remove_all_activities():
     }
 
 
-@app.delete("/activities/by-name/{activity_name}")
-def remove_activity_by_name(activity_name: str):
-    requested_name = activity_name.strip()
+@app.get("/activities/search")
+def search_activities_by_name(name: str):
+    requested_name = name.strip()
 
     if not requested_name:
         raise HTTPException(status_code=400, detail="Activity name is required.")
@@ -203,19 +203,11 @@ def remove_activity_by_name(activity_name: str):
     connection = create_connection()
 
     try:
-        activity_id = search_activity(connection, requested_name)
-
-        if activity_id is None:
-            raise HTTPException(status_code=404, detail="Activity name not found.")
-
-        delete_activity(connection, activity_id)
+        matching_activities = get_activities_by_name(connection, requested_name)
     finally:
         connection.close()
 
-    return {
-        "message": "Activity deleted.",
-        "activity_id": activity_id,
-    }
+    return [activity_to_dict(activity) for activity in matching_activities]
 
 
 @app.delete("/activities/{activity_id}")

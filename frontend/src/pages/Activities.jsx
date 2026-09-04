@@ -114,6 +114,9 @@ function Activities() {
   const [deleteForm, setDeleteForm] = useState(emptyDeleteForm)
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState('')
+  const [nameMatches, setNameMatches] = useState([])
+  const [selectedActivityId, setSelectedActivityId] = useState('')
+  const [isSearching, setIsSearching] = useState(false)
   const [isDeletingAll, setIsDeletingAll] = useState(false)
   const [deleteAllError, setDeleteAllError] = useState('')
 
@@ -173,6 +176,12 @@ function Activities() {
   function handleDeleteFormChange(event) {
     const { name, value } = event.target
 
+    if (name === 'method' || name === 'activityName') {
+      setNameMatches([])
+      setSelectedActivityId('')
+      setDeleteError('')
+    }
+
     setDeleteForm((currentForm) => ({
       ...currentForm,
       [name]: value,
@@ -189,6 +198,8 @@ function Activities() {
     setIsDeleteFormOpen(false)
     setDeleteError('')
     setDeleteForm(emptyDeleteForm)
+    setNameMatches([])
+    setSelectedActivityId('')
   }
 
   async function handleSubmit(event) {
@@ -229,24 +240,79 @@ function Activities() {
     }
   }
 
+  async function deleteActivityById(activityId) {
+    const response = await fetch(`/api/activities/${activityId}`, {
+      method: 'DELETE',
+    })
+
+    if (!response.ok) {
+      const responseBody = await response.json()
+      const errorMessage = typeof responseBody.detail === 'string'
+        ? responseBody.detail
+        : 'Could not delete the activity.'
+
+      throw new Error(errorMessage)
+    }
+
+    const activityData = await fetchActivityData()
+    updateActivityLists(activityData)
+    closeDeleteForm()
+  }
+
   async function handleDeleteSubmit(event) {
     event.preventDefault()
     setDeleteError('')
 
-    const deleteById = deleteForm.method === 'id'
-    const enteredValue = deleteById
-      ? deleteForm.activityId.trim()
-      : deleteForm.activityName.trim()
+    if (deleteForm.method === 'name') {
+      const activityName = deleteForm.activityName.trim()
 
-    if (!enteredValue) {
-      setDeleteError(
-        deleteById ? 'Enter an activity ID.' : 'Enter an activity name.',
-      )
+      if (!activityName) {
+        setDeleteError('Enter an activity name.')
+        return
+      }
+
+      setIsSearching(true)
+
+      try {
+        const response = await fetch(
+          `/api/activities/search?name=${encodeURIComponent(activityName)}`,
+        )
+
+        if (!response.ok) {
+          const responseBody = await response.json()
+          const errorMessage = typeof responseBody.detail === 'string'
+            ? responseBody.detail
+            : 'Could not search for activities.'
+
+          throw new Error(errorMessage)
+        }
+
+        const matches = formatActivities(await response.json())
+        setNameMatches(matches)
+        setSelectedActivityId('')
+
+        if (matches.length === 0) {
+          setDeleteError(`No activities found with the name "${activityName}".`)
+        }
+      } catch (requestError) {
+        setNameMatches([])
+        setDeleteError(requestError.message)
+      } finally {
+        setIsSearching(false)
+      }
+
+      return
+    }
+
+    const activityId = deleteForm.activityId.trim()
+
+    if (!activityId) {
+      setDeleteError('Enter an activity ID.')
       return
     }
 
     const confirmed = window.confirm(
-      `Permanently delete the activity with ${deleteById ? 'ID' : 'name'} "${enteredValue}"?`,
+      `Permanently delete the activity with ID "${activityId}"?`,
     )
 
     if (!confirmed) {
@@ -256,23 +322,36 @@ function Activities() {
     setIsDeleting(true)
 
     try {
-      const endpoint = deleteById
-        ? `/api/activities/${enteredValue}`
-        : `/api/activities/by-name/${encodeURIComponent(enteredValue)}`
-      const response = await fetch(endpoint, { method: 'DELETE' })
+      await deleteActivityById(activityId)
+    } catch (requestError) {
+      setDeleteError(requestError.message)
+    } finally {
+      setIsDeleting(false)
+    }
+  }
 
-      if (!response.ok) {
-        const responseBody = await response.json()
-        const errorMessage = typeof responseBody.detail === 'string'
-          ? responseBody.detail
-          : 'Could not delete the activity.'
+  async function handleDeleteSelected() {
+    if (!selectedActivityId) {
+      setDeleteError('Select an activity to delete.')
+      return
+    }
 
-        throw new Error(errorMessage)
-      }
+    const selectedActivity = nameMatches.find(
+      (activity) => String(activity.id) === selectedActivityId,
+    )
+    const confirmed = window.confirm(
+      `Permanently delete "${selectedActivity.name}" with ID ${selectedActivity.id}?`,
+    )
 
-      const activityData = await fetchActivityData()
-      updateActivityLists(activityData)
-      closeDeleteForm()
+    if (!confirmed) {
+      return
+    }
+
+    setIsDeleting(true)
+    setDeleteError('')
+
+    try {
+      await deleteActivityById(selectedActivityId)
     } catch (requestError) {
       setDeleteError(requestError.message)
     } finally {
@@ -517,11 +596,55 @@ function Activities() {
           {deleteError && <p role="alert">{deleteError}</p>}
 
           <div className="add-activity-actions">
-            <button disabled={isDeleting} type="submit">
-              {isDeleting ? 'Deleting...' : 'Delete Activity'}
+            <button disabled={isDeleting || isSearching} type="submit">
+              {deleteForm.method === 'name'
+                ? (isSearching ? 'Searching...' : 'Search Activities')
+                : (isDeleting ? 'Deleting...' : 'Delete Activity')}
             </button>
             <button onClick={closeDeleteForm} type="button">Cancel</button>
           </div>
+
+          {deleteForm.method === 'name' && nameMatches.length > 0 && (
+            <fieldset className="delete-name-results">
+              <legend>Matching activities</legend>
+
+              <ul className="delete-name-matches">
+                {nameMatches.map((activity) => (
+                  <li key={activity.id}>
+                    <label className="delete-name-match">
+                      <input
+                        checked={selectedActivityId === String(activity.id)}
+                        name="selectedActivity"
+                        onChange={(event) => setSelectedActivityId(event.target.value)}
+                        type="radio"
+                        value={activity.id}
+                      />
+                      <span>
+                        <strong>{activity.name}</strong>
+                        <span>ID: {activity.id}</span>
+                        <span>Category: {activity.category || '—'}</span>
+                        <span>Subject: {activity.subject || '—'}</span>
+                        <span>Activity type: {activity.activityType}</span>
+                        <span>Date: {activity.date || '—'}</span>
+                        <span>Weekday: {activity.weekday || '—'}</span>
+                        <span>Start time: {activity.startTime}</span>
+                        <span>End time: {activity.endTime}</span>
+                      </span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+
+              <button
+                className="delete-selected-activity-button"
+                disabled={isDeleting || !selectedActivityId}
+                onClick={handleDeleteSelected}
+                type="button"
+              >
+                {isDeleting ? 'Deleting...' : 'Delete Selected Activity'}
+              </button>
+            </fieldset>
+          )}
         </form>
       )}
 

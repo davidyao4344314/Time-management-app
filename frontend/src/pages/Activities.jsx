@@ -70,6 +70,23 @@ async function fetchActivityData(signal) {
   }
 }
 
+async function fetchActivitiesByName(activityName) {
+  const response = await fetch(
+    `/api/activities/search?name=${encodeURIComponent(activityName)}`,
+  )
+
+  if (!response.ok) {
+    const responseBody = await response.json()
+    const errorMessage = typeof responseBody.detail === 'string'
+      ? responseBody.detail
+      : 'Could not search for activities.'
+
+    throw new Error(errorMessage)
+  }
+
+  return formatActivities(await response.json())
+}
+
 function ActivityList({ activities, emptyMessage }) {
   if (activities.length === 0) {
     return <p>{emptyMessage}</p>
@@ -119,6 +136,13 @@ function Activities() {
   const [isSearching, setIsSearching] = useState(false)
   const [isDeletingAll, setIsDeletingAll] = useState(false)
   const [deleteAllError, setDeleteAllError] = useState('')
+  const [isSearchFormOpen, setIsSearchFormOpen] = useState(false)
+  const [searchName, setSearchName] = useState('')
+  const [searchResults, setSearchResults] = useState([])
+  const [hasSearched, setHasSearched] = useState(false)
+  const [isSearchingActivities, setIsSearchingActivities] = useState(false)
+  const [searchError, setSearchError] = useState('')
+  const [deletingSearchResultId, setDeletingSearchResultId] = useState(null)
 
   function updateActivityLists(activityData) {
     setAllActivities(activityData.allActivities)
@@ -166,6 +190,7 @@ function Activities() {
   }
 
   function openAddForm() {
+    closeSearchForm()
     setIsDeleteFormOpen(false)
     setDeleteError('')
     setDeleteAllError('')
@@ -190,6 +215,7 @@ function Activities() {
 
   function openDeleteForm() {
     closeForm()
+    closeSearchForm()
     setDeleteAllError('')
     setIsDeleteFormOpen(true)
   }
@@ -200,6 +226,28 @@ function Activities() {
     setDeleteForm(emptyDeleteForm)
     setNameMatches([])
     setSelectedActivityId('')
+  }
+
+  function openSearchForm() {
+    closeForm()
+    closeDeleteForm()
+    setDeleteAllError('')
+    setIsSearchFormOpen(true)
+  }
+
+  function closeSearchForm() {
+    setIsSearchFormOpen(false)
+    setSearchName('')
+    setSearchResults([])
+    setHasSearched(false)
+    setSearchError('')
+  }
+
+  function handleSearchNameChange(event) {
+    setSearchName(event.target.value)
+    setSearchResults([])
+    setHasSearched(false)
+    setSearchError('')
   }
 
   async function handleSubmit(event) {
@@ -274,20 +322,7 @@ function Activities() {
       setIsSearching(true)
 
       try {
-        const response = await fetch(
-          `/api/activities/search?name=${encodeURIComponent(activityName)}`,
-        )
-
-        if (!response.ok) {
-          const responseBody = await response.json()
-          const errorMessage = typeof responseBody.detail === 'string'
-            ? responseBody.detail
-            : 'Could not search for activities.'
-
-          throw new Error(errorMessage)
-        }
-
-        const matches = formatActivities(await response.json())
+        const matches = await fetchActivitiesByName(activityName)
         setNameMatches(matches)
         setSelectedActivityId('')
 
@@ -359,6 +394,56 @@ function Activities() {
     }
   }
 
+  async function handleSearchSubmit(event) {
+    event.preventDefault()
+
+    const activityName = searchName.trim()
+
+    if (!activityName) {
+      setSearchError('Enter an activity name.')
+      return
+    }
+
+    setIsSearchingActivities(true)
+    setSearchError('')
+
+    try {
+      const matches = await fetchActivitiesByName(activityName)
+      setSearchResults(matches)
+      setHasSearched(true)
+    } catch (requestError) {
+      setSearchResults([])
+      setHasSearched(false)
+      setSearchError(requestError.message)
+    } finally {
+      setIsSearchingActivities(false)
+    }
+  }
+
+  async function handleSearchResultDelete(activity) {
+    const confirmed = window.confirm(
+      `Permanently delete "${activity.name}" with ID ${activity.id}?`,
+    )
+
+    if (!confirmed) {
+      return
+    }
+
+    setDeletingSearchResultId(activity.id)
+    setSearchError('')
+
+    try {
+      await deleteActivityById(activity.id)
+      const matches = await fetchActivitiesByName(searchName.trim())
+      setSearchResults(matches)
+      setHasSearched(true)
+    } catch (requestError) {
+      setSearchError(requestError.message)
+    } finally {
+      setDeletingSearchResultId(null)
+    }
+  }
+
   async function handleDeleteAll() {
     setDeleteAllError('')
 
@@ -390,6 +475,7 @@ function Activities() {
       updateActivityLists(activityData)
       closeForm()
       closeDeleteForm()
+      closeSearchForm()
     } catch (requestError) {
       setDeleteAllError(requestError.message)
     } finally {
@@ -418,6 +504,14 @@ function Activities() {
           type="button"
         >
           -
+        </button>
+        <button
+          aria-expanded={isSearchFormOpen}
+          className="delete-all-activities-button"
+          onClick={openSearchForm}
+          type="button"
+        >
+          Search
         </button>
         <button
           className="delete-all-activities-button"
@@ -644,6 +738,72 @@ function Activities() {
                 {isDeleting ? 'Deleting...' : 'Delete Selected Activity'}
               </button>
             </fieldset>
+          )}
+        </form>
+      )}
+
+      {isSearchFormOpen && (
+        <form className="add-activity-form" onSubmit={handleSearchSubmit}>
+          <h3>Search Activities</h3>
+
+          <div className="add-activity-fields">
+            <label>
+              Activity name
+              <input
+                onChange={handleSearchNameChange}
+                required
+                type="text"
+                value={searchName}
+              />
+            </label>
+          </div>
+
+          {searchError && <p role="alert">{searchError}</p>}
+
+          <div className="add-activity-actions">
+            <button disabled={isSearchingActivities} type="submit">
+              {isSearchingActivities ? 'Searching...' : 'Search'}
+            </button>
+            <button onClick={closeSearchForm} type="button">Cancel</button>
+          </div>
+
+          {hasSearched && searchResults.length === 0 && (
+            <p>No activities found with that exact name.</p>
+          )}
+
+          {searchResults.length > 0 && (
+            <ul className="activity-search-results">
+              {searchResults.map((activity) => (
+                <li className="activity-search-card" key={activity.id}>
+                  <div className="activity-search-details">
+                    <strong>{activity.name}</strong>
+                    <span>ID: {activity.id}</span>
+                    <span>Category: {activity.category || '—'}</span>
+                    <span>Subject: {activity.subject || '—'}</span>
+                    <span>Activity type: {activity.activityType}</span>
+                    <span>Date: {activity.date || '—'}</span>
+                    <span>Weekday: {activity.weekday || '—'}</span>
+                    <span>Start time: {activity.startTime}</span>
+                    <span>End time: {activity.endTime}</span>
+                  </div>
+
+                  <div className="activity-search-actions">
+                    <button
+                      disabled={deletingSearchResultId === activity.id}
+                      onClick={() => handleSearchResultDelete(activity)}
+                      type="button"
+                    >
+                      {deletingSearchResultId === activity.id
+                        ? 'Deleting...'
+                        : 'Delete'}
+                    </button>
+                    <button disabled title="Editing is not implemented yet" type="button">
+                      Edit
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
           )}
         </form>
       )}

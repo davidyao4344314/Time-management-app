@@ -21,7 +21,13 @@ from backend.app.calender import (
     get_todays_activities,
     get_week_activities,
 )
-from backend.app.exams import add_exam, get_all_exams
+from backend.app.exams import (
+    add_exam,
+    delete_exam,
+    get_all_exams,
+    get_exam_name_by_id,
+    search_exams_by_name,
+)
 
 app = FastAPI()
 
@@ -154,6 +160,43 @@ def create_exam(exam_request: AddExamRequest):
         connection.close()
 
     return {"message": "Exam created."}
+
+
+@app.get("/exams/search")
+def search_exam_records_by_name(name: str):
+    requested_name = name.strip()
+
+    if not requested_name:
+        raise HTTPException(status_code=400, detail="Exam name is required.")
+
+    connection = create_connection()
+
+    try:
+        matching_exams = search_exams_by_name(connection, requested_name)
+    finally:
+        connection.close()
+
+    return [exam_to_dict(exam) for exam in matching_exams]
+
+
+@app.delete("/exams/{exam_id}")
+def remove_exam_by_id(exam_id: int):
+    connection = create_connection()
+
+    try:
+        exam_name = get_exam_name_by_id(connection, exam_id)
+
+        if exam_name is None:
+            raise HTTPException(status_code=404, detail="Exam ID not found.")
+
+        delete_exam(connection, exam_id)
+    finally:
+        connection.close()
+
+    return {
+        "message": "Exam deleted.",
+        "exam_id": exam_id,
+    }
 
 
 @app.get("/activities")

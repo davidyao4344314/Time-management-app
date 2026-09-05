@@ -10,6 +10,12 @@ const emptyExamForm = {
   end_time: '',
 }
 
+const emptyDeleteExamForm = {
+  method: 'id',
+  examId: '',
+  examName: '',
+}
+
 async function fetchExams(signal) {
   const response = await fetch('/api/exams', { signal })
 
@@ -20,6 +26,37 @@ async function fetchExams(signal) {
   return response.json()
 }
 
+async function fetchExamsByName(examName) {
+  const response = await fetch(
+    `/api/exams/search?name=${encodeURIComponent(examName)}`,
+  )
+
+  if (!response.ok) {
+    const responseBody = await response.json()
+    const errorMessage = typeof responseBody.detail === 'string'
+      ? responseBody.detail
+      : 'Could not search for exams.'
+
+    throw new Error(errorMessage)
+  }
+
+  return response.json()
+}
+
+function ExamDetails({ exam }) {
+  return (
+    <div className="activity-search-details">
+      <strong>{exam.name}</strong>
+      <span>ID: {exam.id}</span>
+      <span>Category: {exam.category || '—'}</span>
+      <span>Subject: {exam.subject || '—'}</span>
+      <span>Date: {exam.date}</span>
+      <span>Start time: {exam.start_time}</span>
+      <span>End time: {exam.end_time}</span>
+    </div>
+  )
+}
+
 function Exams() {
   const [exams, setExams] = useState([])
   const [isLoading, setIsLoading] = useState(true)
@@ -28,6 +65,21 @@ function Exams() {
   const [examForm, setExamForm] = useState(emptyExamForm)
   const [isSaving, setIsSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
+  const [isDeleteFormOpen, setIsDeleteFormOpen] = useState(false)
+  const [deleteForm, setDeleteForm] = useState(emptyDeleteExamForm)
+  const [deleteMatches, setDeleteMatches] = useState([])
+  const [hasSearchedForDelete, setHasSearchedForDelete] = useState(false)
+  const [selectedExamId, setSelectedExamId] = useState('')
+  const [isSearchingForDelete, setIsSearchingForDelete] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
+  const [isSearchFormOpen, setIsSearchFormOpen] = useState(false)
+  const [searchName, setSearchName] = useState('')
+  const [searchResults, setSearchResults] = useState([])
+  const [hasSearched, setHasSearched] = useState(false)
+  const [isSearching, setIsSearching] = useState(false)
+  const [searchError, setSearchError] = useState('')
+  const [deletingSearchResultId, setDeletingSearchResultId] = useState(null)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -66,6 +118,64 @@ function Exams() {
     setExamForm(emptyExamForm)
   }
 
+  function openAddForm() {
+    closeDeleteForm()
+    closeSearchForm()
+    setIsFormOpen(true)
+  }
+
+  function openDeleteForm() {
+    closeForm()
+    closeSearchForm()
+    setIsDeleteFormOpen(true)
+  }
+
+  function closeDeleteForm() {
+    setIsDeleteFormOpen(false)
+    setDeleteForm(emptyDeleteExamForm)
+    setDeleteMatches([])
+    setHasSearchedForDelete(false)
+    setSelectedExamId('')
+    setDeleteError('')
+  }
+
+  function handleDeleteFormChange(event) {
+    const { name, value } = event.target
+
+    if (name === 'method' || name === 'examName') {
+      setDeleteMatches([])
+      setHasSearchedForDelete(false)
+      setSelectedExamId('')
+      setDeleteError('')
+    }
+
+    setDeleteForm((currentForm) => ({
+      ...currentForm,
+      [name]: value,
+    }))
+  }
+
+  function openSearchForm() {
+    closeForm()
+    closeDeleteForm()
+    setIsSearchFormOpen(true)
+  }
+
+  function closeSearchForm() {
+    setIsSearchFormOpen(false)
+    setSearchName('')
+    setSearchResults([])
+    setHasSearched(false)
+    setSearchError('')
+  }
+
+  function handleSearchNameChange(event) {
+    setSearchName(event.target.value)
+    setSearchResults([])
+    setHasSearched(false)
+    setSearchError('')
+  }
+
   async function handleSubmit(event) {
     event.preventDefault()
     setIsSaving(true)
@@ -101,6 +211,168 @@ function Exams() {
     }
   }
 
+  async function deleteExamById(examId) {
+    const response = await fetch(`/api/exams/${examId}`, {
+      method: 'DELETE',
+    })
+
+    if (!response.ok) {
+      const responseBody = await response.json()
+      const errorMessage = typeof responseBody.detail === 'string'
+        ? responseBody.detail
+        : 'Could not delete the exam.'
+
+      throw new Error(errorMessage)
+    }
+  }
+
+  async function handleDeleteSubmit(event) {
+    event.preventDefault()
+    setDeleteError('')
+
+    if (deleteForm.method === 'name') {
+      const examName = deleteForm.examName.trim()
+
+      if (!examName) {
+        setDeleteError('Enter an exam name.')
+        return
+      }
+
+      setIsSearchingForDelete(true)
+
+      try {
+        setDeleteMatches(await fetchExamsByName(examName))
+        setSelectedExamId('')
+        setHasSearchedForDelete(true)
+      } catch (requestError) {
+        setDeleteMatches([])
+        setHasSearchedForDelete(false)
+        setDeleteError(requestError.message)
+      } finally {
+        setIsSearchingForDelete(false)
+      }
+
+      return
+    }
+
+    const examId = deleteForm.examId.trim()
+
+    if (!examId) {
+      setDeleteError('Enter an exam ID.')
+      return
+    }
+
+    const confirmed = window.confirm(
+      `Permanently delete the exam with ID "${examId}"?`,
+    )
+
+    if (!confirmed) {
+      return
+    }
+
+    setIsDeleting(true)
+
+    try {
+      await deleteExamById(examId)
+      setExams(await fetchExams())
+      closeDeleteForm()
+    } catch (requestError) {
+      setDeleteError(requestError.message)
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
+  async function handleDeleteSelected() {
+    if (!selectedExamId) {
+      setDeleteError('Select an exam to delete.')
+      return
+    }
+
+    const selectedExam = deleteMatches.find(
+      (exam) => String(exam.id) === selectedExamId,
+    )
+    const confirmed = window.confirm(
+      `Permanently delete "${selectedExam.name}" with ID ${selectedExam.id}?`,
+    )
+
+    if (!confirmed) {
+      return
+    }
+
+    setIsDeleting(true)
+    setDeleteError('')
+
+    try {
+      await deleteExamById(selectedExamId)
+      const [allExams, matchingExams] = await Promise.all([
+        fetchExams(),
+        fetchExamsByName(deleteForm.examName.trim()),
+      ])
+      setExams(allExams)
+      setDeleteMatches(matchingExams)
+      setSelectedExamId('')
+      setHasSearchedForDelete(true)
+    } catch (requestError) {
+      setDeleteError(requestError.message)
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
+  async function handleSearchSubmit(event) {
+    event.preventDefault()
+
+    const examName = searchName.trim()
+
+    if (!examName) {
+      setSearchError('Enter an exam name.')
+      return
+    }
+
+    setIsSearching(true)
+    setSearchError('')
+
+    try {
+      setSearchResults(await fetchExamsByName(examName))
+      setHasSearched(true)
+    } catch (requestError) {
+      setSearchResults([])
+      setHasSearched(false)
+      setSearchError(requestError.message)
+    } finally {
+      setIsSearching(false)
+    }
+  }
+
+  async function handleSearchResultDelete(exam) {
+    const confirmed = window.confirm(
+      `Permanently delete "${exam.name}" with ID ${exam.id}?`,
+    )
+
+    if (!confirmed) {
+      return
+    }
+
+    setDeletingSearchResultId(exam.id)
+    setSearchError('')
+
+    try {
+      await deleteExamById(exam.id)
+      const [allExams, matchingExams] = await Promise.all([
+        fetchExams(),
+        fetchExamsByName(searchName.trim()),
+      ])
+      setExams(allExams)
+      setSearchResults(matchingExams)
+      setHasSearched(true)
+    } catch (requestError) {
+      setSearchError(requestError.message)
+    } finally {
+      setDeletingSearchResultId(null)
+    }
+  }
+
   return (
     <main className="page">
       <div className="activities-heading-row">
@@ -109,10 +381,27 @@ function Exams() {
           aria-expanded={isFormOpen}
           aria-label="Add exam"
           className="add-activity-button"
-          onClick={() => setIsFormOpen(true)}
+          onClick={openAddForm}
           type="button"
         >
           +
+        </button>
+        <button
+          aria-expanded={isDeleteFormOpen}
+          aria-label="Delete exam"
+          className="add-activity-button"
+          onClick={openDeleteForm}
+          type="button"
+        >
+          -
+        </button>
+        <button
+          aria-expanded={isSearchFormOpen}
+          className="delete-all-activities-button"
+          onClick={openSearchForm}
+          type="button"
+        >
+          Search
         </button>
       </div>
 
@@ -195,6 +484,170 @@ function Exams() {
             </button>
             <button onClick={closeForm} type="button">Cancel</button>
           </div>
+        </form>
+      )}
+
+      {isDeleteFormOpen && (
+        <form className="add-activity-form" onSubmit={handleDeleteSubmit}>
+          <h3>Delete Exam</h3>
+
+          <div className="add-activity-fields">
+            <label>
+              Delete method
+              <select
+                name="method"
+                onChange={handleDeleteFormChange}
+                value={deleteForm.method}
+              >
+                <option value="id">Delete by ID</option>
+                <option value="name">Delete by name</option>
+              </select>
+            </label>
+
+            {deleteForm.method === 'id' && (
+              <label>
+                Exam ID
+                <input
+                  min="1"
+                  name="examId"
+                  onChange={handleDeleteFormChange}
+                  required
+                  step="1"
+                  type="number"
+                  value={deleteForm.examId}
+                />
+              </label>
+            )}
+
+            {deleteForm.method === 'name' && (
+              <label>
+                Exam name
+                <input
+                  name="examName"
+                  onChange={handleDeleteFormChange}
+                  required
+                  type="text"
+                  value={deleteForm.examName}
+                />
+              </label>
+            )}
+          </div>
+
+          {deleteError && <p role="alert">{deleteError}</p>}
+
+          <div className="add-activity-actions">
+            <button
+              disabled={isDeleting || isSearchingForDelete}
+              type="submit"
+            >
+              {deleteForm.method === 'name'
+                ? (isSearchingForDelete ? 'Searching...' : 'Search Exams')
+                : (isDeleting ? 'Deleting...' : 'Delete Exam')}
+            </button>
+            <button onClick={closeDeleteForm} type="button">Cancel</button>
+          </div>
+
+          {deleteForm.method === 'name'
+            && hasSearchedForDelete
+            && deleteMatches.length === 0 && (
+              <p>No exams found with that exact name.</p>
+          )}
+
+          {deleteForm.method === 'name' && deleteMatches.length > 0 && (
+            <fieldset className="delete-name-results">
+              <legend>Matching exams</legend>
+
+              <ul className="delete-name-matches">
+                {deleteMatches.map((exam) => (
+                  <li key={exam.id}>
+                    <label className="delete-name-match">
+                      <input
+                        checked={selectedExamId === String(exam.id)}
+                        name="selectedExam"
+                        onChange={(event) => setSelectedExamId(event.target.value)}
+                        type="radio"
+                        value={exam.id}
+                      />
+                      <span>
+                        <strong>{exam.name}</strong>
+                        <span>ID: {exam.id}</span>
+                        <span>Category: {exam.category || '—'}</span>
+                        <span>Subject: {exam.subject || '—'}</span>
+                        <span>Date: {exam.date}</span>
+                        <span>Start time: {exam.start_time}</span>
+                        <span>End time: {exam.end_time}</span>
+                      </span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+
+              <button
+                className="delete-selected-activity-button"
+                disabled={isDeleting || !selectedExamId}
+                onClick={handleDeleteSelected}
+                type="button"
+              >
+                {isDeleting ? 'Deleting...' : 'Delete Selected Exam'}
+              </button>
+            </fieldset>
+          )}
+        </form>
+      )}
+
+      {isSearchFormOpen && (
+        <form className="add-activity-form" onSubmit={handleSearchSubmit}>
+          <h3>Search Exams</h3>
+
+          <div className="add-activity-fields">
+            <label>
+              Exam name
+              <input
+                onChange={handleSearchNameChange}
+                required
+                type="text"
+                value={searchName}
+              />
+            </label>
+          </div>
+
+          {searchError && <p role="alert">{searchError}</p>}
+
+          <div className="add-activity-actions">
+            <button disabled={isSearching} type="submit">
+              {isSearching ? 'Searching...' : 'Search'}
+            </button>
+            <button onClick={closeSearchForm} type="button">Cancel</button>
+          </div>
+
+          {hasSearched && searchResults.length === 0 && (
+            <p>No exams found with that exact name.</p>
+          )}
+
+          {searchResults.length > 0 && (
+            <ul className="activity-search-results">
+              {searchResults.map((exam) => (
+                <li className="activity-search-card" key={exam.id}>
+                  <ExamDetails exam={exam} />
+
+                  <div className="activity-search-actions">
+                    <button
+                      disabled={deletingSearchResultId === exam.id}
+                      onClick={() => handleSearchResultDelete(exam)}
+                      type="button"
+                    >
+                      {deletingSearchResultId === exam.id
+                        ? 'Deleting...'
+                        : 'Delete'}
+                    </button>
+                    <button disabled title="Editing will be added in Part 3" type="button">
+                      Edit
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
         </form>
       )}
 

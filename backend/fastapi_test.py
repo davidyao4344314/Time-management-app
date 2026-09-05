@@ -21,6 +21,7 @@ from backend.app.calender import (
     get_todays_activities,
     get_week_activities,
 )
+from backend.app.exams import add_exam, get_all_exams
 
 app = FastAPI()
 
@@ -49,6 +50,15 @@ class EditActivityRequest(BaseModel):
     new_value: str | None = None
 
 
+class AddExamRequest(BaseModel):
+    name: str
+    category: str
+    subject: str | None = None
+    date: str
+    start_time: str
+    end_time: str
+
+
 def activity_to_dict(activity):
     return {
         "id": activity[0],
@@ -61,6 +71,89 @@ def activity_to_dict(activity):
         "start_time": activity[7],
         "end_time": activity[8],
     }
+
+
+def exam_to_dict(exam):
+    return {
+        "id": exam[0],
+        "name": exam[1],
+        "category": exam[2],
+        "subject": exam[3],
+        "date": exam[4],
+        "start_time": exam[5],
+        "end_time": exam[6],
+    }
+
+
+@app.get("/exams")
+def all_exams():
+    connection = create_connection()
+
+    try:
+        exam_rows = get_all_exams(connection)
+    finally:
+        connection.close()
+
+    return [exam_to_dict(exam) for exam in exam_rows]
+
+
+@app.post("/exams", status_code=201)
+def create_exam(exam_request: AddExamRequest):
+    name = exam_request.name.strip()
+    category = exam_request.category.strip()
+    subject = exam_request.subject.strip() if exam_request.subject else None
+
+    if not name or not category:
+        raise HTTPException(status_code=400, detail="Name and category are required.")
+
+    try:
+        exam_date = str(date.fromisoformat(exam_request.date.strip()))
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail="Date must use YYYY-MM-DD format.",
+        ) from None
+
+    try:
+        start_time = datetime.strptime(exam_request.start_time.strip(), "%H:%M")
+        end_time = datetime.strptime(exam_request.end_time.strip(), "%H:%M")
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail="Start and end times must use HH:MM format.",
+        ) from None
+
+    if start_time >= end_time:
+        raise HTTPException(
+            status_code=400,
+            detail="End time must be later than start time.",
+        )
+
+    columns = [
+        "name",
+        "category",
+        "subject",
+        "date",
+        "start_time",
+        "end_time",
+    ]
+    values = [
+        name,
+        category,
+        subject,
+        exam_date,
+        start_time.strftime("%H:%M"),
+        end_time.strftime("%H:%M"),
+    ]
+
+    connection = create_connection()
+
+    try:
+        add_exam(connection, columns, values)
+    finally:
+        connection.close()
+
+    return {"message": "Exam created."}
 
 
 @app.get("/activities")

@@ -16,6 +16,19 @@ const emptyDeleteExamForm = {
   examName: '',
 }
 
+const examEditFieldLabels = {
+  name: 'Name',
+  category: 'Category',
+  subject: 'Subject',
+  date: 'Date',
+  start_time: 'Start time',
+  end_time: 'End time',
+}
+
+function getExamFieldValue(exam, columnName) {
+  return exam[columnName] || ''
+}
+
 async function fetchExams(signal) {
   const response = await fetch('/api/exams', { signal })
 
@@ -80,6 +93,11 @@ function Exams() {
   const [isSearching, setIsSearching] = useState(false)
   const [searchError, setSearchError] = useState('')
   const [deletingSearchResultId, setDeletingSearchResultId] = useState(null)
+  const [editingExam, setEditingExam] = useState(null)
+  const [editColumn, setEditColumn] = useState('name')
+  const [editValue, setEditValue] = useState('')
+  const [isSavingEdit, setIsSavingEdit] = useState(false)
+  const [editError, setEditError] = useState('')
 
   useEffect(() => {
     const controller = new AbortController()
@@ -167,6 +185,7 @@ function Exams() {
     setSearchResults([])
     setHasSearched(false)
     setSearchError('')
+    closeEditForm()
   }
 
   function handleSearchNameChange(event) {
@@ -174,6 +193,28 @@ function Exams() {
     setSearchResults([])
     setHasSearched(false)
     setSearchError('')
+  }
+
+  function openEditForm(exam) {
+    setEditingExam(exam)
+    setEditColumn('name')
+    setEditValue(exam.name)
+    setEditError('')
+  }
+
+  function closeEditForm() {
+    setEditingExam(null)
+    setEditColumn('name')
+    setEditValue('')
+    setEditError('')
+  }
+
+  function handleEditColumnChange(event) {
+    const columnName = event.target.value
+
+    setEditColumn(columnName)
+    setEditValue(getExamFieldValue(editingExam, columnName))
+    setEditError('')
   }
 
   async function handleSubmit(event) {
@@ -370,6 +411,54 @@ function Exams() {
       setSearchError(requestError.message)
     } finally {
       setDeletingSearchResultId(null)
+    }
+  }
+
+  async function handleEditSubmit(event) {
+    event.preventDefault()
+    setIsSavingEdit(true)
+    setEditError('')
+
+    try {
+      const response = await fetch(`/api/exams/${editingExam.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          exam_id: editingExam.id,
+          column_name: editColumn,
+          new_value: editValue || null,
+        }),
+      })
+
+      if (!response.ok) {
+        const responseBody = await response.json()
+        const errorMessage = typeof responseBody.detail === 'string'
+          ? responseBody.detail
+          : 'Could not update the exam.'
+
+        throw new Error(errorMessage)
+      }
+
+      const updatedExam = await response.json()
+      const nextSearchName = editColumn === 'name'
+        ? updatedExam.name
+        : searchName.trim()
+      const [allExams, matchingExams] = await Promise.all([
+        fetchExams(),
+        fetchExamsByName(nextSearchName),
+      ])
+
+      setExams(allExams)
+      setSearchName(nextSearchName)
+      setSearchResults(matchingExams)
+      setHasSearched(true)
+      closeEditForm()
+    } catch (requestError) {
+      setEditError(requestError.message)
+    } finally {
+      setIsSavingEdit(false)
     }
   }
 
@@ -640,7 +729,10 @@ function Exams() {
                         ? 'Deleting...'
                         : 'Delete'}
                     </button>
-                    <button disabled title="Editing will be added in Part 3" type="button">
+                    <button
+                      onClick={() => openEditForm(exam)}
+                      type="button"
+                    >
                       Edit
                     </button>
                   </div>
@@ -649,6 +741,66 @@ function Exams() {
             </ul>
           )}
         </form>
+      )}
+
+      {editingExam && (
+        <div className="edit-activity-overlay">
+          <form
+            aria-labelledby="edit-exam-heading"
+            aria-modal="true"
+            className="add-activity-form edit-activity-form"
+            onSubmit={handleEditSubmit}
+            role="dialog"
+          >
+            <h3 id="edit-exam-heading">
+              Edit {editingExam.name} (ID {editingExam.id})
+            </h3>
+
+            <div className="add-activity-fields">
+              <label>
+                Field to edit
+                <select
+                  onChange={handleEditColumnChange}
+                  value={editColumn}
+                >
+                  {Object.entries(examEditFieldLabels).map(([column, label]) => (
+                    <option key={column} value={column}>{label}</option>
+                  ))}
+                </select>
+              </label>
+
+              <div className="edit-current-value">
+                <span>Current value</span>
+                <strong>
+                  {getExamFieldValue(editingExam, editColumn) || 'Not set'}
+                </strong>
+              </div>
+
+              <label>
+                New value
+                <input
+                  onChange={(event) => setEditValue(event.target.value)}
+                  required={editColumn !== 'subject'}
+                  type={editColumn === 'date'
+                    ? 'date'
+                    : editColumn === 'start_time' || editColumn === 'end_time'
+                      ? 'time'
+                      : 'text'}
+                  value={editValue}
+                />
+              </label>
+            </div>
+
+            {editError && <p role="alert">{editError}</p>}
+
+            <div className="add-activity-actions">
+              <button disabled={isSavingEdit} type="submit">
+                {isSavingEdit ? 'Saving...' : 'Save'}
+              </button>
+              <button onClick={closeEditForm} type="button">Cancel</button>
+            </div>
+          </form>
+        </div>
       )}
 
       {isLoading && <p>Loading exams...</p>}

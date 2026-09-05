@@ -162,3 +162,12 @@ def get_exam_name_by_id(connection, exam_id):
         return None
 
     return result[0]
+
+
+def get_exam_by_id(connection, exam_id):
+    cursor = connection.execute(
+        "SELECT * FROM exams WHERE id = ?",
+        (exam_id,)
+    )
+
+    return cursor.fetchone()

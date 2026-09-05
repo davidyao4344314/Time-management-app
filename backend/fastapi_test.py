@@ -24,7 +24,9 @@ from backend.app.calender import (
 from backend.app.exams import (
     add_exam,
     delete_exam,
+    edit_exam,
     get_all_exams,
+    get_exam_by_id,
     get_exam_name_by_id,
     search_exams_by_name,
 )
@@ -63,6 +65,12 @@ class AddExamRequest(BaseModel):
     date: str
     start_time: str
     end_time: str
+
+
+class EditExamRequest(BaseModel):
+    exam_id: int
+    column_name: str
+    new_value: str | None = None
 
 
 def activity_to_dict(activity):
@@ -177,6 +185,95 @@ def search_exam_records_by_name(name: str):
         connection.close()
 
     return [exam_to_dict(exam) for exam in matching_exams]
+
+
+@app.put("/exams/{exam_id}")
+def update_exam(exam_id: int, edit_request: EditExamRequest):
+    if edit_request.exam_id != exam_id:
+        raise HTTPException(
+            status_code=400,
+            detail="The exam ID in the URL and request body must match.",
+        )
+
+    editable_columns = {
+        "name",
+        "category",
+        "subject",
+        "date",
+        "start_time",
+        "end_time",
+    }
+    column_name = edit_request.column_name.strip()
+
+    if column_name not in editable_columns:
+        raise HTTPException(status_code=400, detail="That field cannot be edited.")
+
+    connection = create_connection()
+
+    try:
+        exam = get_exam_by_id(connection, exam_id)
+
+        if exam is None:
+            raise HTTPException(status_code=404, detail="Exam ID not found.")
+
+        new_value = edit_request.new_value
+
+        if column_name in {"name", "category"}:
+            new_value = new_value.strip() if new_value else ""
+
+            if not new_value:
+                field_name = column_name.title()
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{field_name} is required.",
+                )
+
+        elif column_name == "subject":
+            new_value = new_value.strip() if new_value else None
+
+        elif column_name == "date":
+            try:
+                new_value = str(date.fromisoformat(new_value.strip()))
+            except (AttributeError, ValueError):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Date must use YYYY-MM-DD format.",
+                ) from None
+
+        elif column_name in {"start_time", "end_time"}:
+            try:
+                parsed_new_time = datetime.strptime(new_value.strip(), "%H:%M")
+            except (AttributeError, ValueError):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Time must use HH:MM format.",
+                ) from None
+
+            new_value = parsed_new_time.strftime("%H:%M")
+            start_time_value = new_value if column_name == "start_time" else exam[5]
+            end_time_value = new_value if column_name == "end_time" else exam[6]
+
+            try:
+                start_time = datetime.strptime(start_time_value, "%H:%M")
+                end_time = datetime.strptime(end_time_value, "%H:%M")
+            except (TypeError, ValueError):
+                raise HTTPException(
+                    status_code=400,
+                    detail="The stored exam time is invalid.",
+                ) from None
+
+            if start_time >= end_time:
+                raise HTTPException(
+                    status_code=400,
+                    detail="End time must be later than start time.",
+                )
+
+        edit_exam(connection, exam_id, column_name, new_value)
+        updated_exam = get_exam_by_id(connection, exam_id)
+    finally:
+        connection.close()
+
+    return exam_to_dict(updated_exam)
 
 
 @app.delete("/exams/{exam_id}")

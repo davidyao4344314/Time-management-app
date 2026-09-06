@@ -3,7 +3,7 @@ from backend.app.activities import print_all_activities , search_activity, get_u
 from backend.app.calender import get_current_date, get_current_time ,print_all_dailies, get_current_day,get_todays_activities, check_activity_current
 conection =create_connection()
 create_tables(conection)
-from backend.app.canvas_import import get_canvas_events
+from backend.app.canvas_import import get_canvas_events, classify_canvas_event
 
 current_activity = []
 
@@ -67,7 +67,9 @@ while True:
         user_input_name = input("Please input the thing you want to delte")
         target_id = search_by_id(conection, user_input_name)
     elif user_choice == "9":
-        events = get_canvas_events()
+        events = get_canvas_events()\
+
+        type = classify_canvas_event(events)
 
         print(events)
 

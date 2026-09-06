@@ -48,8 +48,8 @@ class AddActivityRequest(BaseModel):
     activity_type: str
     date: str | None = None
     weekday: str | None = None
-    start_time: str
-    end_time: str
+    start_time: str | None = None
+    end_time: str | None = None
 
 
 class EditActivityRequest(BaseModel):
@@ -63,8 +63,8 @@ class AddExamRequest(BaseModel):
     category: str
     subject: str | None = None
     date: str
-    start_time: str
-    end_time: str
+    start_time: str | None = None
+    end_time: str | None = None
 
 
 class EditExamRequest(BaseModel):
@@ -99,6 +99,27 @@ def exam_to_dict(exam):
     }
 
 
+def normalize_optional_time(value):
+    if value is None or not value.strip():
+        return None
+
+    return datetime.strptime(value.strip(), "%H:%M").strftime("%H:%M")
+
+
+def validate_optional_time_range(start_time, end_time):
+    if start_time is None or end_time is None:
+        return
+
+    parsed_start = datetime.strptime(start_time, "%H:%M")
+    parsed_end = datetime.strptime(end_time, "%H:%M")
+
+    if parsed_start >= parsed_end:
+        raise HTTPException(
+            status_code=400,
+            detail="End time must be later than start time.",
+        )
+
+
 @app.get("/exams")
 def all_exams():
     connection = create_connection()
@@ -129,19 +150,15 @@ def create_exam(exam_request: AddExamRequest):
         ) from None
 
     try:
-        start_time = datetime.strptime(exam_request.start_time.strip(), "%H:%M")
-        end_time = datetime.strptime(exam_request.end_time.strip(), "%H:%M")
-    except ValueError:
+        start_time = normalize_optional_time(exam_request.start_time)
+        end_time = normalize_optional_time(exam_request.end_time)
+    except (AttributeError, ValueError):
         raise HTTPException(
             status_code=400,
-            detail="Start and end times must use HH:MM format.",
+            detail="Times must use HH:MM format.",
         ) from None
 
-    if start_time >= end_time:
-        raise HTTPException(
-            status_code=400,
-            detail="End time must be later than start time.",
-        )
+    validate_optional_time_range(start_time, end_time)
 
     columns = [
         "name",
@@ -156,8 +173,8 @@ def create_exam(exam_request: AddExamRequest):
         category,
         subject,
         exam_date,
-        start_time.strftime("%H:%M"),
-        end_time.strftime("%H:%M"),
+        start_time,
+        end_time,
     ]
 
     connection = create_connection()
@@ -242,31 +259,26 @@ def update_exam(exam_id: int, edit_request: EditExamRequest):
 
         elif column_name in {"start_time", "end_time"}:
             try:
-                parsed_new_time = datetime.strptime(new_value.strip(), "%H:%M")
+                new_value = normalize_optional_time(new_value)
             except (AttributeError, ValueError):
                 raise HTTPException(
                     status_code=400,
                     detail="Time must use HH:MM format.",
                 ) from None
 
-            new_value = parsed_new_time.strftime("%H:%M")
             start_time_value = new_value if column_name == "start_time" else exam[5]
             end_time_value = new_value if column_name == "end_time" else exam[6]
 
             try:
-                start_time = datetime.strptime(start_time_value, "%H:%M")
-                end_time = datetime.strptime(end_time_value, "%H:%M")
-            except (TypeError, ValueError):
+                start_time_value = normalize_optional_time(start_time_value)
+                end_time_value = normalize_optional_time(end_time_value)
+            except (AttributeError, ValueError):
                 raise HTTPException(
                     status_code=400,
                     detail="The stored exam time is invalid.",
                 ) from None
 
-            if start_time >= end_time:
-                raise HTTPException(
-                    status_code=400,
-                    detail="End time must be later than start time.",
-                )
+            validate_optional_time_range(start_time_value, end_time_value)
 
         edit_exam(connection, exam_id, column_name, new_value)
         updated_exam = get_exam_by_id(connection, exam_id)
@@ -321,25 +333,15 @@ def create_activity(activity_request: AddActivityRequest):
         raise HTTPException(status_code=400, detail="Invalid activity type.")
 
     try:
-        start_time = datetime.strptime(
-            activity_request.start_time.strip(),
-            "%H:%M",
-        )
-        end_time = datetime.strptime(
-            activity_request.end_time.strip(),
-            "%H:%M",
-        )
-    except ValueError:
+        start_time = normalize_optional_time(activity_request.start_time)
+        end_time = normalize_optional_time(activity_request.end_time)
+    except (AttributeError, ValueError):
         raise HTTPException(
             status_code=400,
-            detail="Start and end times must use HH:MM format.",
+            detail="Times must use HH:MM format.",
         ) from None
 
-    if start_time >= end_time:
-        raise HTTPException(
-            status_code=400,
-            detail="End time must be later than start time.",
-        )
+    validate_optional_time_range(start_time, end_time)
 
     activity_date = None
     weekday = None
@@ -399,8 +401,8 @@ def create_activity(activity_request: AddActivityRequest):
         activity_type,
         activity_date,
         weekday,
-        start_time.strftime("%H:%M"),
-        end_time.strftime("%H:%M"),
+        start_time,
+        end_time,
     ]
 
     connection = create_connection()
@@ -543,31 +545,26 @@ def update_activity(activity_id: int, edit_request: EditActivityRequest):
 
         elif column_name in {"start_time", "end_time"}:
             try:
-                parsed_new_time = datetime.strptime(new_value.strip(), "%H:%M")
+                new_value = normalize_optional_time(new_value)
             except (AttributeError, ValueError):
                 raise HTTPException(
                     status_code=400,
                     detail="Time must use HH:MM format.",
                 ) from None
 
-            new_value = parsed_new_time.strftime("%H:%M")
             start_time_value = new_value if column_name == "start_time" else activity[7]
             end_time_value = new_value if column_name == "end_time" else activity[8]
 
             try:
-                start_time = datetime.strptime(start_time_value, "%H:%M")
-                end_time = datetime.strptime(end_time_value, "%H:%M")
-            except (TypeError, ValueError):
+                start_time_value = normalize_optional_time(start_time_value)
+                end_time_value = normalize_optional_time(end_time_value)
+            except (AttributeError, ValueError):
                 raise HTTPException(
                     status_code=400,
                     detail="The stored activity time is invalid.",
                 ) from None
 
-            if start_time >= end_time:
-                raise HTTPException(
-                    status_code=400,
-                    detail="End time must be later than start time.",
-                )
+            validate_optional_time_range(start_time_value, end_time_value)
 
         edit_activity(connection, activity_id, column_name, new_value)
 

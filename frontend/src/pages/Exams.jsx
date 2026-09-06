@@ -25,6 +25,14 @@ const examEditFieldLabels = {
   end_time: 'End time',
 }
 
+function formatTimeRange(startTime, endTime) {
+  if (!startTime && !endTime) {
+    return 'No time set'
+  }
+
+  return `${startTime || 'No start time'} – ${endTime || 'No end time'}`
+}
+
 function getExamFieldValue(exam, columnName) {
   return exam[columnName] || ''
 }
@@ -64,8 +72,8 @@ function ExamDetails({ exam }) {
       <span>Category: {exam.category || '—'}</span>
       <span>Subject: {exam.subject || '—'}</span>
       <span>Date: {exam.date}</span>
-      <span>Start time: {exam.start_time}</span>
-      <span>End time: {exam.end_time}</span>
+      <span>Start time: {exam.start_time || 'No time set'}</span>
+      <span>End time: {exam.end_time || 'No time set'}</span>
     </div>
   )
 }
@@ -231,6 +239,8 @@ function Exams() {
         body: JSON.stringify({
           ...examForm,
           subject: examForm.subject || null,
+          start_time: examForm.start_time || null,
+          end_time: examForm.end_time || null,
         }),
       })
 
@@ -547,7 +557,6 @@ function Exams() {
               <input
                 name="start_time"
                 onChange={handleFormChange}
-                required
                 type="time"
                 value={examForm.start_time}
               />
@@ -558,7 +567,6 @@ function Exams() {
               <input
                 name="end_time"
                 onChange={handleFormChange}
-                required
                 type="time"
                 value={examForm.end_time}
               />
@@ -663,8 +671,8 @@ function Exams() {
                         <span>Category: {exam.category || '—'}</span>
                         <span>Subject: {exam.subject || '—'}</span>
                         <span>Date: {exam.date}</span>
-                        <span>Start time: {exam.start_time}</span>
-                        <span>End time: {exam.end_time}</span>
+                        <span>Start time: {exam.start_time || 'No time set'}</span>
+                        <span>End time: {exam.end_time || 'No time set'}</span>
                       </span>
                     </label>
                   </li>
@@ -780,7 +788,7 @@ function Exams() {
                 New value
                 <input
                   onChange={(event) => setEditValue(event.target.value)}
-                  required={editColumn !== 'subject'}
+                  required={!['subject', 'start_time', 'end_time'].includes(editColumn)}
                   type={editColumn === 'date'
                     ? 'date'
                     : editColumn === 'start_time' || editColumn === 'end_time'
@@ -825,7 +833,7 @@ function Exams() {
                     <p>Date: {exam.date}</p>
                   </div>
                   <p className="activities-time">
-                    {exam.start_time} – {exam.end_time}
+                    {formatTimeRange(exam.start_time, exam.end_time)}
                   </p>
                 </li>
               ))}

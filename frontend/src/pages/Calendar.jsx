@@ -69,36 +69,61 @@ async function fetchWeeklyActivities(signal) {
 }
 
 function timeToMinutes(time) {
+  if (typeof time !== 'string') {
+    return null
+  }
+
   const [hoursPart, minutesPart] = time.split(':').map(Number)
+
+  if (!Number.isFinite(hoursPart) || !Number.isFinite(minutesPart)) {
+    return null
+  }
 
   return hoursPart * 60 + minutesPart
 }
 
-function CalendarActivity({ activity, onDragStart }) {
+function formatTimeRange(startTime, endTime) {
+  if (!startTime && !endTime) {
+    return 'No time set'
+  }
+
+  return `${startTime || 'No start time'} – ${endTime || 'No end time'}`
+}
+
+function CalendarActivity({ activity, onDragStart, untimedIndex }) {
   const startMinutes = timeToMinutes(activity.startTime)
   const endMinutes = timeToMinutes(activity.endTime)
-  const top = (startMinutes / minutesPerDay) * 100
-  const height = ((endMinutes - startMinutes) / minutesPerDay) * 100
+  const hasTimeRange = (
+    startMinutes !== null
+    && endMinutes !== null
+    && startMinutes < endMinutes
+  )
+  const position = hasTimeRange
+    ? {
+        top: `${(startMinutes / minutesPerDay) * 100}%`,
+        height: `${((endMinutes - startMinutes) / minutesPerDay) * 100}%`,
+      }
+    : {
+        top: `${0.25 + untimedIndex * 3.25}rem`,
+        height: '3rem',
+      }
 
   return (
     <article
       className="calendar-activity"
       draggable
       onDragStart={(event) => onDragStart(event, activity.calendarId)}
-      style={{
-        top: `${top}%`,
-        height: `${height}%`,
-      }}
+      style={position}
     >
       <h4>{activity.name}</h4>
-      <p>{activity.startTime} – {activity.endTime}</p>
+      <p>{formatTimeRange(activity.startTime, activity.endTime)}</p>
     </article>
   )
 }
 
 function CalendarDay({ day, activities, onDragStart, onDrop }) {
   const orderedActivities = [...activities].sort((first, second) =>
-    first.startTime.localeCompare(second.startTime),
+    (first.startTime || '').localeCompare(second.startTime || ''),
   )
 
   return (
@@ -108,11 +133,12 @@ function CalendarDay({ day, activities, onDragStart, onDrop }) {
       onDragOver={(event) => event.preventDefault()}
       onDrop={(event) => onDrop(event, day)}
     >
-      {orderedActivities.map((activity) => (
+      {orderedActivities.map((activity, index) => (
         <CalendarActivity
           activity={activity}
           key={activity.calendarId}
           onDragStart={onDragStart}
+          untimedIndex={index}
         />
       ))}
     </section>

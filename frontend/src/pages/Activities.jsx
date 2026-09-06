@@ -39,6 +39,14 @@ const weekdays = [
   'Sunday',
 ]
 
+function formatTimeRange(startTime, endTime) {
+  if (!startTime && !endTime) {
+    return 'No time set'
+  }
+
+  return `${startTime || 'No start time'} – ${endTime || 'No end time'}`
+}
+
 function getEditableFields(activity) {
   const fields = [
     'name',
@@ -163,7 +171,7 @@ function ActivityList({ activities, emptyMessage }) {
             {activity.weekday && <p>Weekday: {activity.weekday}</p>}
           </div>
           <p className="activities-time">
-            {activity.startTime} – {activity.endTime}
+            {formatTimeRange(activity.startTime, activity.endTime)}
           </p>
         </li>
       ))}
@@ -358,6 +366,8 @@ function Activities() {
           weekday: activityForm.activity_type === 'weekly'
             ? activityForm.weekday
             : null,
+          start_time: activityForm.start_time || null,
+          end_time: activityForm.end_time || null,
         }),
       })
 
@@ -748,7 +758,6 @@ function Activities() {
               <input
                 name="start_time"
                 onChange={handleFormChange}
-                required
                 type="time"
                 value={activityForm.start_time}
               />
@@ -759,7 +768,6 @@ function Activities() {
               <input
                 name="end_time"
                 onChange={handleFormChange}
-                required
                 type="time"
                 value={activityForm.end_time}
               />
@@ -857,8 +865,8 @@ function Activities() {
                         <span>Activity type: {activity.activityType}</span>
                         <span>Date: {activity.date || '—'}</span>
                         <span>Weekday: {activity.weekday || '—'}</span>
-                        <span>Start time: {activity.startTime}</span>
-                        <span>End time: {activity.endTime}</span>
+                        <span>Start time: {activity.startTime || 'No time set'}</span>
+                        <span>End time: {activity.endTime || 'No time set'}</span>
                       </span>
                     </label>
                   </li>
@@ -919,8 +927,8 @@ function Activities() {
                     <span>Activity type: {activity.activityType}</span>
                     <span>Date: {activity.date || '—'}</span>
                     <span>Weekday: {activity.weekday || '—'}</span>
-                    <span>Start time: {activity.startTime}</span>
-                    <span>End time: {activity.endTime}</span>
+                    <span>Start time: {activity.startTime || 'No time set'}</span>
+                    <span>End time: {activity.endTime || 'No time set'}</span>
                   </div>
 
                   <div className="activity-search-actions">
@@ -1005,7 +1013,7 @@ function Activities() {
                 ) : (
                   <input
                     onChange={(event) => setEditValue(event.target.value)}
-                    required={editColumn !== 'subject'}
+                    required={!['subject', 'start_time', 'end_time'].includes(editColumn)}
                     type={editColumn === 'date'
                       ? 'date'
                       : editColumn === 'start_time' || editColumn === 'end_time'

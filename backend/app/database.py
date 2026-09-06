@@ -24,6 +24,74 @@ db_file = backend_dir / "study_app.db"
 sql_file = project_dir / "activities.sql"
 
 
+def times_are_required(connection, table_name):
+    columns = connection.execute(f"PRAGMA table_info({table_name})").fetchall()
+
+    return any(
+        column[1] in {"start_time", "end_time"} and column[3] == 1
+        for column in columns
+    )
+
+
+def allow_null_times(connection):
+    table_migrations = {
+        "activities": {
+            "columns": (
+                "id, name, category, subject, activity_type, date, weekday, "
+                "start_time, end_time"
+            ),
+            "create_sql": """
+                CREATE TABLE activities_new(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    subject TEXT,
+                    activity_type TEXT NOT NULL
+                        CHECK (activity_type IN ('one_time', 'daily', 'weekly')),
+                    date TEXT,
+                    weekday TEXT,
+                    start_time TEXT,
+                    end_time TEXT
+                )
+            """,
+        },
+        "exams": {
+            "columns": (
+                "id, name, category, subject, date, start_time, end_time"
+            ),
+            "create_sql": """
+                CREATE TABLE exams_new(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    subject TEXT,
+                    date TEXT NOT NULL,
+                    start_time TEXT,
+                    end_time TEXT
+                )
+            """,
+        },
+    }
+
+    for table_name, migration in table_migrations.items():
+        if not times_are_required(connection, table_name):
+            continue
+
+        new_table_name = f"{table_name}_new"
+        columns = migration["columns"]
+
+        with connection:
+            connection.execute(migration["create_sql"])
+            connection.execute(
+                f"INSERT INTO {new_table_name} ({columns}) "
+                f"SELECT {columns} FROM {table_name}"
+            )
+            connection.execute(f"DROP TABLE {table_name}")
+            connection.execute(
+                f"ALTER TABLE {new_table_name} RENAME TO {table_name}"
+            )
+
+
 def create_connection():
     """
     Open the SQLite database and return the connection.
@@ -33,6 +101,7 @@ def create_connection():
     """
 
     connection = sqlite3.connect(db_file)
+    allow_null_times(connection)
 
     return connection
 

@@ -62,6 +62,9 @@ def check_activity_current(activities_today, current_time):
         start_time = activity[7]
         end_time = activity[8]
 
+        if not is_valid_activity_time(start_time, end_time):
+            continue
+
         if start_time <= current_time < end_time:
             current_activities.append(activity[0])
 
@@ -159,9 +162,6 @@ def get_week_activities(connection):
             start_time = activity[7]
             end_time = activity[8]
 
-            if not is_valid_activity_time(start_time, end_time):
-                continue
-
             if not is_activity_on_date(
                 activity_type,
                 stored_date,
@@ -177,15 +177,20 @@ def get_week_activities(connection):
                 "subject": activity[3],
                 "activity_type": activity_type.strip().lower(),
                 "calendar_date": str(calendar_date),
-                "start_time": start_time.strip(),
-                "end_time": end_time.strip(),
+                "start_time": start_time.strip()
+                    if isinstance(start_time, str) and start_time.strip()
+                    else None,
+                "end_time": end_time.strip()
+                    if isinstance(end_time, str) and end_time.strip()
+                    else None,
             })
 
     return sorted(
         week_activities,
         key=lambda activity: (
             activity["calendar_date"],
-            activity["start_time"],
+            activity["start_time"] is None,
+            activity["start_time"] or "",
             activity["name"],
         ),
     )

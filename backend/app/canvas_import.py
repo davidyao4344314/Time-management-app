@@ -146,16 +146,6 @@ def check_canvas_event_matches_schema(event_type, columns, values):
             f"Cannot import Canvas {event_type} {converted_event['name']!r}: "
             "the event does not contain a usable start date."
         )
-
-    if (
-        converted_event.get("start_time") is None
-        or converted_event.get("end_time") is None
-    ):
-        raise ValueError(
-            f"Cannot import Canvas {event_type} {converted_event['name']!r}: "
-            "the current database requires both start_time and end_time, "
-            "but this event does not provide both times."
-        )
 if __name__ == "__main__":
     try:
         canvas_events = get_canvas_events()

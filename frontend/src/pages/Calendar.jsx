@@ -14,6 +14,20 @@ const dayNames = [
 const hours = Array.from({ length: 24 }, (_, hour) => hour)
 const minutesPerDay = 24 * 60
 
+function isValidCanvasUrl(value) {
+  try {
+    const url = new URL(value.trim())
+    return url.protocol === 'https:'
+      && url.pathname.toLowerCase().endsWith('.ics')
+      && !url.username
+      && !url.password
+      && !url.hash
+      && !/\s/.test(value.trim())
+  } catch {
+    return false
+  }
+}
+
 function formatDate(date) {
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, '0')
@@ -155,6 +169,8 @@ function Calendar() {
   const [isCanvasModalOpen, setIsCanvasModalOpen] = useState(false)
   const [canvasUrl, setCanvasUrl] = useState('')
   const [canvasMessage, setCanvasMessage] = useState('')
+  const [isImportingCanvas, setIsImportingCanvas] = useState(false)
+  const [canvasError, setCanvasError] = useState('')
 
   useEffect(() => {
     const controller = new AbortController()
@@ -185,8 +201,11 @@ function Calendar() {
   }
 
   async function handleCanvasImportClick() {
+    if (isCheckingCanvas || isImportingCanvas) return
+
     setIsCheckingCanvas(true)
     setCanvasMessage('')
+    setCanvasError('')
 
     try {
       const response = await fetch('/api/canvas/status')
@@ -198,21 +217,71 @@ function Calendar() {
       const status = await response.json()
 
       if (status.configured) {
-        setIsCanvasModalOpen(false)
-        setCanvasMessage('Canvas calendar is already configured.')
+        await importCanvas()
       } else {
         setIsCanvasModalOpen(true)
       }
     } catch (requestError) {
-      setCanvasMessage(requestError.message)
+      setCanvasError(requestError.message)
     } finally {
       setIsCheckingCanvas(false)
     }
   }
 
+  async function importCanvas(calendarUrl = null) {
+    if (isImportingCanvas) return
+
+    setIsImportingCanvas(true)
+    setCanvasMessage('Importing from Canvas...')
+    setCanvasError('')
+
+    try {
+      const response = await fetch('/api/canvas/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ calendar_url: calendarUrl }),
+      })
+
+      if (!response.ok) {
+        const result = await response.json().catch(() => ({}))
+        throw new Error(typeof result.detail === 'string'
+          ? result.detail
+          : 'Canvas import failed. Please try again.')
+      }
+
+      setIsCanvasModalOpen(false)
+      setCanvasUrl('')
+      setCanvasMessage('Canvas import completed.')
+
+      try {
+        setActivities(await fetchWeeklyActivities())
+        setError('')
+        // Activities and Exams already refetch when opened through navigation.
+      } catch {
+        setCanvasError('The import was saved, but the calendar could not refresh. Reload the page to see it.')
+      }
+    } catch (requestError) {
+      setCanvasMessage('')
+      setCanvasError(requestError instanceof TypeError
+        ? 'Could not reach the backend. Check that it is running.'
+        : requestError.message)
+    } finally {
+      setIsImportingCanvas(false)
+    }
+  }
+
+  function handleCanvasSubmit(event) {
+    event.preventDefault()
+    if (isValidCanvasUrl(canvasUrl)) {
+      importCanvas(canvasUrl.trim())
+    }
+  }
+
   function closeCanvasModal() {
+    if (isImportingCanvas) return
     setIsCanvasModalOpen(false)
     setCanvasUrl('')
+    setCanvasError('')
   }
 
   async function handleDrop(event, destinationDay) {
@@ -260,37 +329,57 @@ function Calendar() {
       <div className="calendar-heading-row">
         <h2>Calendar</h2>
         <button
-          disabled={isCheckingCanvas}
+          disabled={isCheckingCanvas || isImportingCanvas}
           onClick={handleCanvasImportClick}
           type="button"
         >
-          {isCheckingCanvas ? 'Checking...' : 'Import from Canvas'}
+          {isImportingCanvas
+            ? 'Importing from Canvas...'
+            : isCheckingCanvas ? 'Checking...' : 'Import from Canvas'}
         </button>
       </div>
 
-      {canvasMessage && <p aria-live="polite">{canvasMessage}</p>}
+      {!isCanvasModalOpen && canvasMessage && <p role="status">{canvasMessage}</p>}
+      {!isCanvasModalOpen && canvasError && <p role="alert">{canvasError}</p>}
 
       {isCanvasModalOpen && (
         <div className="canvas-modal-overlay">
-          <div
+          <form
             aria-labelledby="canvas-modal-heading"
             aria-modal="true"
             className="canvas-modal"
+            onSubmit={handleCanvasSubmit}
             role="dialog"
           >
             <h3 id="canvas-modal-heading">Connect Canvas calendar</h3>
             <label>
               Canvas iCal feed URL
               <input
+                autoComplete="off"
+                disabled={isImportingCanvas}
                 onChange={(event) => setCanvasUrl(event.target.value)}
                 placeholder="Paste your Canvas iCal feed URL"
+                required
+                spellCheck={false}
                 type="url"
                 value={canvasUrl}
               />
             </label>
-            <p>The URL will not be saved during this step.</p>
-            <button onClick={closeCanvasModal} type="button">Close</button>
-          </div>
+            <p>Your feed URL will be saved locally for future imports.</p>
+            {canvasUrl.trim() && !isValidCanvasUrl(canvasUrl) && (
+              <p>Enter an HTTPS Canvas iCal feed URL ending in .ics.</p>
+            )}
+            {canvasMessage && <p role="status">{canvasMessage}</p>}
+            {canvasError && <p role="alert">{canvasError}</p>}
+            <div className="canvas-modal-actions">
+              {isValidCanvasUrl(canvasUrl) && (
+                <button disabled={isImportingCanvas} type="submit">
+                  {isImportingCanvas ? 'Importing from Canvas...' : 'Import from Canvas'}
+                </button>
+              )}
+              <button disabled={isImportingCanvas} onClick={closeCanvasModal} type="button">Close</button>
+            </div>
+          </form>
         </div>
       )}
 

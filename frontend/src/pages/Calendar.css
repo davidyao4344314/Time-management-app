@@ -19,9 +19,16 @@
   cursor: pointer;
 }
 
-.calendar-heading-row button:disabled {
+.calendar-heading-row button:disabled,
+.canvas-modal button:disabled {
   cursor: wait;
   opacity: 0.7;
+}
+
+.canvas-modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
 }
 
 .canvas-modal-overlay {

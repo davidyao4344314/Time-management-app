@@ -1,7 +1,8 @@
 from datetime import date, datetime
+from sqlite3 import Error as SQLiteError
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, SecretStr
 
 from backend.app.activities import (
     add_activity,
@@ -21,7 +22,12 @@ from backend.app.calender import (
     get_todays_activities,
     get_week_activities,
 )
-from backend.app.canvas_import import is_canvas_calendar_configured
+from backend.app.canvas_import import (
+    get_canvas_events,
+    is_canvas_calendar_configured,
+    save_canvas_calendar_url,
+    sort_out_canvas_events,
+)
 from backend.app.exams import (
     add_exam,
     delete_exam,
@@ -38,6 +44,59 @@ app = FastAPI()
 @app.get("/canvas/status")
 def canvas_status():
     return {"configured": is_canvas_calendar_configured()}
+
+
+class CanvasImportRequest(BaseModel):
+    calendar_url: SecretStr | None = None
+
+
+@app.post("/canvas/import")
+def import_canvas_calendar(import_request: CanvasImportRequest):
+    calendar_url = (
+        import_request.calendar_url.get_secret_value()
+        if import_request.calendar_url is not None
+        else None
+    )
+
+    if calendar_url is None and not is_canvas_calendar_configured():
+        raise HTTPException(status_code=400, detail="Enter your Canvas iCal feed URL first.")
+
+    try:
+        events = get_canvas_events(calendar_url)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail="Enter a valid HTTPS Canvas iCal feed URL ending in .ics.",
+        ) from None
+    except (RuntimeError, TypeError, AttributeError):
+        raise HTTPException(
+            status_code=502,
+            detail="Could not download or read the Canvas calendar. Check the feed URL and try again.",
+        ) from None
+
+    if calendar_url is not None:
+        try:
+            save_canvas_calendar_url(calendar_url)
+        except RuntimeError:
+            raise HTTPException(
+                status_code=500,
+                detail="Could not save the Canvas calendar configuration. Check local file permissions.",
+            ) from None
+
+    connection = None
+    try:
+        connection = create_connection()
+        sort_out_canvas_events(connection, events)
+    except (ValueError, SQLiteError):
+        raise HTTPException(
+            status_code=500,
+            detail="Could not save all Canvas events. Check the event dates and database; some events may already have been saved.",
+        ) from None
+    finally:
+        if connection is not None:
+            connection.close()
+
+    return {"message": "Canvas import completed."}
 
 
 class MoveActivityRequest(BaseModel):

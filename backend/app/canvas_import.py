@@ -1,9 +1,10 @@
 import os
 from datetime import date, datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import requests
-from dotenv import load_dotenv
+from dotenv import load_dotenv, set_key
 from icalendar import Calendar
 
 try:
@@ -15,23 +16,64 @@ except ModuleNotFoundError:
     from exams import add_exam
 
 
+CANVAS_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+
+
 def is_canvas_calendar_configured():
-    project_directory = Path(__file__).resolve().parents[2]
-    load_dotenv(project_directory / ".env")
+    load_dotenv(CANVAS_ENV_FILE)
 
     return bool(os.getenv("CANVAS_CALENDAR_URL", "").strip())
 
 
-def get_canvas_events():
-    project_directory = Path(__file__).resolve().parents[2]
-    load_dotenv(project_directory / ".env")
+def validate_canvas_calendar_url(calendar_url):
+    calendar_url = calendar_url.strip()
+    error_message = "Enter a valid HTTPS Canvas iCal feed URL ending in .ics."
 
-    calendar_url = os.getenv("CANVAS_CALENDAR_URL", "").strip()
+    try:
+        parsed_url = urlsplit(calendar_url)
+        valid = (
+            parsed_url.scheme == "https"
+            and parsed_url.hostname
+            and parsed_url.path.lower().endswith(".ics")
+            and not parsed_url.username
+            and not parsed_url.password
+            and not parsed_url.fragment
+            and not any(character.isspace() for character in calendar_url)
+        )
+    except ValueError:
+        raise ValueError(error_message) from None
+
+    if not valid:
+        raise ValueError(error_message)
+
+    return calendar_url
+
+
+def save_canvas_calendar_url(calendar_url):
+    calendar_url = validate_canvas_calendar_url(calendar_url)
+
+    try:
+        set_key(CANVAS_ENV_FILE, "CANVAS_CALENDAR_URL", calendar_url)
+        CANVAS_ENV_FILE.chmod(0o600)
+    except OSError:
+        raise RuntimeError("Could not save the Canvas calendar configuration.") from None
+
+    # Also update this running process, so another import uses the new URL.
+    os.environ["CANVAS_CALENDAR_URL"] = calendar_url
+
+
+def get_canvas_events(calendar_url=None):
+    load_dotenv(CANVAS_ENV_FILE)
+
+    if calendar_url is None:
+        calendar_url = os.getenv("CANVAS_CALENDAR_URL", "").strip()
 
     if not calendar_url:
         raise RuntimeError(
             "CANVAS_CALENDAR_URL is missing. Add it to the project .env file."
         )
+
+    calendar_url = validate_canvas_calendar_url(calendar_url)
 
     try:
         response = requests.get(calendar_url, timeout=30)

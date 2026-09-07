@@ -67,7 +67,7 @@ while True:
         user_input_name = input("Please input the thing you want to delte")
         target_id = search_by_id(conection, user_input_name)
     elif user_choice == "9":
-        events = get_canvas_events()\
+        events = get_canvas_events()
 
         type = classify_canvas_event(events)
 

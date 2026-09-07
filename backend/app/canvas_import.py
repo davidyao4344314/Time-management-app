@@ -15,6 +15,13 @@ except ModuleNotFoundError:
     from exams import add_exam
 
 
+def is_canvas_calendar_configured():
+    project_directory = Path(__file__).resolve().parents[2]
+    load_dotenv(project_directory / ".env")
+
+    return bool(os.getenv("CANVAS_CALENDAR_URL", "").strip())
+
+
 def get_canvas_events():
     project_directory = Path(__file__).resolve().parents[2]
     load_dotenv(project_directory / ".env")

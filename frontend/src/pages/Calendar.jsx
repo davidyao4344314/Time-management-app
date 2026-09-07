@@ -151,6 +151,10 @@ function Calendar() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState('')
   const [moveError, setMoveError] = useState('')
+  const [isCheckingCanvas, setIsCheckingCanvas] = useState(false)
+  const [isCanvasModalOpen, setIsCanvasModalOpen] = useState(false)
+  const [canvasUrl, setCanvasUrl] = useState('')
+  const [canvasMessage, setCanvasMessage] = useState('')
 
   useEffect(() => {
     const controller = new AbortController()
@@ -178,6 +182,37 @@ function Calendar() {
   function handleDragStart(event, calendarId) {
     event.dataTransfer.setData('text/plain', calendarId)
     event.dataTransfer.effectAllowed = 'move'
+  }
+
+  async function handleCanvasImportClick() {
+    setIsCheckingCanvas(true)
+    setCanvasMessage('')
+
+    try {
+      const response = await fetch('/api/canvas/status')
+
+      if (!response.ok) {
+        throw new Error('Could not check the Canvas configuration.')
+      }
+
+      const status = await response.json()
+
+      if (status.configured) {
+        setIsCanvasModalOpen(false)
+        setCanvasMessage('Canvas calendar is already configured.')
+      } else {
+        setIsCanvasModalOpen(true)
+      }
+    } catch (requestError) {
+      setCanvasMessage(requestError.message)
+    } finally {
+      setIsCheckingCanvas(false)
+    }
+  }
+
+  function closeCanvasModal() {
+    setIsCanvasModalOpen(false)
+    setCanvasUrl('')
   }
 
   async function handleDrop(event, destinationDay) {
@@ -222,7 +257,42 @@ function Calendar() {
 
   return (
     <main className="page">
-      <h2>Calendar</h2>
+      <div className="calendar-heading-row">
+        <h2>Calendar</h2>
+        <button
+          disabled={isCheckingCanvas}
+          onClick={handleCanvasImportClick}
+          type="button"
+        >
+          {isCheckingCanvas ? 'Checking...' : 'Import from Canvas'}
+        </button>
+      </div>
+
+      {canvasMessage && <p aria-live="polite">{canvasMessage}</p>}
+
+      {isCanvasModalOpen && (
+        <div className="canvas-modal-overlay">
+          <div
+            aria-labelledby="canvas-modal-heading"
+            aria-modal="true"
+            className="canvas-modal"
+            role="dialog"
+          >
+            <h3 id="canvas-modal-heading">Connect Canvas calendar</h3>
+            <label>
+              Canvas iCal feed URL
+              <input
+                onChange={(event) => setCanvasUrl(event.target.value)}
+                placeholder="Paste your Canvas iCal feed URL"
+                type="url"
+                value={canvasUrl}
+              />
+            </label>
+            <p>The URL will not be saved during this step.</p>
+            <button onClick={closeCanvasModal} type="button">Close</button>
+          </div>
+        </div>
+      )}
 
       {isLoading && <p>Loading calendar...</p>}
 

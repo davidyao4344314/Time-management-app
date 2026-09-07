@@ -21,6 +21,7 @@ from backend.app.calender import (
     get_todays_activities,
     get_week_activities,
 )
+from backend.app.canvas_import import is_canvas_calendar_configured
 from backend.app.exams import (
     add_exam,
     delete_exam,
@@ -32,6 +33,11 @@ from backend.app.exams import (
 )
 
 app = FastAPI()
+
+
+@app.get("/canvas/status")
+def canvas_status():
+    return {"configured": is_canvas_calendar_configured()}
 
 
 class MoveActivityRequest(BaseModel):

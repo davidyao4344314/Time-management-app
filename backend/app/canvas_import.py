@@ -3,9 +3,12 @@ from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
-import requests
 from dotenv import load_dotenv, set_key
-from icalendar import Calendar
+
+if __package__:
+    from .ical_import import get_ical_events
+else:
+    from ical_import import get_ical_events
 
 try:
     from backend.app.activities import add_activity
@@ -75,33 +78,7 @@ def get_canvas_events(calendar_url=None):
 
     calendar_url = validate_canvas_calendar_url(calendar_url)
 
-    try:
-        response = requests.get(calendar_url, timeout=30)
-        response.raise_for_status()
-    except requests.RequestException:
-        raise RuntimeError("Could not download the Canvas calendar feed.") from None
-
-    try:
-        calendar = Calendar.from_ical(response.content)
-    except Exception:
-        raise RuntimeError("Could not parse the Canvas calendar feed.") from None
-
-    events = []
-
-    for component in calendar.walk("VEVENT"):
-        summary = component.get("summary")
-        start = component.get("dtstart")
-        end = component.get("dtend")
-        uid = component.get("uid")
-
-        events.append({
-            "name": str(summary) if summary else "Untitled event",
-            "start": start.dt if start else None,
-            "end": end.dt if end else None,
-            "external_id": str(uid) if uid else None,
-        })
-
-    return events
+    return get_ical_events(calendar_url)
 
 def convert_canvas_event_to_exam(event):
     event_date, start_time, end_time = get_canvas_event_schedule(event)

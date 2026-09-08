@@ -83,14 +83,15 @@
 .calendar-scroll {
   margin-top: 2rem;
   overflow: auto;
+  overflow-anchor: none;
   border: 1px solid #dddddd;
   border-radius: 0.25rem;
 }
 
 .calendar-layout {
   display: grid;
-  grid-template-columns: 4.5rem repeat(7, minmax(11rem, 1fr));
-  min-width: 82rem;
+  grid-template-columns: 4.5rem repeat(var(--calendar-day-count), 11rem);
+  width: max-content;
   --calendar-hour-height: 3.25rem;
   --calendar-day-height: 78rem;
 }
@@ -130,8 +131,16 @@
 }
 
 .calendar-time-column {
+  position: sticky;
+  left: 0;
+  z-index: 4;
   border-right: 1px solid #dddddd;
   background: #ffffff;
+}
+
+.calendar-corner {
+  left: 0;
+  z-index: 5;
 }
 
 .calendar-time-label {

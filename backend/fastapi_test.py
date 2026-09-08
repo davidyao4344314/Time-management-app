@@ -800,14 +800,14 @@ def current_activities():
 
 
 @app.get("/activities/week")
-def weekly_activities():
+def weekly_activities(week_start: date | None = None):
+    if week_start is not None and week_start > date(9999, 12, 25):
+        raise HTTPException(status_code=400, detail="The requested week is outside the supported date range.")
     connection = create_connection()
-
-    activities_week = get_week_activities(connection)
-
-    connection.close()
-
-    return activities_week
+    try:
+        return get_week_activities(connection, week_start)
+    finally:
+        connection.close()
 
 
 @app.put("/activities/{activity_id}/move")

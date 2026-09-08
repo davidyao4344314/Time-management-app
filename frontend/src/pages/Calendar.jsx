@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import UoaTimetableImport from '../components/UoaTimetableImport'
 import './Calendar.css'
 
@@ -37,19 +37,23 @@ function formatDate(date) {
   return `${year}-${month}-${day}`
 }
 
-function getCurrentWeek() {
+function getCurrentMonday() {
   const today = new Date()
   const monday = new Date(today)
   const daysSinceMonday = today.getDay() === 0 ? 6 : today.getDay() - 1
 
   monday.setDate(today.getDate() - daysSinceMonday)
+  monday.setHours(12, 0, 0, 0)
+  return monday
+}
 
-  return dayNames.map((name, index) => {
-    const date = new Date(monday)
-    date.setDate(monday.getDate() + index)
+function createCalendarDays(start, count) {
+  return Array.from({ length: count }, (_, index) => {
+    const date = new Date(start)
+    date.setDate(start.getDate() + index)
 
     return {
-      name,
+      name: dayNames[(date.getDay() + 6) % 7],
       date: formatDate(date),
       dateLabel: date.toLocaleDateString(undefined, {
         month: 'short',
@@ -57,6 +61,12 @@ function getCurrentWeek() {
       }),
     }
   })
+}
+
+function getInitialDays() {
+  const start = getCurrentMonday()
+  start.setDate(start.getDate() - 7)
+  return createCalendarDays(start, 35)
 }
 
 function formatWeeklyActivities(data) {
@@ -71,16 +81,15 @@ function formatWeeklyActivities(data) {
   }))
 }
 
-async function fetchWeeklyActivities(signal) {
-  const response = await fetch('/api/activities/week', { signal })
-
-  if (!response.ok) {
-    throw new Error('The server could not load the weekly activities.')
-  }
-
-  const data = await response.json()
-
-  return formatWeeklyActivities(data)
+async function fetchActivitiesForDays(days, signal) {
+  // Fetch occurrences resolved by Python, one seven-day batch at a time.
+  const weekStarts = days.filter((_, index) => index % 7 === 0)
+  const weeks = await Promise.all(weekStarts.map(async (day) => {
+    const response = await fetch(`/api/activities/week?week_start=${day.date}`, { signal })
+    if (!response.ok) throw new Error('The server could not load the calendar activities.')
+    return response.json()
+  }))
+  return formatWeeklyActivities(weeks.flat())
 }
 
 function timeToMinutes(time) {
@@ -161,7 +170,14 @@ function CalendarDay({ day, activities, onDragStart, onDrop }) {
 }
 
 function Calendar() {
-  const [weekDays] = useState(getCurrentWeek)
+  const [weekDays, setWeekDays] = useState(getInitialDays)
+  const daysRef = useRef(weekDays)
+  const scrollRef = useRef(null)
+  const hasPositioned = useRef(false)
+  const prependWidth = useRef(null)
+  const loadingMoreRef = useRef(false)
+  const moreController = useRef(null)
+  const [isLoadingMore, setIsLoadingMore] = useState(false)
   const [activities, setActivities] = useState([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState('')
@@ -176,6 +192,31 @@ function Calendar() {
   const [isRemovingDuplicates, setIsRemovingDuplicates] = useState(false)
   const [duplicateMessage, setDuplicateMessage] = useState('')
   const [duplicateError, setDuplicateError] = useState('')
+
+  async function fetchWeeklyActivities(signal) {
+    // Existing import/delete/move refreshes must cover all loaded columns.
+    let requestedDays
+    let result
+    do {
+      requestedDays = daysRef.current
+      result = await fetchActivitiesForDays(requestedDays, signal)
+    } while (requestedDays !== daysRef.current)
+    return result
+  }
+
+  useLayoutEffect(() => {
+    const scroll = scrollRef.current
+    if (!scroll) return
+    if (!hasPositioned.current) {
+      const column = scroll.querySelector('.calendar-day-header')
+      scroll.scrollLeft = column.getBoundingClientRect().width * 7
+      hasPositioned.current = true
+    } else if (prependWidth.current !== null) {
+      // Keep the same visible date when earlier columns are inserted.
+      scroll.scrollLeft += scroll.scrollWidth - prependWidth.current
+      prependWidth.current = null
+    }
+  }, [weekDays, isLoading])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -197,8 +238,46 @@ function Calendar() {
 
     loadWeeklyActivities()
 
-    return () => controller.abort()
+    return () => {
+      controller.abort()
+      moreController.current?.abort()
+    }
   }, [])
+
+  async function handleCalendarScroll(event) {
+    const scroll = event.currentTarget
+    if (isLoading || loadingMoreRef.current || !hasPositioned.current) return
+    const nearLeft = scroll.scrollLeft < 250
+    const nearRight = scroll.scrollWidth - scroll.clientWidth - scroll.scrollLeft < 250
+    if (!nearLeft && !nearRight) return
+
+    loadingMoreRef.current = true
+    setIsLoadingMore(true)
+    const controller = new AbortController()
+    moreController.current = controller
+    const currentDays = daysRef.current
+    const edge = nearLeft ? currentDays[0] : currentDays[currentDays.length - 1]
+    const start = new Date(`${edge.date}T12:00:00`)
+    start.setDate(start.getDate() + (nearLeft ? -14 : 1))
+    const extraDays = createCalendarDays(start, 14)
+    try {
+      const extraActivities = await fetchActivitiesForDays(extraDays, controller.signal)
+      if (controller.signal.aborted) return
+      if (nearLeft) prependWidth.current = scroll.scrollWidth
+      const expandedDays = nearLeft ? [...extraDays, ...currentDays] : [...currentDays, ...extraDays]
+      daysRef.current = expandedDays
+      setWeekDays(expandedDays)
+      setActivities((current) => [...current, ...extraActivities])
+      setError('')
+    } catch (requestError) {
+      if (requestError.name !== 'AbortError') {
+        setError('Could not load more dates. Scroll away from the edge and back to retry.')
+      }
+    } finally {
+      loadingMoreRef.current = false
+      if (!controller.signal.aborted) setIsLoadingMore(false)
+    }
+  }
 
   function handleDragStart(event, calendarId) {
     event.dataTransfer.setData('text/plain', calendarId)
@@ -467,14 +546,15 @@ function Calendar() {
       )}
 
       {isLoading && <p>Loading calendar...</p>}
+      {isLoadingMore && <p role="status">Loading more dates...</p>}
 
       {error && <p role="alert">{error}</p>}
 
       {moveError && <p role="alert">{moveError}</p>}
 
-      {!isLoading && !error && (
-        <div className="calendar-scroll">
-          <div className="calendar-layout">
+      {!isLoading && (
+        <div className="calendar-scroll" ref={scrollRef} onScroll={handleCalendarScroll} tabIndex={0} role="region" aria-label="Calendar dates; scroll horizontally for earlier or later dates">
+          <div className="calendar-layout" style={{ '--calendar-day-count': weekDays.length }}>
             <div className="calendar-corner" aria-hidden="true" />
 
             {weekDays.map((day) => (

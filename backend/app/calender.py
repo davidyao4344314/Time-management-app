@@ -164,9 +164,10 @@ def is_valid_activity_time(start_time, end_time):
     return parsed_start < parsed_end
 
 
-def get_week_activities(connection):
+def get_week_activities(connection, week_start=None):
     activities = get_all_activities(connection)
-    current_week = get_current_week()
+    current_week = (get_current_week() if week_start is None else
+                    [week_start + timedelta(days=i) for i in range(7)])
     week_activities = []
 
     for calendar_date in current_week:

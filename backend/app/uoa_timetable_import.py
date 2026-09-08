@@ -34,7 +34,7 @@ def get_uoa_timetable_events():
 
 
 def convert_uoa_event_to_activity(event):
-    """Convert one dated class to the app's weekly activity format."""
+    """Return activity columns and matching values without changing the raw event."""
     if not isinstance(event, dict):
         raise ValueError("The event must be a dictionary.")
 
@@ -72,21 +72,32 @@ def convert_uoa_event_to_activity(event):
 
     weekdays = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
     columns = [
-        "name", "category", "subject", "activity_type", "date",
-        "weekday", "start_time", "end_time",
+        "name",
+        "category",
+        "subject",
+        "activity_type",
+        "date",
+        "weekday",
+        "start_time",
+        "end_time",
     ]
     values = [
-        name, "University", subject, "weekly", None,
-        weekdays[start.weekday()], start_time, end_time,
+        name,
+        "University",
+        subject,
+        "weekly",
+        None,
+        weekdays[start.weekday()],
+        start_time,
+        end_time,
     ]
     return columns, values
 
 
 def import_uoa_timetable_to_activities(connection, events):
+    """Convert and insert each valid event using the existing activity function."""
     imported = 0
     skipped = []
-    repeated = 0
-    seen_schedules = set()
 
     for event_number, event in enumerate(events, start=1):
         try:
@@ -97,20 +108,11 @@ def import_uoa_timetable_to_activities(connection, events):
             print(f"Skipped timetable event {event_number}: {reason}")
             continue
 
-        # Several dated occurrences of one class become a single weekly row.
-        # This only groups this batch; it does not perform database syncing.
-        schedule = tuple(values)
-        if schedule in seen_schedules:
-            repeated += 1
-            continue
-
         add_activity(connection, columns, values)
-        seen_schedules.add(schedule)
         imported += 1
 
-    print(f"Imported {imported} weekly activities; skipped {len(skipped)} invalid events "
-          f"and {repeated} repeated weekly occurrences.")
-    return {"imported": imported, "skipped": skipped, "repeated": repeated}
+    print(f"Imported {imported} weekly activities; skipped {len(skipped)} invalid events.")
+    return {"imported": imported, "skipped": skipped}
 
 
 if __name__ == "__main__":

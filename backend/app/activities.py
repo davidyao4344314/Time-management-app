@@ -116,12 +116,25 @@ def remove_duplicate_activities(connection):
                 SELECT MIN(id)
                 FROM activities
                 GROUP BY name, category, subject, activity_type,
-                         date, weekday, start_time, end_time
+                         date, weekday, start_time, end_time,
+                         active_start_date, active_end_date
             )
         """)
         number_removed = cursor.rowcount
 
     return number_removed
+
+
+def backfill_activity_date_range(connection, activity_id, start_date, end_date):
+    """Repair a feed-matched legacy row; the caller owns the transaction."""
+    cursor = connection.execute(
+        """
+        UPDATE activities SET active_start_date = ?, active_end_date = ?
+        WHERE id = ? AND active_start_date IS NULL AND active_end_date IS NULL
+        """,
+        (start_date, end_date, activity_id),
+    )
+    return cursor.rowcount
 
 
 def edit_activity(connection, activity_id, column_name, new_value):

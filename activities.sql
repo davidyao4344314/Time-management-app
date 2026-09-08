@@ -7,7 +7,9 @@ CREATE TABLE IF NOT EXISTS activities(
     date TEXT,
     weekday TEXT,
     start_time TEXT,
-    end_time TEXT
+    end_time TEXT,
+    active_start_date TEXT,
+    active_end_date TEXT
 );
 CREATE TABLE IF NOT EXISTS exams(
     id INTEGER PRIMARY KEY AUTOINCREMENT,

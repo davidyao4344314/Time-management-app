@@ -223,6 +223,8 @@ def activity_to_dict(activity):
         "weekday": activity[6],
         "start_time": activity[7],
         "end_time": activity[8],
+        "active_start_date": activity[9],
+        "active_end_date": activity[10],
     }
 
 

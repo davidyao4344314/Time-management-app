@@ -28,12 +28,15 @@ def print_all_dailies(connection, activit_list):
         print(f"End time: {activity[8]}")
 
 
-def is_activity_today(activity_type, activity_date, activity_day):
+def is_activity_today(activity_type, activity_date, activity_day,
+                      active_start_date=None, active_end_date=None):
     return is_activity_on_date(
         activity_type,
         activity_date,
         activity_day,
         get_current_date(),
+        active_start_date,
+        active_end_date,
     )
 
 def get_todays_activities(connection):
@@ -49,7 +52,9 @@ def get_todays_activities(connection):
         if is_activity_today(
             activity_type,
             activity_date,
-            activity_day
+            activity_day,
+            activity[9] if len(activity) > 9 else None,
+            activity[10] if len(activity) > 10 else None,
         ):
             activities_today.append(activity)
 
@@ -86,7 +91,9 @@ def is_activity_on_date(
     activity_type,
     activity_date,
     activity_day,
-    chosen_date
+    chosen_date,
+    active_start_date=None,
+    active_end_date=None,
 ):
     if not isinstance(activity_type, str):
         return False
@@ -111,6 +118,17 @@ def is_activity_on_date(
         return True
 
     elif activity_type == "weekly":
+        # Both NULL means an unrestricted, manually-created weekly activity.
+        # Partial, malformed or reversed ranges must not become endless events.
+        if active_start_date is not None or active_end_date is not None:
+            try:
+                first_day = datetime.strptime(active_start_date, "%Y-%m-%d").date()
+                last_day = datetime.strptime(active_end_date, "%Y-%m-%d").date()
+            except (TypeError, ValueError):
+                return False
+            if not first_day <= chosen_date <= last_day:
+                return False
+
         if not isinstance(activity_day, str):
             return False
 
@@ -167,6 +185,8 @@ def get_week_activities(connection):
                 stored_date,
                 stored_weekday,
                 calendar_date,
+                activity[9] if len(activity) > 9 else None,
+                activity[10] if len(activity) > 10 else None,
             ):
                 continue
 

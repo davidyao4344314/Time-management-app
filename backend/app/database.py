@@ -24,6 +24,17 @@ db_file = backend_dir / "study_app.db"
 sql_file = project_dir / "activities.sql"
 
 
+def add_activity_date_ranges(connection):
+    """Append optional range fields without changing existing rows or indexes."""
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(activities)")}
+    if not columns:
+        return
+    with connection:
+        for name in ("active_start_date", "active_end_date"):
+            if name not in columns:
+                connection.execute(f"ALTER TABLE activities ADD COLUMN {name} TEXT")
+
+
 def times_are_required(connection, table_name):
     columns = connection.execute(f"PRAGMA table_info({table_name})").fetchall()
 
@@ -38,7 +49,7 @@ def allow_null_times(connection):
         "activities": {
             "columns": (
                 "id, name, category, subject, activity_type, date, weekday, "
-                "start_time, end_time"
+                "start_time, end_time, active_start_date, active_end_date"
             ),
             "create_sql": """
                 CREATE TABLE activities_new(
@@ -51,7 +62,9 @@ def allow_null_times(connection):
                     date TEXT,
                     weekday TEXT,
                     start_time TEXT,
-                    end_time TEXT
+                    end_time TEXT,
+                    active_start_date TEXT,
+                    active_end_date TEXT
                 )
             """,
         },
@@ -101,6 +114,7 @@ def create_connection():
     """
 
     connection = sqlite3.connect(db_file)
+    add_activity_date_ranges(connection)
     allow_null_times(connection)
 
     return connection

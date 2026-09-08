@@ -10,11 +10,11 @@ from dotenv import load_dotenv, set_key
 
 if __package__:
     from .ical_import import get_ical_events
-    from .activities import add_activity
+    from .activities import add_activity, backfill_activity_date_range, get_all_activities
     from .database import create_connection
 else:
     from ical_import import get_ical_events
-    from activities import add_activity
+    from activities import add_activity, backfill_activity_date_range, get_all_activities
     from database import create_connection
 
 
@@ -119,6 +119,8 @@ def convert_uoa_event_to_activity(event):
         "weekday",
         "start_time",
         "end_time",
+        "active_start_date",
+        "active_end_date",
     ]
     values = [
         name,
@@ -129,13 +131,19 @@ def convert_uoa_event_to_activity(event):
         weekdays[start.weekday()],
         start_time,
         end_time,
+        start.date().isoformat(),
+        end.date().isoformat(),
     ]
     return columns, values
 
 
-def import_uoa_timetable_to_activities(connection, events):
-    """Convert and insert each valid event using the existing activity function."""
-    imported = 0
+def prepare_uoa_activity_ranges(events):
+    """Combine dated occurrences of the same class into a bounded weekly row.
+
+    DTSTART/DTEND describe one class, not an entire semester. The inspected
+    UoA feed lists each occurrence separately, so use its first and last dates.
+    """
+    schedules = {}
     skipped = []
 
     for event_number, event in enumerate(events, start=1):
@@ -147,8 +155,44 @@ def import_uoa_timetable_to_activities(connection, events):
             print(f"Skipped timetable event {event_number}: {reason}")
             continue
 
+        # Match the eight original fields, never semester labels or row IDs.
+        key = tuple(values[:8])
+        if key not in schedules:
+            schedules[key] = (columns, values)
+        else:
+            saved_values = schedules[key][1]
+            saved_values[8] = min(saved_values[8], values[8])
+            saved_values[9] = max(saved_values[9], values[9])
+
+    return list(schedules.values()), skipped
+
+
+def backfill_uoa_activity_ranges(connection, events):
+    """Repair only legacy rows exactly matching the feed; keep all IDs/data."""
+    schedules, skipped = prepare_uoa_activity_ranges(events)
+    ranges = {tuple(values[:8]): values[8:] for _, values in schedules}
+    updated = 0
+    unmatched_ids = []
+    with connection:
+        for activity in get_all_activities(connection):
+            if activity[2] != "University" or activity[4] != "weekly":
+                continue
+            if activity[9] is not None or activity[10] is not None:
+                continue
+            bounds = ranges.get(tuple(activity[1:9]))
+            if bounds is None:
+                unmatched_ids.append(activity[0])
+                continue
+            updated += backfill_activity_date_range(connection, activity[0], *bounds)
+    return {"updated": updated, "unmatched_ids": unmatched_ids, "skipped": skipped}
+
+
+def import_uoa_timetable_to_activities(connection, events):
+    """Insert bounded weekly schedules using the existing activity function."""
+    schedules, skipped = prepare_uoa_activity_ranges(events)
+    for columns, values in schedules:
         add_activity(connection, columns, values)
-        imported += 1
+    imported = len(schedules)
 
     print(f"Imported {imported} weekly activities; skipped {len(skipped)} invalid events.")
     return {"imported": imported, "skipped": skipped}

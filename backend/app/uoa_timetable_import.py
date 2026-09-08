@@ -3,9 +3,10 @@ import argparse
 import re
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv, set_key
 
 if __package__:
     from .ical_import import get_ical_events
@@ -21,15 +22,53 @@ UOA_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 AUCKLAND_TIMEZONE = ZoneInfo("Pacific/Auckland")
 
 
-def get_uoa_timetable_events():
+def is_uoa_timetable_configured():
     load_dotenv(UOA_ENV_FILE)
-    feed_url = os.getenv("UOA_TIMETABLE_URL", "").strip()
+    return bool(os.getenv("UOA_TIMETABLE_URL", "").strip())
+
+
+def validate_uoa_timetable_url(feed_url):
+    feed_url = feed_url.strip()
+    message = "Enter a valid HTTP, HTTPS or webcal UoA timetable subscription URL."
+    try:
+        url = urlsplit(feed_url)
+        valid = (
+            url.scheme in {"http", "https", "webcal"}
+            and url.hostname
+            and not url.username
+            and not url.password
+            and not url.fragment
+            and not any(character.isspace() for character in feed_url)
+        )
+        url.port  # Reject invalid ports without including the URL in an error.
+    except ValueError:
+        raise ValueError(message) from None
+    if not valid:
+        raise ValueError(message)
+    return feed_url
+
+
+def save_uoa_timetable_url(feed_url):
+    feed_url = validate_uoa_timetable_url(feed_url)
+    try:
+        set_key(UOA_ENV_FILE, "UOA_TIMETABLE_URL", feed_url)
+        UOA_ENV_FILE.chmod(0o600)
+    except OSError:
+        raise RuntimeError("Could not save the UoA timetable configuration.") from None
+    os.environ["UOA_TIMETABLE_URL"] = feed_url
+
+
+def get_uoa_timetable_events(feed_url=None):
+    load_dotenv(UOA_ENV_FILE)
+    if feed_url is None:
+        feed_url = os.getenv("UOA_TIMETABLE_URL", "").strip()
 
     if not feed_url:
         raise RuntimeError(
             "UOA_TIMETABLE_URL is missing. Add it to the project-root .env file."
         )
 
+    feed_url = validate_uoa_timetable_url(feed_url)
     return get_ical_events(feed_url, include_description=True)
 
 
@@ -122,7 +161,7 @@ if __name__ == "__main__":
 
     try:
         events = get_uoa_timetable_events()
-    except RuntimeError as error:
+    except (RuntimeError, ValueError) as error:
         print(f"UoA timetable import failed: {error}")
         raise SystemExit(1)
 

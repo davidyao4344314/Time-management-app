@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import UoaTimetableImport from '../components/UoaTimetableImport'
 import './Calendar.css'
 
 const dayNames = [
@@ -328,6 +329,7 @@ function Calendar() {
     <main className="page">
       <div className="calendar-heading-row">
         <h2>Calendar</h2>
+        <div className="calendar-import-actions">
         <button
           disabled={isCheckingCanvas || isImportingCanvas}
           onClick={handleCanvasImportClick}
@@ -337,6 +339,11 @@ function Calendar() {
             ? 'Importing from Canvas...'
             : isCheckingCanvas ? 'Checking...' : 'Import from Canvas'}
         </button>
+        <UoaTimetableImport onImported={async () => {
+          setActivities(await fetchWeeklyActivities())
+          setError('')
+        }} />
+        </div>
       </div>
 
       {!isCanvasModalOpen && canvasMessage && <p role="status">{canvasMessage}</p>}

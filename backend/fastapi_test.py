@@ -37,6 +37,12 @@ from backend.app.exams import (
     get_exam_name_by_id,
     search_exams_by_name,
 )
+from backend.app.uoa_timetable_import import (
+    get_uoa_timetable_events,
+    import_uoa_timetable_to_activities,
+    is_uoa_timetable_configured,
+    save_uoa_timetable_url,
+)
 
 app = FastAPI()
 
@@ -97,6 +103,73 @@ def import_canvas_calendar(import_request: CanvasImportRequest):
             connection.close()
 
     return {"message": "Canvas import completed."}
+
+
+@app.get("/uoa/status")
+def uoa_status():
+    return {"configured": is_uoa_timetable_configured()}
+
+
+class UoaImportRequest(BaseModel):
+    timetable_url: SecretStr | None = None
+
+
+@app.post("/uoa/import")
+def import_uoa_timetable(import_request: UoaImportRequest):
+    timetable_url = (
+        import_request.timetable_url.get_secret_value()
+        if import_request.timetable_url is not None
+        else None
+    )
+    if timetable_url is None and not is_uoa_timetable_configured():
+        raise HTTPException(status_code=400, detail="Enter your UoA timetable subscription URL first.")
+
+    try:
+        events = get_uoa_timetable_events(timetable_url)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail="Enter a valid HTTP, HTTPS or webcal UoA timetable subscription URL.",
+        ) from None
+    except (RuntimeError, TypeError, AttributeError):
+        raise HTTPException(
+            status_code=502,
+            detail="Could not download or read the UoA timetable. Check your subscription URL and try again.",
+        ) from None
+
+    if timetable_url is not None:
+        try:
+            save_uoa_timetable_url(timetable_url)
+        except RuntimeError:
+            raise HTTPException(
+                status_code=500,
+                detail="Could not save the UoA timetable configuration. Check local file permissions.",
+            ) from None
+
+    connection = None
+    try:
+        connection = create_connection()
+        result = import_uoa_timetable_to_activities(connection, events)
+    except (ValueError, SQLiteError):
+        raise HTTPException(
+            status_code=500,
+            detail="Could not save all timetable classes. Check the database; some classes may already have been saved.",
+        ) from None
+    finally:
+        if connection is not None:
+            connection.close()
+
+    if result["imported"] == 0 and result["skipped"]:
+        raise HTTPException(
+            status_code=422,
+            detail="No classes could be imported. The timetable events are missing valid names or start/end times.",
+        )
+
+    return {
+        "message": "UoA timetable imported successfully.",
+        "imported": result["imported"],
+        "skipped": len(result["skipped"]),
+    }
 
 
 class MoveActivityRequest(BaseModel):

@@ -1,8 +1,22 @@
 .calendar-heading-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
+}
+
+.calendar-import-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: 100%;
+}
+
+.timetable-import-message {
+  flex-basis: 100%;
+  margin: 0.5rem 0 0;
 }
 
 .calendar-heading-row h2 {

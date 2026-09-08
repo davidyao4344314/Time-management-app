@@ -105,6 +105,25 @@ def delete_activity(connection, activity_id):
 
     connection.commit()
 
+def remove_duplicate_activities(connection):
+    """Keep the lowest ID for each identical set of activity fields."""
+    # GROUP BY treats matching NULL fields as part of the same group.
+    # IDs choose which copy survives, but are not compared as activity data.
+    with connection:
+        cursor = connection.execute("""
+            DELETE FROM activities
+            WHERE id NOT IN (
+                SELECT MIN(id)
+                FROM activities
+                GROUP BY name, category, subject, activity_type,
+                         date, weekday, start_time, end_time
+            )
+        """)
+        number_removed = cursor.rowcount
+
+    return number_removed
+
+
 def edit_activity(connection, activity_id, column_name, new_value):
     sql = f"""
         UPDATE activities

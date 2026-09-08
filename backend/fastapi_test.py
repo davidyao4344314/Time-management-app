@@ -14,6 +14,7 @@ from backend.app.activities import (
     get_activity_name_by_id,
     get_all_activities,
     move_activity,
+    remove_duplicate_activities,
 )
 from backend.app.database import create_connection
 from backend.app.calender import (
@@ -556,6 +557,24 @@ def create_activity(activity_request: AddActivityRequest):
         connection.close()
 
     return activity_to_dict(created_activity)
+
+
+@app.post("/activities/remove-duplicates")
+def clear_duplicate_activities():
+    connection = None
+    try:
+        connection = create_connection()
+        number_removed = remove_duplicate_activities(connection)
+    except SQLiteError:
+        raise HTTPException(
+            status_code=500,
+            detail="Could not remove duplicate activities. Please try again.",
+        ) from None
+    finally:
+        if connection is not None:
+            connection.close()
+
+    return {"number_removed": number_removed}
 
 
 @app.delete("/activities/all")

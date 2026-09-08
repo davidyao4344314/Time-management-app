@@ -172,6 +172,10 @@ function Calendar() {
   const [canvasMessage, setCanvasMessage] = useState('')
   const [isImportingCanvas, setIsImportingCanvas] = useState(false)
   const [canvasError, setCanvasError] = useState('')
+  const [isClearDuplicatesOpen, setIsClearDuplicatesOpen] = useState(false)
+  const [isRemovingDuplicates, setIsRemovingDuplicates] = useState(false)
+  const [duplicateMessage, setDuplicateMessage] = useState('')
+  const [duplicateError, setDuplicateError] = useState('')
 
   useEffect(() => {
     const controller = new AbortController()
@@ -285,6 +289,39 @@ function Calendar() {
     setCanvasError('')
   }
 
+  async function handleClearDuplicates() {
+    if (isRemovingDuplicates) return
+    setIsRemovingDuplicates(true)
+    setDuplicateMessage('Removing duplicate activities...')
+    setDuplicateError('')
+
+    try {
+      const response = await fetch('/api/activities/remove-duplicates', { method: 'POST' })
+      const result = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        throw new Error(typeof result.detail === 'string'
+          ? result.detail : 'Could not remove duplicate activities. Please try again.')
+      }
+
+      setIsClearDuplicatesOpen(false)
+      setDuplicateMessage(`Removed ${result.number_removed} duplicate activities.`)
+      try {
+        setActivities(await fetchWeeklyActivities())
+        setError('')
+        // The Activities page also refetches when opened through navigation.
+      } catch {
+        setDuplicateError('Duplicates were removed, but the calendar could not refresh. Reload the page to see the changes.')
+      }
+    } catch (requestError) {
+      setDuplicateMessage('')
+      setDuplicateError(requestError instanceof TypeError
+        ? 'Could not reach the backend. Check that it is running.'
+        : requestError.message)
+    } finally {
+      setIsRemovingDuplicates(false)
+    }
+  }
+
   async function handleDrop(event, destinationDay) {
     event.preventDefault()
 
@@ -343,11 +380,50 @@ function Calendar() {
           setActivities(await fetchWeeklyActivities())
           setError('')
         }} />
+        <button
+          type="button"
+          disabled={isRemovingDuplicates}
+          onClick={() => {
+            setDuplicateMessage('')
+            setDuplicateError('')
+            setIsClearDuplicatesOpen(true)
+          }}
+        >
+          {isRemovingDuplicates ? 'Removing duplicate activities...' : 'Clear Duplicate Activities'}
+        </button>
         </div>
       </div>
 
       {!isCanvasModalOpen && canvasMessage && <p role="status">{canvasMessage}</p>}
       {!isCanvasModalOpen && canvasError && <p role="alert">{canvasError}</p>}
+
+      {!isClearDuplicatesOpen && duplicateMessage && <p role="status">{duplicateMessage}</p>}
+      {!isClearDuplicatesOpen && duplicateError && <p role="alert">{duplicateError}</p>}
+
+      {isClearDuplicatesOpen && (
+        <div className="canvas-modal-overlay">
+          <section
+            className="canvas-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="clear-duplicates-heading"
+            aria-describedby="clear-duplicates-description"
+          >
+            <h3 id="clear-duplicates-heading">Remove duplicate activities?</h3>
+            <p id="clear-duplicates-description">One copy of each activity will be kept. Extra copies will be permanently deleted.</p>
+            {duplicateMessage && <p role="status">{duplicateMessage}</p>}
+            {duplicateError && <p role="alert">{duplicateError}</p>}
+            <div className="canvas-modal-actions">
+              <button type="button" disabled={isRemovingDuplicates} onClick={() => setIsClearDuplicatesOpen(false)}>
+                Cancel
+              </button>
+              <button type="button" disabled={isRemovingDuplicates} onClick={handleClearDuplicates}>
+                {isRemovingDuplicates ? 'Removing duplicate activities...' : 'Clear Duplicates'}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
 
       {isCanvasModalOpen && (
         <div className="canvas-modal-overlay">

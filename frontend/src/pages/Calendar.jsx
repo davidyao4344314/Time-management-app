@@ -68,7 +68,10 @@ function formatWeeklyActivities(data) {
     calendarId: `${activity.event_type === 'exam' ? 'exam' : 'activity'}-${activity.id}-${activity.calendar_date}`,
     eventType: activity.event_type === 'exam' ? 'exam' : 'activity',
     id: activity.id,
+    activityId: activity.activity_id ?? activity.id,
     name: activity.name,
+    subject: activity.subject,
+    category: activity.category,
     activityType: activity.activity_type,
     calendarDate: activity.calendar_date,
     startTime: activity.start_time,
@@ -136,10 +139,57 @@ function CalendarActivity({ activity, onDragStart, untimedIndex }) {
   )
 }
 
-function CalendarDay({ day, activities, onDragStart, onDrop }) {
-  const orderedActivities = [...activities].sort((first, second) =>
+function mergeAdjacentActivities(activities) {
+  const groups = new Map()
+  const displayed = []
+  const validTime = /^(?:[01]\d|2[0-3]):[0-5]\d$/
+
+  for (const activity of activities) {
+    // Untimed, incomplete and invalid ranges retain their existing display.
+    if (!activity.calendarDate
+      || !validTime.test(activity.startTime)
+      || !validTime.test(activity.endTime)
+      || activity.startTime >= activity.endTime) {
+      displayed.push({ ...activity })
+      continue
+    }
+
+    const originalId = activity.activityId ?? activity.id
+    const identity = originalId != null
+      ? ['id', originalId]
+      : ['fields', activity.name, activity.subject, activity.category, activity.activityType]
+    if (originalId == null && !activity.name) {
+      displayed.push({ ...activity })
+      continue
+    }
+    // Exam IDs and activity IDs belong to separate tables.
+    const key = JSON.stringify([activity.calendarDate, activity.eventType, ...identity])
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key).push(activity)
+  }
+
+  for (const group of groups.values()) {
+    group.sort((first, second) => first.startTime.localeCompare(second.startTime)
+      || first.endTime.localeCompare(second.endTime))
+    let previous = null
+    for (const activity of group) {
+      if (previous && previous.endTime === activity.startTime) {
+        previous.endTime = activity.endTime
+      } else {
+        // Only change display copies, never the fetched occurrences.
+        previous = { ...activity }
+        displayed.push(previous)
+      }
+    }
+  }
+
+  return displayed.sort((first, second) =>
     (first.startTime || '').localeCompare(second.startTime || ''),
   )
+}
+
+function CalendarDay({ day, activities, onDragStart, onDrop }) {
+  const orderedActivities = mergeAdjacentActivities(activities)
 
   return (
     <section
@@ -151,7 +201,7 @@ function CalendarDay({ day, activities, onDragStart, onDrop }) {
       {orderedActivities.map((activity, index) => (
         <CalendarActivity
           activity={activity}
-          key={activity.calendarId}
+          key={`${activity.calendarId}-${activity.startTime}-${activity.endTime}-${index}`}
           onDragStart={onDragStart}
           untimedIndex={index}
         />

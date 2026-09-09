@@ -166,14 +166,24 @@
   min-height: 1.75rem;
   padding: 0.35rem 0.5rem;
   overflow: hidden;
-  border: 1px solid #9b9ac0;
-  border-left: 0.25rem solid #11104f;
+  border: 1px solid #93b4e8;
+  border-left: 0.25rem solid #1d4ed8;
   border-radius: 0.25rem;
-  background: #ffffff;
+  background: #dbeafe;
+  color: #172554;
   cursor: grab;
 }
 
-.calendar-activity:active {
+/* Blue is the default, including unknown event types. */
+.calendar-activity[data-event-type='exam'] {
+  border-color: #86b99a;
+  border-left-color: #15803d;
+  background: #dcfce7;
+  color: #14532d;
+  cursor: default;
+}
+
+.calendar-activity[draggable='true']:active {
   cursor: grabbing;
 }
 
@@ -188,6 +198,6 @@
 
 .calendar-activity p {
   margin-top: 0.125rem;
-  color: #555555;
+  color: inherit;
   font-size: 0.75rem;
 }

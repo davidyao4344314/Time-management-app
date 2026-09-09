@@ -71,7 +71,8 @@ function getInitialDays() {
 
 function formatWeeklyActivities(data) {
   return data.map((activity) => ({
-    calendarId: `${activity.id}-${activity.calendar_date}`,
+    calendarId: `${activity.event_type === 'exam' ? 'exam' : 'activity'}-${activity.id}-${activity.calendar_date}`,
+    eventType: activity.event_type === 'exam' ? 'exam' : 'activity',
     id: activity.id,
     name: activity.name,
     activityType: activity.activity_type,
@@ -85,7 +86,7 @@ async function fetchActivitiesForDays(days, signal) {
   // Fetch occurrences resolved by Python, one seven-day batch at a time.
   const weekStarts = days.filter((_, index) => index % 7 === 0)
   const weeks = await Promise.all(weekStarts.map(async (day) => {
-    const response = await fetch(`/api/activities/week?week_start=${day.date}`, { signal })
+    const response = await fetch(`/api/activities/week?week_start=${day.date}&include_exams=true`, { signal })
     if (!response.ok) throw new Error('The server could not load the calendar activities.')
     return response.json()
   }))
@@ -135,7 +136,8 @@ function CalendarActivity({ activity, onDragStart, untimedIndex }) {
   return (
     <article
       className="calendar-activity"
-      draggable
+      data-event-type={activity.eventType}
+      draggable={activity.eventType !== 'exam'}
       onDragStart={(event) => onDragStart(event, activity.calendarId)}
       style={position}
     >
@@ -409,7 +411,7 @@ function Calendar() {
       (calendarActivity) => calendarActivity.calendarId === calendarId,
     )
 
-    if (!activity) {
+    if (!activity || activity.eventType === 'exam') {
       return
     }
 

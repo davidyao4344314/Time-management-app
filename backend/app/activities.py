@@ -33,6 +33,22 @@ def get_user_values(columns):
         values.append(user_value)
 
     return values
+def activity_exists(connection, columns, values):
+    """Match converted activity data, including NULLs and active date ranges."""
+    activity = dict(zip(columns, values))
+    fields = (
+        "name", "category", "subject", "activity_type", "date", "weekday",
+        "start_time", "end_time", "active_start_date", "active_end_date",
+    )
+    # Field names are fixed here, never taken from user input. IS matches NULL.
+    conditions = " AND ".join(f"{field} IS ?" for field in fields)
+    row = connection.execute(
+        f"SELECT 1 FROM activities WHERE {conditions} LIMIT 1",
+        tuple(activity.get(field) for field in fields),
+    ).fetchone()
+    return row is not None
+
+
 def add_activity(connection, columns, values):
     column_names = ", ".join(columns)
     placeholders = ", ".join(["?"] * len(columns))

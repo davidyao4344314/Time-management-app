@@ -1,3 +1,16 @@
+def exam_exists(connection, columns, values):
+    """Match all exam data fields, not the unique row ID."""
+    exam = dict(zip(columns, values))
+    fields = ("name", "category", "subject", "date", "start_time", "end_time")
+    # IS treats two NULL values as equal, unlike =.
+    conditions = " AND ".join(f"{field} IS ?" for field in fields)
+    row = connection.execute(
+        f"SELECT 1 FROM exams WHERE {conditions} LIMIT 1",
+        tuple(exam.get(field) for field in fields),
+    ).fetchone()
+    return row is not None
+
+
 def get_all_exams(connection):
     cursor = connection.execute("SELECT * FROM exams")
     return cursor.fetchall()

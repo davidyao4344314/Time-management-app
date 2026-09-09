@@ -10,11 +10,11 @@ from dotenv import load_dotenv, set_key
 
 if __package__:
     from .ical_import import get_ical_events
-    from .activities import add_activity, backfill_activity_date_range, get_all_activities
+    from .activities import activity_exists, add_activity, backfill_activity_date_range, get_all_activities
     from .database import create_connection
 else:
     from ical_import import get_ical_events
-    from activities import add_activity, backfill_activity_date_range, get_all_activities
+    from activities import activity_exists, add_activity, backfill_activity_date_range, get_all_activities
     from database import create_connection
 
 
@@ -190,12 +190,18 @@ def backfill_uoa_activity_ranges(connection, events):
 def import_uoa_timetable_to_activities(connection, events):
     """Insert bounded weekly schedules using the existing activity function."""
     schedules, skipped = prepare_uoa_activity_ranges(events)
+    imported = 0
+    duplicates_skipped = 0
     for columns, values in schedules:
+        if activity_exists(connection, columns, values):
+            duplicates_skipped += 1
+            continue
         add_activity(connection, columns, values)
-    imported = len(schedules)
+        imported += 1
 
     print(f"Imported {imported} weekly activities; skipped {len(skipped)} invalid events.")
-    return {"imported": imported, "skipped": skipped}
+    print(f"Skipped {duplicates_skipped} duplicate timetable activities.")
+    return {"imported": imported, "skipped": skipped, "duplicates_skipped": duplicates_skipped}
 
 
 if __name__ == "__main__":

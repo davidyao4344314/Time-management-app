@@ -11,12 +11,12 @@ else:
     from ical_import import get_ical_events
 
 try:
-    from backend.app.activities import add_activity
-    from backend.app.exams import add_exam
+    from backend.app.activities import activity_exists, add_activity
+    from backend.app.exams import add_exam, exam_exists
 except ModuleNotFoundError:
     # Keep direct execution working: python backend/app/canvas_import.py
-    from activities import add_activity
-    from exams import add_exam
+    from activities import activity_exists, add_activity
+    from exams import add_exam, exam_exists
 
 
 CANVAS_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
@@ -200,18 +200,30 @@ def classify_canvas_event(event):
     return "unknown"
 
 def sort_out_canvas_events(connection, events):
+    imported = 0
+    duplicates_skipped = 0
     for event in events:
         event_type = classify_canvas_event(event)
 
         if event_type == "exam":
             columns, values = convert_canvas_event_to_exam(event)
             check_canvas_event_matches_schema(event_type, columns, values)
+            if exam_exists(connection, columns, values):
+                duplicates_skipped += 1
+                continue
             add_exam(connection, columns, values)
 
         elif event_type == "activity":
             columns, values = convert_canvas_event_to_activity(event)
             check_canvas_event_matches_schema(event_type, columns, values)
+            if activity_exists(connection, columns, values):
+                duplicates_skipped += 1
+                continue
             add_activity(connection, columns, values)
 
         else:
             continue
+        imported += 1
+
+    print(f"Imported {imported} Canvas events; skipped {duplicates_skipped} duplicates.")
+    return {"imported": imported, "duplicates_skipped": duplicates_skipped}

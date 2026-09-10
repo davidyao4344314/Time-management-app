@@ -121,6 +121,7 @@ def convert_uoa_event_to_activity(event):
         "end_time",
         "active_start_date",
         "active_end_date",
+        "source",
     ]
     values = [
         name,
@@ -133,6 +134,7 @@ def convert_uoa_event_to_activity(event):
         end_time,
         start.date().isoformat(),
         end.date().isoformat(),
+        "UoA",
     ]
     return columns, values
 
@@ -170,7 +172,7 @@ def prepare_uoa_activity_ranges(events):
 def backfill_uoa_activity_ranges(connection, events):
     """Repair only legacy rows exactly matching the feed; keep all IDs/data."""
     schedules, skipped = prepare_uoa_activity_ranges(events)
-    ranges = {tuple(values[:8]): values[8:] for _, values in schedules}
+    ranges = {tuple(values[:8]): values[8:10] for _, values in schedules}
     updated = 0
     unmatched_ids = []
     with connection:

@@ -196,6 +196,7 @@ def get_week_activities(connection, week_start=None):
                 "name": activity[1],
                 "category": activity[2],
                 "subject": activity[3],
+                "source": activity[11] if len(activity) > 11 else "Manual",
                 "activity_type": activity_type.strip().lower(),
                 "calendar_date": str(calendar_date),
                 "start_time": start_time.strip()

@@ -15,7 +15,7 @@ def get_clomuns(connection, table_name):
     for column in table_data:
         comumn_name = column[1]
 
-        if comumn_name != "id":
+        if comumn_name not in {"id", "source"}:
             columns.append(comumn_name)
     return columns
 """

@@ -9,7 +9,8 @@ CREATE TABLE IF NOT EXISTS activities(
     start_time TEXT,
     end_time TEXT,
     active_start_date TEXT,
-    active_end_date TEXT
+    active_end_date TEXT,
+    source TEXT NOT NULL DEFAULT 'Manual'
 );
 CREATE TABLE IF NOT EXISTS exams(
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -18,5 +19,6 @@ CREATE TABLE IF NOT EXISTS exams(
     subject TEXT,
     date TEXT NOT NULL,
     start_time TEXT,
-    end_time TEXT
+    end_time TEXT,
+    source TEXT NOT NULL DEFAULT 'Manual'
 );

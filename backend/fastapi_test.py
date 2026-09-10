@@ -226,6 +226,7 @@ def activity_to_dict(activity):
         "end_time": activity[8],
         "active_start_date": activity[9],
         "active_end_date": activity[10],
+        "source": activity[11],
     }
 
 
@@ -238,6 +239,7 @@ def exam_to_dict(exam):
         "date": exam[4],
         "start_time": exam[5],
         "end_time": exam[6],
+        "source": exam[7],
     }
 
 

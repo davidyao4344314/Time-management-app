@@ -49,7 +49,7 @@ class TimetableDateTests(unittest.TestCase):
         schedules, skipped = prepare_uoa_activity_ranges(events)
         self.assertEqual(skipped, [])
         self.assertEqual(len(schedules), 1)
-        self.assertEqual(schedules[0][1][-2:], ["2026-03-02", "2026-06-01"])
+        self.assertEqual(schedules[0][1][8:10], ["2026-03-02", "2026-06-01"])
         result = import_uoa_timetable_to_activities(self.connection, events)
         self.assertEqual(result["imported"], 1)
 
@@ -74,7 +74,7 @@ class TimetableDateTests(unittest.TestCase):
         import_uoa_timetable_to_activities(self.connection, events)
         columns, values = convert_uoa_event_to_activity(class_event("2026-03-02", "Manual weekly"))
         values[1] = "Study"
-        values[-2:] = [None, None]
+        values[8:10] = [None, None]
         add_activity(self.connection, columns, values)
         for day, expected in [(date(2026, 3, 16), "First semester class"), (date(2026, 8, 3), "Second semester class")]:
             with patch.object(calender, "get_current_date", return_value=day):
@@ -84,7 +84,7 @@ class TimetableDateTests(unittest.TestCase):
 
     def test_backfill_preserves_ids_and_nonmatching_manual_rows(self):
         columns, values = convert_uoa_event_to_activity(class_event("2026-03-02"))
-        values[-2:] = [None, None]
+        values[8:10] = [None, None]
         add_activity(self.connection, columns, values)
         manual = values.copy()
         manual[0] = "Manual university activity"
@@ -95,8 +95,8 @@ class TimetableDateTests(unittest.TestCase):
         self.assertEqual(result["updated"], 1)
         self.assertEqual(result["unmatched_ids"], [2])
         self.assertEqual([row[:9] for row in before], [row[:9] for row in after])
-        self.assertEqual(after[0][-2:], ("2026-03-02", "2026-06-01"))
-        self.assertEqual(after[1][-2:], (None, None))
+        self.assertEqual(after[0][9:11], ("2026-03-02", "2026-06-01"))
+        self.assertEqual(after[1][9:11], (None, None))
         self.assertEqual(backfill_uoa_activity_ranges(self.connection, [class_event("2026-03-02")])["updated"], 0)
 
     def test_cleanup_does_not_merge_different_date_ranges(self):
@@ -111,6 +111,7 @@ class TimetableDateTests(unittest.TestCase):
             connection = sqlite3.connect(path)
             # The old schema, including its older NOT NULL time constraint.
             schema = database.sql_file.read_text().replace(",\n    active_start_date TEXT,\n    active_end_date TEXT", "")
+            schema = schema.replace(",\n    source TEXT NOT NULL DEFAULT 'Manual'", "")
             schema = schema.replace("start_time TEXT", "start_time TEXT NOT NULL").replace("end_time TEXT", "end_time TEXT NOT NULL")
             connection.executescript(schema)
             connection.execute("INSERT INTO activities (id,name,category,activity_type,weekday,start_time,end_time) VALUES (20,'Manual','Study','weekly','Monday','10:00','11:00')")
@@ -122,7 +123,7 @@ class TimetableDateTests(unittest.TestCase):
                     connection = database.create_connection()
                     row = connection.execute("SELECT * FROM activities").fetchone()
                     self.assertEqual(row[:9], old_row)
-                    self.assertEqual(row[9:], (None, None))
+                    self.assertEqual(row[9:], (None, None, "Manual"))
                     connection.close()
 
 

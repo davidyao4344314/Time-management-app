@@ -35,6 +35,28 @@ def add_activity_date_ranges(connection):
                 connection.execute(f"ALTER TABLE activities ADD COLUMN {name} TEXT")
 
 
+def add_record_sources(connection):
+    """Append source once, retaining every existing row and column position."""
+    with connection:
+        for table in ("activities", "exams"):
+            columns = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
+            if not columns:
+                continue
+            if "source" not in columns:
+                connection.execute(f"ALTER TABLE {table} ADD COLUMN source TEXT NOT NULL DEFAULT 'Manual'")
+                # These category values were written by the legacy converters.
+                # Apply inference ONLY during migration, not to new Manual rows.
+                connection.execute(f"UPDATE {table} SET source = 'Canvas' WHERE category = 'Canvas'")
+                if table == "activities":
+                    connection.execute("""
+                        UPDATE activities SET source = 'UoA'
+                        WHERE category = 'University' AND activity_type = 'weekly'
+                          AND active_start_date IS NOT NULL AND active_end_date IS NOT NULL
+                    """)
+            else:
+                connection.execute(f"UPDATE {table} SET source = 'Manual' WHERE source IS NULL OR trim(source) = ''")
+
+
 def times_are_required(connection, table_name):
     columns = connection.execute(f"PRAGMA table_info({table_name})").fetchall()
 
@@ -49,7 +71,7 @@ def allow_null_times(connection):
         "activities": {
             "columns": (
                 "id, name, category, subject, activity_type, date, weekday, "
-                "start_time, end_time, active_start_date, active_end_date"
+                "start_time, end_time, active_start_date, active_end_date, source"
             ),
             "create_sql": """
                 CREATE TABLE activities_new(
@@ -64,13 +86,14 @@ def allow_null_times(connection):
                     start_time TEXT,
                     end_time TEXT,
                     active_start_date TEXT,
-                    active_end_date TEXT
+                    active_end_date TEXT,
+                    source TEXT NOT NULL DEFAULT 'Manual'
                 )
             """,
         },
         "exams": {
             "columns": (
-                "id, name, category, subject, date, start_time, end_time"
+                "id, name, category, subject, date, start_time, end_time, source"
             ),
             "create_sql": """
                 CREATE TABLE exams_new(
@@ -80,7 +103,8 @@ def allow_null_times(connection):
                     subject TEXT,
                     date TEXT NOT NULL,
                     start_time TEXT,
-                    end_time TEXT
+                    end_time TEXT,
+                    source TEXT NOT NULL DEFAULT 'Manual'
                 )
             """,
         },
@@ -115,6 +139,7 @@ def create_connection():
 
     connection = sqlite3.connect(db_file)
     add_activity_date_ranges(connection)
+    add_record_sources(connection)
     allow_null_times(connection)
 
     return connection

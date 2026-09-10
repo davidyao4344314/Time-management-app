@@ -43,7 +43,7 @@ class ImportDuplicateTests(unittest.TestCase):
                 self.assertTrue(exists(self.connection, columns[::-1], values[::-1]))
                 self.assertTrue(exists(self.connection, ["id", *columns], [900, *values]))
                 for index in range(len(columns)):
-                    if columns[index] == "source":
+                    if columns[index] in {"source", "external_id"}:
                         continue  # Source metadata does not change existing duplicate rules.
                     changed = values.copy()
                     changed[index] = "different" if values[index] is not None else ""
@@ -60,7 +60,7 @@ class ImportDuplicateTests(unittest.TestCase):
         with patch.object(uoa_timetable_import, "add_activity") as add_activity:
             result = uoa_timetable_import.import_uoa_timetable_to_activities(self.connection, events[::-1] * 2)
             add_activity.assert_not_called()
-        self.assertEqual(result, {"imported": 0, "skipped": [], "duplicates_skipped": 1})
+        self.assertEqual(result, {"imported": 0, "skipped": [], "duplicates_skipped": 1, "mappings_added": 0})
         self.assertEqual(before, self.snapshot("activities"))
         columns, values = uoa_timetable_import.prepare_uoa_activity_ranges(events)[0][0]
         for index in (8, 9):

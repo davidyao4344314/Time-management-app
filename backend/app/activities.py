@@ -15,7 +15,7 @@ def get_clomuns(connection, table_name):
     for column in table_data:
         comumn_name = column[1]
 
-        if comumn_name not in {"id", "source"}:
+        if comumn_name not in {"id", "source", "external_id"}:
             columns.append(comumn_name)
     return columns
 """
@@ -33,7 +33,7 @@ def get_user_values(columns):
         values.append(user_value)
 
     return values
-def activity_exists(connection, columns, values):
+def find_equivalent_activity_id(connection, columns, values):
     """Match converted activity data, including NULLs and active date ranges."""
     activity = dict(zip(columns, values))
     fields = (
@@ -43,10 +43,28 @@ def activity_exists(connection, columns, values):
     # Field names are fixed here, never taken from user input. IS matches NULL.
     conditions = " AND ".join(f"{field} IS ?" for field in fields)
     row = connection.execute(
-        f"SELECT 1 FROM activities WHERE {conditions} LIMIT 1",
+        f"SELECT id FROM activities WHERE {conditions} ORDER BY id LIMIT 1",
         tuple(activity.get(field) for field in fields),
     ).fetchone()
-    return row is not None
+    return row[0] if row is not None else None
+
+
+def activity_exists(connection, columns, values):
+    return find_equivalent_activity_id(connection, columns, values) is not None
+
+
+def save_uoa_external_ids(connection, activity_id, external_ids):
+    """Link every UID to its grouped activity without repeating a mapping."""
+    added = 0
+    with connection:
+        for external_id in external_ids:
+            cursor = connection.execute(
+                """INSERT INTO uoa_activity_external_ids (activity_id, external_id)
+                   VALUES (?, ?) ON CONFLICT(activity_id, external_id) DO NOTHING""",
+                (activity_id, external_id),
+            )
+            added += cursor.rowcount
+    return added
 
 
 def add_activity(connection, columns, values):
@@ -58,8 +76,9 @@ def add_activity(connection, columns, values):
         VALUES ({placeholders})
     """
 
-    connection.execute(sql, values)
+    cursor = connection.execute(sql, values)
     connection.commit()
+    return cursor.lastrowid
 
 """
 print all the activities in the database

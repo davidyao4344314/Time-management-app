@@ -57,6 +57,24 @@ def add_record_sources(connection):
                 connection.execute(f"UPDATE {table} SET source = 'Manual' WHERE source IS NULL OR trim(source) = ''")
 
 
+def add_external_id_storage(connection):
+    """Keep old records intact; their new external_id remains NULL."""
+    with connection:
+        for table in ("activities", "exams"):
+            columns = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
+            if columns and "external_id" not in columns:
+                connection.execute(f"ALTER TABLE {table} ADD COLUMN external_id TEXT")
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS uoa_activity_external_ids(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                activity_id INTEGER NOT NULL,
+                external_id TEXT NOT NULL,
+                FOREIGN KEY(activity_id) REFERENCES activities(id) ON DELETE CASCADE,
+                UNIQUE(activity_id, external_id)
+            )
+        """)
+
+
 def times_are_required(connection, table_name):
     columns = connection.execute(f"PRAGMA table_info({table_name})").fetchall()
 
@@ -71,7 +89,7 @@ def allow_null_times(connection):
         "activities": {
             "columns": (
                 "id, name, category, subject, activity_type, date, weekday, "
-                "start_time, end_time, active_start_date, active_end_date, source"
+                "start_time, end_time, active_start_date, active_end_date, source, external_id"
             ),
             "create_sql": """
                 CREATE TABLE activities_new(
@@ -87,13 +105,14 @@ def allow_null_times(connection):
                     end_time TEXT,
                     active_start_date TEXT,
                     active_end_date TEXT,
-                    source TEXT NOT NULL DEFAULT 'Manual'
+                    source TEXT NOT NULL DEFAULT 'Manual',
+                    external_id TEXT
                 )
             """,
         },
         "exams": {
             "columns": (
-                "id, name, category, subject, date, start_time, end_time, source"
+                "id, name, category, subject, date, start_time, end_time, source, external_id"
             ),
             "create_sql": """
                 CREATE TABLE exams_new(
@@ -104,7 +123,8 @@ def allow_null_times(connection):
                     date TEXT NOT NULL,
                     start_time TEXT,
                     end_time TEXT,
-                    source TEXT NOT NULL DEFAULT 'Manual'
+                    source TEXT NOT NULL DEFAULT 'Manual',
+                    external_id TEXT
                 )
             """,
         },
@@ -140,7 +160,9 @@ def create_connection():
     connection = sqlite3.connect(db_file)
     add_activity_date_ranges(connection)
     add_record_sources(connection)
+    add_external_id_storage(connection)
     allow_null_times(connection)
+    connection.execute("PRAGMA foreign_keys = ON")
 
     return connection
 

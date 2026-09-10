@@ -10,11 +10,11 @@ from dotenv import load_dotenv, set_key
 
 if __package__:
     from .ical_import import get_ical_events
-    from .activities import activity_exists, add_activity, backfill_activity_date_range, get_all_activities
+    from .activities import add_activity, backfill_activity_date_range, find_equivalent_activity_id, get_all_activities, save_uoa_external_ids
     from .database import create_connection
 else:
     from ical_import import get_ical_events
-    from activities import activity_exists, add_activity, backfill_activity_date_range, get_all_activities
+    from activities import add_activity, backfill_activity_date_range, find_equivalent_activity_id, get_all_activities, save_uoa_external_ids
     from database import create_connection
 
 
@@ -122,6 +122,7 @@ def convert_uoa_event_to_activity(event):
         "active_start_date",
         "active_end_date",
         "source",
+        "external_id",
     ]
     values = [
         name,
@@ -135,17 +136,19 @@ def convert_uoa_event_to_activity(event):
         start.date().isoformat(),
         end.date().isoformat(),
         "UoA",
+        event.get("external_id"),
     ]
     return columns, values
 
 
-def prepare_uoa_activity_ranges(events):
+def prepare_uoa_activity_ranges(events, include_external_ids=False):
     """Combine dated occurrences of the same class into a bounded weekly row.
 
     DTSTART/DTEND describe one class, not an entire semester. The inspected
     UoA feed lists each occurrence separately, so use its first and last dates.
     """
     schedules = {}
+    external_ids = {}
     skipped = []
 
     for event_number, event in enumerate(events, start=1):
@@ -159,6 +162,12 @@ def prepare_uoa_activity_ranges(events):
 
         # Match the eight original fields, never semester labels or row IDs.
         key = tuple(values[:8])
+        external_id = values[columns.index("external_id")]
+        external_ids.setdefault(key, set())
+        if isinstance(external_id, str) and external_id.strip():
+            external_ids[key].add(external_id)
+        # The grouped row represents many UIDs, not an arbitrary first UID.
+        values[columns.index("external_id")] = None
         if key not in schedules:
             schedules[key] = (columns, values)
         else:
@@ -166,6 +175,8 @@ def prepare_uoa_activity_ranges(events):
             saved_values[8] = min(saved_values[8], values[8])
             saved_values[9] = max(saved_values[9], values[9])
 
+    if include_external_ids:
+        return list(schedules.values()), skipped, external_ids
     return list(schedules.values()), skipped
 
 
@@ -191,19 +202,23 @@ def backfill_uoa_activity_ranges(connection, events):
 
 def import_uoa_timetable_to_activities(connection, events):
     """Insert bounded weekly schedules using the existing activity function."""
-    schedules, skipped = prepare_uoa_activity_ranges(events)
+    schedules, skipped, external_ids = prepare_uoa_activity_ranges(events, include_external_ids=True)
     imported = 0
+    mappings_added = 0
     duplicates_skipped = 0
     for columns, values in schedules:
-        if activity_exists(connection, columns, values):
+        activity_id = find_equivalent_activity_id(connection, columns, values)
+        if activity_id is not None:
             duplicates_skipped += 1
-            continue
-        add_activity(connection, columns, values)
-        imported += 1
+        else:
+            activity_id = add_activity(connection, columns, values)
+            imported += 1
+        mappings_added += save_uoa_external_ids(connection, activity_id, external_ids[tuple(values[:8])])
 
     print(f"Imported {imported} weekly activities; skipped {len(skipped)} invalid events.")
     print(f"Skipped {duplicates_skipped} duplicate timetable activities.")
-    return {"imported": imported, "skipped": skipped, "duplicates_skipped": duplicates_skipped}
+    print(f"Added {mappings_added} UoA UID mappings.")
+    return {"imported": imported, "skipped": skipped, "duplicates_skipped": duplicates_skipped, "mappings_added": mappings_added}
 
 
 if __name__ == "__main__":

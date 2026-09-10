@@ -91,6 +91,7 @@ def convert_canvas_event_to_exam(event):
         "start_time",
         "end_time",
         "source",
+        "external_id",
     ]
     values = [
         event.get("name", "Untitled event"),
@@ -100,6 +101,7 @@ def convert_canvas_event_to_exam(event):
         start_time,
         end_time,
         "Canvas",
+        event.get("external_id"),
     ]
 
     return columns, values
@@ -118,6 +120,7 @@ def convert_canvas_event_to_activity(event):
         "start_time",
         "end_time",
         "source",
+        "external_id",
     ]
     values = [
         event.get("name", "Untitled event"),
@@ -129,6 +132,7 @@ def convert_canvas_event_to_activity(event):
         start_time,
         end_time,
         "Canvas",
+        event.get("external_id"),
     ]
 
     return columns, values

@@ -112,6 +112,8 @@ class TimetableDateTests(unittest.TestCase):
             # The old schema, including its older NOT NULL time constraint.
             schema = database.sql_file.read_text().replace(",\n    active_start_date TEXT,\n    active_end_date TEXT", "")
             schema = schema.replace(",\n    source TEXT NOT NULL DEFAULT 'Manual'", "")
+            schema = schema.replace(",\n    external_id TEXT", "")
+            schema = schema.split('CREATE TABLE IF NOT EXISTS uoa_activity_external_ids')[0]
             schema = schema.replace("start_time TEXT", "start_time TEXT NOT NULL").replace("end_time TEXT", "end_time TEXT NOT NULL")
             connection.executescript(schema)
             connection.execute("INSERT INTO activities (id,name,category,activity_type,weekday,start_time,end_time) VALUES (20,'Manual','Study','weekly','Monday','10:00','11:00')")
@@ -123,7 +125,7 @@ class TimetableDateTests(unittest.TestCase):
                     connection = database.create_connection()
                     row = connection.execute("SELECT * FROM activities").fetchone()
                     self.assertEqual(row[:9], old_row)
-                    self.assertEqual(row[9:], (None, None, "Manual"))
+                    self.assertEqual(row[9:], (None, None, "Manual", None))
                     connection.close()
 
 

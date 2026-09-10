@@ -19,6 +19,7 @@ from backend.app.activities import (
 from backend.app.database import create_connection
 from backend.app.calender import (
     check_activity_current,
+    get_current_and_next_activities,
     get_current_time,
     get_todays_activities,
     get_week_activities,
@@ -801,6 +802,19 @@ def todays_activities():
     connection.close()
 
     return [activity_to_dict(activity) for activity in activities]
+
+
+@app.get("/activities/current-next")
+def current_and_next_activities():
+    connection = create_connection()
+    try:
+        current, next_activity = get_current_and_next_activities(connection)
+        return {
+            "current": [activity_to_dict(activity) for activity in current] or None,
+            "next": activity_to_dict(next_activity) if next_activity is not None else None,
+        }
+    finally:
+        connection.close()
 
 
 @app.get("/activities/current")

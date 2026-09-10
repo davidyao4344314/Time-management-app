@@ -62,6 +62,7 @@ def get_todays_activities(connection):
 
 def check_activity_current(activities_today, current_time):
     current_activities = []
+    now = datetime.strptime(current_time, "%H:%M").time()
 
     for activity in activities_today:
         start_time = activity[7]
@@ -70,10 +71,38 @@ def check_activity_current(activities_today, current_time):
         if not is_valid_activity_time(start_time, end_time):
             continue
 
-        if start_time <= current_time < end_time:
+        start = datetime.strptime(start_time.strip(), "%H:%M").time()
+        end = datetime.strptime(end_time.strip(), "%H:%M").time()
+        if start <= now < end:
             current_activities.append(activity[0])
 
     return current_activities
+
+def get_current_and_next_activities(connection):
+    """Return all active activities and the next timed activity today only."""
+    activities_today = get_todays_activities(connection)
+    current_time = get_current_time()
+    current_ids = set(check_activity_current(activities_today, current_time))
+    current = [activity for activity in activities_today if activity[0] in current_ids]
+
+    now = datetime.strptime(current_time, "%H:%M").time()
+    upcoming = []
+    for activity in activities_today:
+        if not is_valid_activity_time(activity[7], activity[8]):
+            continue
+        start = datetime.strptime(activity[7].strip(), "%H:%M").time()
+        if start > now:
+            upcoming.append(activity)
+
+    next_activity = min(
+        upcoming,
+        key=lambda activity: (
+            datetime.strptime(activity[7].strip(), "%H:%M").time(),
+            activity[0],
+        ),
+        default=None,
+    )
+    return current, next_activity
 
 def get_current_week():
     today = get_current_date()

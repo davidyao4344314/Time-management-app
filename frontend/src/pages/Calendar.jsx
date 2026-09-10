@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import UoaTimetableImport from '../components/UoaTimetableImport'
+import ActivityEditModal from '../components/ActivityEditModal'
 import './Calendar.css'
 
 const dayNames = [
@@ -107,7 +108,9 @@ function formatTimeRange(startTime, endTime) {
   return `${startTime || 'No start time'} – ${endTime || 'No end time'}`
 }
 
-function CalendarActivity({ activity, onDragStart, untimedIndex }) {
+function CalendarActivity({ activity, onDragStart, onEdit, untimedIndex }) {
+  const wasDragged = useRef(false)
+  const canEdit = activity.eventType !== 'exam'
   const startMinutes = timeToMinutes(activity.startTime)
   const endMinutes = timeToMinutes(activity.endTime)
   const hasTimeRange = (
@@ -130,7 +133,23 @@ function CalendarActivity({ activity, onDragStart, untimedIndex }) {
       className="calendar-activity"
       data-event-type={activity.eventType}
       draggable={activity.eventType !== 'exam'}
-      onDragStart={(event) => onDragStart(event, activity.calendarId)}
+      role={canEdit ? 'button' : undefined}
+      tabIndex={canEdit ? 0 : undefined}
+      aria-label={canEdit ? `Edit ${activity.name}` : undefined}
+      onPointerDown={() => { wasDragged.current = false }}
+      onDragStart={(event) => {
+        wasDragged.current = true
+        onDragStart(event, activity.calendarId)
+      }}
+      onClick={() => {
+        if (canEdit && !wasDragged.current) onEdit(activity)
+      }}
+      onKeyDown={(event) => {
+        if (canEdit && (event.key === 'Enter' || event.key === ' ')) {
+          event.preventDefault()
+          onEdit(activity)
+        }
+      }}
       style={position}
     >
       <h4>{activity.name}</h4>
@@ -188,7 +207,7 @@ function mergeAdjacentActivities(activities) {
   )
 }
 
-function CalendarDay({ day, activities, onDragStart, onDrop }) {
+function CalendarDay({ day, activities, onDragStart, onDrop, onEdit }) {
   const orderedActivities = mergeAdjacentActivities(activities)
 
   return (
@@ -203,6 +222,7 @@ function CalendarDay({ day, activities, onDragStart, onDrop }) {
           activity={activity}
           key={`${activity.calendarId}-${activity.startTime}-${activity.endTime}-${index}`}
           onDragStart={onDragStart}
+          onEdit={onEdit}
           untimedIndex={index}
         />
       ))}
@@ -218,6 +238,11 @@ function Calendar() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState('')
   const [moveError, setMoveError] = useState('')
+  const [editingActivity, setEditingActivity] = useState(null)
+  const [isLoadingEdit, setIsLoadingEdit] = useState(false)
+  const [editError, setEditError] = useState('')
+  const [editMessage, setEditMessage] = useState('')
+  const editRequest = useRef(null)
   const [isCheckingCanvas, setIsCheckingCanvas] = useState(false)
   const [isCanvasModalOpen, setIsCanvasModalOpen] = useState(false)
   const [canvasUrl, setCanvasUrl] = useState('')
@@ -281,6 +306,46 @@ function Calendar() {
 
     return () => controller.abort()
   }, [selectedWeek])
+
+  useEffect(() => () => editRequest.current?.abort(), [])
+
+  async function openCalendarEdit(activity) {
+    if (activity.eventType === 'exam') return
+    editRequest.current?.abort()
+    const controller = new AbortController()
+    editRequest.current = controller
+    setIsLoadingEdit(true)
+    setEditError('')
+    setEditMessage('')
+    try {
+      // Fetch the original row: a merged display block may have different times.
+      const response = await fetch('/api/activities', { signal: controller.signal })
+      if (!response.ok) throw new Error('Could not load the activity for editing.')
+      const rows = await response.json()
+      if (controller.signal.aborted) return
+      const row = rows.find((item) => item.id === (activity.activityId ?? activity.id))
+      if (!row) throw new Error('This activity no longer exists. Refresh the Calendar.')
+      setEditingActivity({
+        id: row.id, name: row.name, category: row.category, subject: row.subject,
+        activityType: row.activity_type, date: row.date, weekday: row.weekday,
+        startTime: row.start_time, endTime: row.end_time, source: row.source,
+      })
+    } catch (requestError) {
+      if (!controller.signal.aborted) setEditError(requestError.message)
+    } finally {
+      if (!controller.signal.aborted) setIsLoadingEdit(false)
+    }
+  }
+
+  async function handleCalendarEditSaved() {
+    setEditMessage('Activity updated.')
+    try {
+      setActivities(await fetchWeeklyActivities())
+      setError('')
+    } catch {
+      setEditError('The edit was saved, but the calendar could not refresh. Reload the page.')
+    }
+  }
 
   function handleDragStart(event, calendarId) {
     event.dataTransfer.setData('text/plain', calendarId)
@@ -559,6 +624,13 @@ function Calendar() {
       {error && <p role="alert">{error}</p>}
 
       {moveError && <p role="alert">{moveError}</p>}
+      {isLoadingEdit && <p role="status">Loading activity for editing...</p>}
+      {editError && <p role="alert">{editError}</p>}
+      {editMessage && <p role="status">{editMessage}</p>}
+      {editingActivity && (
+        <ActivityEditModal key={editingActivity.id} activity={editingActivity}
+          onClose={() => setEditingActivity(null)} onSaved={handleCalendarEditSaved} />
+      )}
 
       {!isLoading && (
         <div className="calendar-scroll" key={selectedWeek} tabIndex={0} role="region" aria-label="Monday to Sunday calendar">
@@ -593,6 +665,7 @@ function Calendar() {
                 key={day.date}
                 onDragStart={handleDragStart}
                 onDrop={handleDrop}
+                onEdit={openCalendarEdit}
               />
             ))}
           </div>

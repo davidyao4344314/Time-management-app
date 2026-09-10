@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import './Activities.css'
+import ActivityEditModal from '../components/ActivityEditModal'
 
 const emptyActivityForm = {
   name: '',
@@ -18,27 +19,6 @@ const emptyDeleteForm = {
   activityName: '',
 }
 
-const editFieldLabels = {
-  name: 'Name',
-  category: 'Category',
-  subject: 'Subject',
-  activity_type: 'Activity type',
-  date: 'Date',
-  weekday: 'Weekday',
-  start_time: 'Start time',
-  end_time: 'End time',
-}
-
-const weekdays = [
-  'Monday',
-  'Tuesday',
-  'Wednesday',
-  'Thursday',
-  'Friday',
-  'Saturday',
-  'Sunday',
-]
-
 function formatTimeRange(startTime, endTime) {
   if (!startTime && !endTime) {
     return 'No time set'
@@ -47,45 +27,12 @@ function formatTimeRange(startTime, endTime) {
   return `${startTime || 'No start time'} – ${endTime || 'No end time'}`
 }
 
-function getEditableFields(activity) {
-  const fields = [
-    'name',
-    'category',
-    'subject',
-    'activity_type',
-    'start_time',
-    'end_time',
-  ]
-
-  if (activity.activityType === 'one_time') {
-    fields.splice(4, 0, 'date')
-  } else if (activity.activityType === 'weekly') {
-    fields.splice(4, 0, 'weekday')
-  }
-
-  return fields
-}
-
-function getActivityFieldValue(activity, columnName) {
-  const values = {
-    name: activity.name,
-    category: activity.category,
-    subject: activity.subject,
-    activity_type: activity.activityType,
-    date: activity.date,
-    weekday: activity.weekday,
-    start_time: activity.startTime,
-    end_time: activity.endTime,
-  }
-
-  return values[columnName] || ''
-}
-
 function formatActivities(data) {
   return data.map((activity) => ({
     id: activity.id,
     name: activity.name,
     category: activity.category,
+    source: activity.source,
     subject: activity.subject,
     activityType: activity.activity_type,
     date: activity.date,
@@ -207,10 +154,6 @@ function Activities() {
   const [searchError, setSearchError] = useState('')
   const [deletingSearchResultId, setDeletingSearchResultId] = useState(null)
   const [editingActivity, setEditingActivity] = useState(null)
-  const [editColumn, setEditColumn] = useState('name')
-  const [editValue, setEditValue] = useState('')
-  const [isSavingEdit, setIsSavingEdit] = useState(false)
-  const [editError, setEditError] = useState('')
 
   function updateActivityLists(activityData) {
     setAllActivities(activityData.allActivities)
@@ -321,29 +264,10 @@ function Activities() {
 
   function openEditForm(activity) {
     setEditingActivity(activity)
-    setEditColumn('name')
-    setEditValue(activity.name)
-    setEditError('')
   }
 
   function closeEditForm() {
     setEditingActivity(null)
-    setEditColumn('name')
-    setEditValue('')
-    setEditError('')
-  }
-
-  function handleEditColumnChange(event) {
-    const columnName = event.target.value
-    let currentValue = getActivityFieldValue(editingActivity, columnName)
-
-    if (columnName === 'weekday' && !currentValue) {
-      currentValue = 'Monday'
-    }
-
-    setEditColumn(columnName)
-    setEditValue(currentValue)
-    setEditError('')
   }
 
   async function handleSubmit(event) {
@@ -542,51 +466,18 @@ function Activities() {
     }
   }
 
-  async function handleEditSubmit(event) {
-    event.preventDefault()
-    setIsSavingEdit(true)
-    setEditError('')
-
+  async function handleEditSaved(updatedActivity, columnName) {
     try {
-      const response = await fetch(`/api/activities/${editingActivity.id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          activity_id: editingActivity.id,
-          column_name: editColumn,
-          new_value: editValue || null,
-        }),
-      })
-
-      if (!response.ok) {
-        const responseBody = await response.json()
-        const errorMessage = typeof responseBody.detail === 'string'
-          ? responseBody.detail
-          : 'Could not update the activity.'
-
-        throw new Error(errorMessage)
-      }
-
-      const updatedActivity = formatActivities([await response.json()])[0]
-      const nextSearchName = editColumn === 'name'
-        ? updatedActivity.name
-        : searchName.trim()
+      const nextSearchName = columnName === 'name' ? updatedActivity.name : searchName.trim()
       const [activityData, matches] = await Promise.all([
-        fetchActivityData(),
-        fetchActivitiesByName(nextSearchName),
+        fetchActivityData(), fetchActivitiesByName(nextSearchName),
       ])
-
       updateActivityLists(activityData)
       setSearchName(nextSearchName)
       setSearchResults(matches)
       setHasSearched(true)
-      closeEditForm()
-    } catch (requestError) {
-      setEditError(requestError.message)
-    } finally {
-      setIsSavingEdit(false)
+    } catch {
+      setSearchError('The edit was saved, but the lists could not refresh. Reload the page.')
     }
   }
 
@@ -956,85 +847,7 @@ function Activities() {
       )}
 
       {editingActivity && (
-        <div className="edit-activity-overlay">
-          <form
-            aria-labelledby="edit-activity-heading"
-            aria-modal="true"
-            className="add-activity-form edit-activity-form"
-            onSubmit={handleEditSubmit}
-            role="dialog"
-          >
-            <h3 id="edit-activity-heading">
-              Edit {editingActivity.name} (ID {editingActivity.id})
-            </h3>
-
-            <div className="add-activity-fields">
-              <label>
-                Field to edit
-                <select
-                  onChange={handleEditColumnChange}
-                  value={editColumn}
-                >
-                  {getEditableFields(editingActivity).map((columnName) => (
-                    <option key={columnName} value={columnName}>
-                      {editFieldLabels[columnName]}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <div className="edit-current-value">
-                <span>Current value</span>
-                <strong>
-                  {getActivityFieldValue(editingActivity, editColumn) || 'Not set'}
-                </strong>
-              </div>
-
-              <label>
-                New value
-                {editColumn === 'activity_type' ? (
-                  <select
-                    onChange={(event) => setEditValue(event.target.value)}
-                    value={editValue}
-                  >
-                    <option value="daily">Daily</option>
-                    <option value="one_time">One time</option>
-                    <option value="weekly">Weekly</option>
-                  </select>
-                ) : editColumn === 'weekday' ? (
-                  <select
-                    onChange={(event) => setEditValue(event.target.value)}
-                    value={editValue}
-                  >
-                    {weekdays.map((weekday) => (
-                      <option key={weekday} value={weekday}>{weekday}</option>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    onChange={(event) => setEditValue(event.target.value)}
-                    required={!['subject', 'start_time', 'end_time'].includes(editColumn)}
-                    type={editColumn === 'date'
-                      ? 'date'
-                      : editColumn === 'start_time' || editColumn === 'end_time'
-                        ? 'time'
-                        : 'text'}
-                    value={editValue}
-                  />
-                )}
-              </label>
-            </div>
-
-            {editError && <p role="alert">{editError}</p>}
-
-            <div className="add-activity-actions">
-              <button disabled={isSavingEdit} type="submit">
-                {isSavingEdit ? 'Saving...' : 'Save'}
-              </button>
-              <button onClick={closeEditForm} type="button">Cancel</button>
-            </div>
-          </form>
-        </div>
+        <ActivityEditModal key={editingActivity.id} activity={editingActivity} onClose={closeEditForm} onSaved={handleEditSaved} />
       )}
 
       {isLoading && <p>Loading activities...</p>}

@@ -196,6 +196,8 @@ class EditActivityRequest(BaseModel):
     activity_id: int
     column_name: str
     new_value: str | None = None
+    date: str | None = None
+    weekday: str | None = None
 
 
 class AddExamRequest(BaseModel):
@@ -670,6 +672,19 @@ def update_activity(activity_id: int, edit_request: EditActivityRequest):
             if new_value not in {"one_time", "daily", "weekly"}:
                 raise HTTPException(status_code=400, detail="Invalid activity type.")
 
+            if new_value == "one_time":
+                try:
+                    selected_date = edit_request.date if edit_request.date is not None else activity[5]
+                    selected_date = date.fromisoformat(selected_date.strip()).isoformat()
+                except (AttributeError, ValueError):
+                    raise HTTPException(status_code=400, detail="Choose a date for the one-time activity.") from None
+            elif new_value == "weekly":
+                selected_weekday = edit_request.weekday if edit_request.weekday is not None else activity[6]
+                weekdays = {day.lower(): day for day in ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")}
+                selected_weekday = weekdays.get(selected_weekday.strip().lower()) if selected_weekday else None
+                if selected_weekday is None:
+                    raise HTTPException(status_code=400, detail="Choose a weekday for the weekly activity.")
+
         elif column_name == "date":
             if current_activity_type != "one_time":
                 raise HTTPException(
@@ -731,6 +746,12 @@ def update_activity(activity_id: int, edit_request: EditActivityRequest):
             validate_optional_time_range(start_time_value, end_time_value)
 
         edit_activity(connection, activity_id, column_name, new_value)
+
+        if column_name == "activity_type":
+            if new_value == "one_time":
+                edit_activity(connection, activity_id, "date", selected_date)
+            elif new_value == "weekly":
+                edit_activity(connection, activity_id, "weekday", selected_weekday)
 
         resulting_activity_type = (
             new_value if column_name == "activity_type" else current_activity_type

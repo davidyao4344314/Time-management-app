@@ -4,6 +4,7 @@ import Home from './pages/Home'
 import Activities from './pages/Activities'
 import Calendar from './pages/Calendar'
 import Exams from './pages/Exams'
+import ScreenTime from './pages/ScreenTime'
 
 function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
@@ -36,6 +37,7 @@ function App() {
               <li><button type="button" onClick={() => changePage('Activities')}>Activities</button></li>
               <li><button type="button" onClick={() => changePage('Calendar')}>Calendar</button></li>
               <li><button type="button" onClick={() => changePage('Exams')}>Exams</button></li>
+              <li><button type="button" onClick={() => changePage('Screen Time')}>Screen Time</button></li>
             </ul>
           </nav>
         )}
@@ -45,6 +47,7 @@ function App() {
       {currentPage === 'Activities' && <Activities />}
       {currentPage === 'Calendar' && <Calendar />}
       {currentPage === 'Exams' && <Exams />}
+      {currentPage === 'Screen Time' && <ScreenTime />}
     </>
   )
 }

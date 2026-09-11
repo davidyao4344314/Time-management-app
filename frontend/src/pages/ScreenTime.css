@@ -1,0 +1,10 @@
+.screen-time-import-button {
+  margin-top: 1rem;
+  padding: 0.55rem 0.85rem;
+  border: 1px solid #11104f;
+  border-radius: 0.25rem;
+  background: #11104f;
+  color: #ffffff;
+  font-family: inherit;
+  cursor: pointer;
+}

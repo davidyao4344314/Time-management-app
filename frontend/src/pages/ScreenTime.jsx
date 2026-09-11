@@ -1,7 +1,23 @@
+import { useState } from 'react'
+import './ScreenTime.css'
+
 function ScreenTime() {
+  const [showImportMessage, setShowImportMessage] = useState(false)
+
   return (
     <main className="page">
       <h2>Screen Time</h2>
+
+      <button
+        className="screen-time-import-button"
+        type="button"
+        onClick={() => setShowImportMessage(true)}
+      >
+        Import Screen Time from Apple
+      </button>
+      {showImportMessage && (
+        <p role="status">Apple Screen Time import is not connected yet.</p>
+      )}
 
       <section>
         <h3>Today</h3>

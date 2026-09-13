@@ -207,13 +207,13 @@ function mergeAdjacentActivities(activities) {
   )
 }
 
-function CalendarDay({ day, activities, onDragStart, onDrop, onEdit }) {
+function CalendarDay({ day, isToday, activities, onDragStart, onDrop, onEdit }) {
   const orderedActivities = mergeAdjacentActivities(activities)
 
   return (
     <section
       aria-label={`${day.name}, ${day.dateLabel}`}
-      className="calendar-day-timeline"
+      className={`calendar-day-timeline${isToday ? ' calendar-today' : ''}`}
       onDragOver={(event) => event.preventDefault()}
       onDrop={(event) => onDrop(event, day)}
     >
@@ -231,6 +231,7 @@ function CalendarDay({ day, activities, onDragStart, onDrop, onEdit }) {
 }
 
 function Calendar() {
+  const today = formatDate(new Date())
   const [selectedWeek, setSelectedWeek] = useState(() => formatDate(getCurrentMonday()))
   const selectedWeekRef = useRef(selectedWeek)
   const weekDays = createCalendarDays(new Date(`${selectedWeek}T12:00:00`), 7)
@@ -638,9 +639,14 @@ function Calendar() {
             <div className="calendar-corner" aria-hidden="true" />
 
             {weekDays.map((day) => (
-              <header className="calendar-day-header" key={day.date}>
+              <header
+                className={`calendar-day-header${day.date === today ? ' calendar-today' : ''}`}
+                key={day.date}
+              >
                 <h3>{day.name}</h3>
-                <time dateTime={day.date}>{day.dateLabel}</time>
+                <time dateTime={day.date} aria-current={day.date === today ? 'date' : undefined}>
+                  {day.dateLabel}
+                </time>
               </header>
             ))}
 
@@ -662,6 +668,7 @@ function Calendar() {
                   (activity) => activity.calendarDate === day.date,
                 )}
                 day={day}
+                isToday={day.date === today}
                 key={day.date}
                 onDragStart={handleDragStart}
                 onDrop={handleDrop}

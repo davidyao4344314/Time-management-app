@@ -158,6 +158,17 @@
   background-size: 100% var(--calendar-hour-height);
 }
 
+/* Inset edges highlight today without shifting the grid or activity blocks. */
+.calendar-day-header.calendar-today,
+.calendar-day-timeline.calendar-today {
+  background-color: #eef2ff;
+  box-shadow: inset 2px 0 #6366f1, inset -2px 0 #6366f1;
+}
+
+.calendar-day-header.calendar-today {
+  border-bottom-color: #6366f1;
+}
+
 .calendar-activity {
   position: absolute;
   right: 0.25rem;

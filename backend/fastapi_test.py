@@ -17,6 +17,7 @@ from backend.app.activities import (
     remove_duplicate_activities,
 )
 from backend.app.database import create_connection
+from backend.app.ai_config import is_openai_api_key_configured, save_openai_api_key
 from backend.app.calender import (
     check_activity_current,
     get_current_and_next_activities,
@@ -48,6 +49,29 @@ from backend.app.uoa_timetable_import import (
 )
 
 app = FastAPI()
+
+
+class AIConfigRequest(BaseModel):
+    api_key: SecretStr
+
+
+@app.get("/ai/config/status")
+def ai_config_status():
+    return {"configured": is_openai_api_key_configured()}
+
+
+@app.post("/ai/config")
+def configure_ai(config_request: AIConfigRequest):
+    try:
+        save_openai_api_key(config_request.api_key.get_secret_value())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Enter a valid API key without spaces.") from None
+    except RuntimeError:
+        raise HTTPException(
+            status_code=500,
+            detail="Could not save the API key locally. Check file permissions.",
+        ) from None
+    return {"configured": True}
 
 
 @app.get("/canvas/status")

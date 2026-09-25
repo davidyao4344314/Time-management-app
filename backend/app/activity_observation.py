@@ -9,15 +9,7 @@ from backend.app.calender import (
     get_week_activities,
     is_valid_activity_time,
 )
-
-
-def _time_or_none(value):
-    if not isinstance(value, str):
-        return None
-    try:
-        return datetime.strptime(value.strip(), "%H:%M").strftime("%H:%M")
-    except ValueError:
-        return None
+from backend.app.observation_utils import chronological_key, compact_time as _time_or_none
 
 
 def _brief_activity(activity):
@@ -61,12 +53,9 @@ def build_activity_observation(connection):
                 continue
         relevant.append(occurrence)
 
-    relevant.sort(key=lambda occurrence: (
-        occurrence["calendar_date"],
-        _time_or_none(occurrence["start_time"]) is None,
-        _time_or_none(occurrence["start_time"]) or "",
-        occurrence["name"],
-        occurrence["id"],
+    relevant.sort(key=lambda occurrence: chronological_key(
+        occurrence["calendar_date"], occurrence["start_time"],
+        occurrence["name"], occurrence["id"],
     ))
     current.sort(key=lambda activity: (
         _time_or_none(activity[7]) or "", activity[1], activity[0]

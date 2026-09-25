@@ -1,7 +1,10 @@
+import sqlite3
 from datetime import date, datetime, timedelta
 from sqlite3 import Error as SQLiteError
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
+from openai import OpenAIError
 from pydantic import BaseModel, SecretStr
 
 from backend.app.activities import (
@@ -16,8 +19,9 @@ from backend.app.activities import (
     move_activity,
     remove_duplicate_activities,
 )
-from backend.app.database import create_connection
+from backend.app.database import create_connection, db_file
 from backend.app.ai_config import is_openai_api_key_configured, save_openai_api_key
+from backend.app.ai_observation_test import send_observation_to_llm
 from backend.app.calender import (
     check_activity_current,
     get_current_and_next_activities,
@@ -72,6 +76,40 @@ def configure_ai(config_request: AIConfigRequest):
             detail="Could not save the API key locally. Check file permissions.",
         ) from None
     return {"configured": True}
+
+
+@app.post("/ai/test-observation")
+def test_ai_observation():
+    if not is_openai_api_key_configured():
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "error": "Configure OPENAI_API_KEY first."},
+        )
+
+    try:
+        # This test must not modify SQLite, even if a migration is pending.
+        connection = sqlite3.connect(f"{db_file.resolve().as_uri()}?mode=ro", uri=True)
+        try:
+            send_observation_to_llm(connection)
+        finally:
+            connection.close()
+    except SQLiteError:
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "error": "Could not read the observation data."},
+        )
+    except OpenAIError:
+        return JSONResponse(
+            status_code=502,
+            content={"success": False, "error": "OpenAI request failed. Check the key, model access, and network."},
+        )
+    except RuntimeError:
+        return JSONResponse(
+            status_code=502,
+            content={"success": False, "error": "OpenAI did not complete the observation test."},
+        )
+
+    return {"success": True}
 
 
 @app.get("/canvas/status")

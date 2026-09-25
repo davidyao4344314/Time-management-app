@@ -5,7 +5,7 @@ from sqlite3 import Error as SQLiteError
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from openai import OpenAIError
-from pydantic import BaseModel, SecretStr
+from pydantic import BaseModel, SecretStr, ValidationError
 
 from backend.app.activities import (
     add_activity,
@@ -22,6 +22,7 @@ from backend.app.activities import (
 from backend.app.database import create_connection, db_file
 from backend.app.ai_config import is_openai_api_key_configured, save_openai_api_key
 from backend.app.ai_observation_test import send_observation_to_llm
+from backend.app.ai_proposal import InvalidProposalError, get_agent_proposal
 from backend.app.calender import (
     check_activity_current,
     get_current_and_next_activities,
@@ -110,6 +111,32 @@ def test_ai_observation():
         )
 
     return {"success": True}
+
+
+class AIProposalRequest(BaseModel):
+    message: str
+
+
+@app.post("/ai/propose")
+def propose_ai(request: AIProposalRequest):
+    if not request.message.strip():
+        raise HTTPException(status_code=400, detail="Enter a request first.")
+    if not is_openai_api_key_configured():
+        raise HTTPException(status_code=400, detail="Configure OPENAI_API_KEY first.")
+
+    try:
+        # Read-only: the proposed add_activity action is never executed here.
+        connection = sqlite3.connect(f"{db_file.resolve().as_uri()}?mode=ro", uri=True)
+        try:
+            return get_agent_proposal(connection, request.message)
+        finally:
+            connection.close()
+    except SQLiteError:
+        raise HTTPException(status_code=500, detail="Could not read the observation data.") from None
+    except OpenAIError:
+        raise HTTPException(status_code=502, detail="OpenAI request failed. Check the key, model access, and network.") from None
+    except (InvalidProposalError, ValidationError):
+        raise HTTPException(status_code=502, detail="OpenAI did not return a valid proposal.") from None
 
 
 @app.get("/canvas/status")

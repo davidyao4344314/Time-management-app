@@ -31,3 +31,12 @@ CREATE TABLE IF NOT EXISTS uoa_activity_external_ids(
     FOREIGN KEY(activity_id) REFERENCES activities(id) ON DELETE CASCADE,
     UNIQUE(activity_id, external_id)
 );
+CREATE TABLE IF NOT EXISTS screen_time_daily(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT NOT NULL UNIQUE,
+    total_minutes INTEGER,
+    productive_minutes INTEGER,
+    social_minutes INTEGER,
+    entertainment_minutes INTEGER,
+    other_minutes INTEGER
+);

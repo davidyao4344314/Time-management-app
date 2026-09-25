@@ -149,6 +149,22 @@ def allow_null_times(connection):
             )
 
 
+def add_screen_time_storage(connection):
+    """Create Screen Time storage in existing databases without changing their rows."""
+    with connection:
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS screen_time_daily(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL UNIQUE,
+                total_minutes INTEGER,
+                productive_minutes INTEGER,
+                social_minutes INTEGER,
+                entertainment_minutes INTEGER,
+                other_minutes INTEGER
+            )
+        """)
+
+
 def create_connection():
     """
     Open the SQLite database and return the connection.
@@ -162,6 +178,7 @@ def create_connection():
     add_record_sources(connection)
     add_external_id_storage(connection)
     allow_null_times(connection)
+    add_screen_time_storage(connection)
     connection.execute("PRAGMA foreign_keys = ON")
 
     return connection

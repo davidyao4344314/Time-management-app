@@ -6,6 +6,7 @@ import Calendar from './pages/Calendar'
 import Exams from './pages/Exams'
 import ScreenTime from './pages/ScreenTime'
 import AISettings from './pages/AISettings'
+import AIAgent from './pages/AIAgent'
 
 function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
@@ -39,6 +40,7 @@ function App() {
               <li><button type="button" onClick={() => changePage('Calendar')}>Calendar</button></li>
               <li><button type="button" onClick={() => changePage('Exams')}>Exams</button></li>
               <li><button type="button" onClick={() => changePage('Screen Time')}>Screen Time</button></li>
+              <li><button type="button" onClick={() => changePage('AI Agent')}>AI Agent</button></li>
               <li><button type="button" onClick={() => changePage('AI Settings')}>AI Settings</button></li>
             </ul>
           </nav>
@@ -50,6 +52,7 @@ function App() {
       {currentPage === 'Calendar' && <Calendar />}
       {currentPage === 'Exams' && <Exams />}
       {currentPage === 'Screen Time' && <ScreenTime />}
+      {currentPage === 'AI Agent' && <AIAgent />}
       {currentPage === 'AI Settings' && <AISettings />}
     </>
   )

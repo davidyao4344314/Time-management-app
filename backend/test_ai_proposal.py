@@ -94,12 +94,28 @@ class AIProposalTests(unittest.TestCase):
 
         self.assertEqual(result, expected)
         self.assertEqual(request["text_format"], ai_proposal.AgentProposal)
+        self.assertEqual(request["instructions"], ai_proposal.STUDY_PLANNING_INSTRUCTIONS)
         self.assertFalse(request["store"])
         model_input = json.loads(request["input"][0]["content"])
         self.assertEqual(model_input["request"], "Help me plan tonight")
         self.assertEqual(model_input["observations"], {
             "activities": {"today": []}, "exams": {"upcoming": []},
         })
+
+    def test_instructions_keep_advice_and_actions_separate(self):
+        instructions = ai_proposal.STUDY_PLANNING_INSTRUCTIONS
+        for rule in (
+            "study planning assistant",
+            "activity and exam observations",
+            "ask one simple follow-up question",
+            "user-facing message",
+            "separate actions list",
+            "only allowed tool is add_activity",
+            "Never execute a tool, generate SQL",
+            '"message": "response for the user", "actions": []',
+        ):
+            with self.subTest(rule=rule):
+                self.assertIn(rule, instructions)
 
     def test_missing_key_prevents_model_call(self):
         with patch.object(ai_proposal, "is_openai_api_key_configured", return_value=False), \

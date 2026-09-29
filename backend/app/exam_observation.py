@@ -4,7 +4,9 @@ from datetime import date, timedelta
 
 from backend.app.calender import get_current_date, get_current_time
 from backend.app.exams import get_all_exams
-from backend.app.observation_utils import chronological_key, compact_time
+from backend.app.observation_utils import (
+    chronological_key, compact_time, observation_date_range,
+)
 
 
 def _exam_date(value):
@@ -17,10 +19,13 @@ def _exam_date(value):
     return parsed if parsed.isoformat() == value.strip() else None
 
 
-def build_exam_observation(connection):
-    """Return relevant exams from today through 30 days ahead, at most 20 detailed."""
+def build_exam_observation(connection, scope="upcoming"):
+    """Return relevant exams for the requested period, at most 20 detailed."""
     today = get_current_date()
-    end_date = today + timedelta(days=30)
+    end_date = (
+        today + timedelta(days=30) if scope == "upcoming"
+        else observation_date_range(today, scope)[1]
+    )
     current_time = get_current_time()
     relevant = []
     seen = set()

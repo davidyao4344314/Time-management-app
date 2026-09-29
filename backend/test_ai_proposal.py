@@ -1,14 +1,19 @@
 """Proposal validation and API tests; never contact OpenAI or change SQLite."""
 
 import json
+import sqlite3
 import unittest
+from datetime import date
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import ANY, Mock, patch
 
 from fastapi.testclient import TestClient
 
 from backend import fastapi_test as api
-from backend.app import ai_memory, ai_proposal
+from backend.app import (
+    activity_observation, ai_context_router, ai_memory, ai_proposal,
+    exam_observation,
+)
 
 
 def activity_action(**changes):
@@ -27,6 +32,186 @@ def activity_action(**changes):
 
 
 class AIProposalTests(unittest.TestCase):
+    def test_context_router_examples(self):
+        cases = (
+            ("What should I do today?", "today", False, None),
+            ("What should I study tonight?", "today", True, "upcoming"),
+            ("What do I have this week?", "week", False, None),
+            ("What am I doing this month?", "month", False, None),
+            ("What exams do I have?", None, True, "upcoming"),
+            ("What exams do I have this month?", None, True, "month"),
+            ("Show me all activities.", "all", False, None),
+            ("Look at all my activities and exams.", "all", True, "upcoming"),
+            ("What should I do today for my exams?", "today", True, "upcoming"),
+            ("Everything on my calendar", "all", False, None),
+            ("Show my full calendar", "all", False, None),
+            ("Show my entire schedule", "all", False, None),
+            ("Look at everything", "all", True, "upcoming"),
+            ("What are my upcoming quizzes?", None, True, "upcoming"),
+            ("What is coming in the next few days?", "week", False, None),
+            ("What is due later this month?", "month", False, None),
+            ("TODAY’S schedule", "today", False, None),
+            ("Help me plan", "today", True, "upcoming"),
+        )
+        for message, activity_scope, include_exams, exam_scope in cases:
+            with self.subTest(message=message):
+                self.assertEqual(ai_context_router.choose_agent_context(message), {
+                    "activities_scope": activity_scope,
+                    "include_exams": include_exams,
+                    "exam_scope": exam_scope,
+                })
+
+    def test_today_observation_does_not_send_later_dates(self):
+        today = date(2026, 9, 29)
+        occurrence = {
+            "id": 1, "name": "Lecture", "start_time": "11:00",
+            "end_time": "12:00", "calendar_date": "2026-09-29",
+        }
+        tomorrow = {**occurrence, "calendar_date": "2026-09-30"}
+        connection = Mock()
+        with patch.object(activity_observation, "get_current_date", return_value=today), \
+                patch.object(activity_observation, "get_current_time", return_value="09:00"), \
+                patch.object(activity_observation, "get_current_and_next_activities", return_value=([], None)), \
+                patch.object(activity_observation, "get_week_activities", return_value=[occurrence, tomorrow]) as week:
+            result = activity_observation.build_activity_observation(connection, scope="today")
+
+        week.assert_called_once_with(connection, today)
+        self.assertEqual(result["today"], [{"name": "Lecture", "start": "11:00", "end": "12:00"}])
+        self.assertNotIn("upcoming_7d", result)
+
+    def test_week_observation_uses_the_next_seven_dates(self):
+        today = date(2026, 9, 29)
+        occurrence = {
+            "id": 1, "name": "Study", "start_time": None, "end_time": None,
+            "calendar_date": "2026-10-05",
+        }
+        too_late = {**occurrence, "calendar_date": "2026-10-06"}
+        with patch.object(activity_observation, "get_current_date", return_value=today), \
+                patch.object(activity_observation, "get_current_time", return_value="09:00"), \
+                patch.object(activity_observation, "get_current_and_next_activities", return_value=([], None)), \
+                patch.object(activity_observation, "get_week_activities", return_value=[occurrence, too_late]):
+            result = activity_observation.build_activity_observation(Mock(), scope="week")
+        self.assertEqual(result["upcoming_7d"], [
+            {"name": "Study", "date": "2026-10-05", "start": None, "end": None},
+        ])
+
+    def test_month_observation_uses_calendar_recurrence_and_stops_at_month_end(self):
+        today = date(2026, 9, 1)
+        starts = []
+
+        def calendar_occurrences(_connection, week_start):
+            starts.append(week_start)
+            if week_start == date(2026, 9, 29):
+                return [
+                    {"id": 1, "name": "Month end", "calendar_date": "2026-09-30",
+                     "start_time": None, "end_time": None},
+                    {"id": 2, "name": "Next month", "calendar_date": "2026-10-01",
+                     "start_time": None, "end_time": None},
+                ]
+            return []
+
+        with patch.object(activity_observation, "get_current_date", return_value=today), \
+                patch.object(activity_observation, "get_current_time", return_value="09:00"), \
+                patch.object(activity_observation, "get_current_and_next_activities", return_value=([], None)), \
+                patch.object(activity_observation, "get_week_activities", side_effect=calendar_occurrences):
+            result = activity_observation.build_activity_observation(Mock(), scope="month")
+
+        self.assertEqual(starts, [date(2026, 9, day) for day in (1, 8, 15, 22, 29)])
+        self.assertEqual(result["upcoming_month"], [
+            {"name": "Month end", "date": "2026-09-30", "start": None, "end": None},
+        ])
+
+    def test_month_observation_uses_real_calendar_recurrence_rules(self):
+        connection = sqlite3.connect(":memory:")
+        self.addCleanup(connection.close)
+        connection.execute("""
+            CREATE TABLE activities (
+                id INTEGER PRIMARY KEY, name TEXT, category TEXT, subject TEXT,
+                activity_type TEXT, date TEXT, weekday TEXT, start_time TEXT,
+                end_time TEXT, active_start_date TEXT, active_end_date TEXT
+            )
+        """)
+        connection.executemany(
+            """INSERT INTO activities
+               (name, category, activity_type, date, weekday, start_time, end_time)
+               VALUES (?, 'Study', ?, ?, ?, NULL, NULL)""",
+            [
+                ("Daily", "daily", None, None),
+                ("Weekly", "weekly", None, "Wednesday"),
+                ("September task", "one_time", "2026-09-30", None),
+                ("October task", "one_time", "2026-10-01", None),
+            ],
+        )
+        with patch.object(activity_observation, "get_current_date", return_value=date(2026, 9, 29)), \
+                patch.object(activity_observation, "get_current_time", return_value="09:00"), \
+                patch.object(activity_observation, "get_current_and_next_activities", return_value=([], None)):
+            result = activity_observation.build_activity_observation(connection, scope="month")
+
+        self.assertEqual(
+            [(item["name"], item["date"]) for item in result["upcoming_month"]],
+            [
+                ("Daily", "2026-09-29"),
+                ("Daily", "2026-09-30"),
+                ("September task", "2026-09-30"),
+                ("Weekly", "2026-09-30"),
+            ],
+        )
+
+    def test_all_activity_scope_uses_existing_activity_rows(self):
+        activity = (1, "Lecture", "University", "COMPSCI 130", "weekly",
+                    None, "Monday", "10:00", "11:00", "2026-07-01", "2026-11-01")
+        with patch.object(activity_observation, "get_all_activities", return_value=[activity]), \
+                patch.object(activity_observation, "get_week_activities") as week:
+            result = activity_observation.build_activity_observation(Mock(), scope="all")
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["all_activities"][0]["weekday"], "Monday")
+        self.assertEqual(result["all_activities"][0]["active_end_date"], "2026-11-01")
+        week.assert_not_called()
+
+    def test_exam_month_scope_uses_same_date_boundaries(self):
+        exams = [
+            (1, "September test", "Test", "COMPSCI", "2026-09-30", None, None),
+            (2, "October test", "Test", "COMPSCI", "2026-10-01", None, None),
+        ]
+        with patch.object(exam_observation, "get_current_date", return_value=date(2026, 9, 29)), \
+                patch.object(exam_observation, "get_current_time", return_value="09:00"), \
+                patch.object(exam_observation, "get_all_exams", return_value=exams):
+            result = exam_observation.build_exam_observation(Mock(), scope="month")
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["upcoming"][0]["date"], "2026-09-30")
+
+    def test_request_builds_only_selected_observations(self):
+        cases = (
+            ("What do I have this week?", "week", None),
+            ("What exams do I have this month?", None, "month"),
+            ("Look at all my activities and exams.", "all", "upcoming"),
+        )
+        for message, activity_scope, exam_scope in cases:
+            with self.subTest(message=message), \
+                    patch.object(ai_proposal, "is_openai_api_key_configured", return_value=True), \
+                    patch.dict(ai_proposal.os.environ, {"OPENAI_API_KEY": "test-key"}), \
+                    patch.object(ai_proposal, "build_activity_observation", return_value={"activity_data": True}) as activity_builder, \
+                    patch.object(ai_proposal, "build_exam_observation", return_value={"exam_data": True}) as exam_builder, \
+                    patch.object(ai_proposal, "OpenAI") as client_class:
+                client = client_class.return_value.__enter__.return_value
+                client.responses.parse.return_value = SimpleNamespace(
+                    status="completed", output_parsed={"message": "Reply", "actions": []},
+                )
+                ai_proposal.get_agent_proposal(Mock(), message)
+                payload = json.loads(client.responses.parse.call_args.kwargs["input"][-1]["content"])
+                if activity_scope is None:
+                    activity_builder.assert_not_called()
+                    self.assertNotIn("activities", payload["observations"])
+                else:
+                    activity_builder.assert_called_once_with(ANY, scope=activity_scope)
+                    self.assertIn("activities", payload["observations"])
+                if exam_scope is None:
+                    exam_builder.assert_not_called()
+                    self.assertNotIn("exams", payload["observations"])
+                else:
+                    exam_builder.assert_called_once_with(ANY, scope=exam_scope)
+                    self.assertIn("exams", payload["observations"])
+
     def test_only_the_last_five_completed_turns_are_kept(self):
         with patch.object(ai_memory, "_sessions", {}):
             for number in range(1, 6):

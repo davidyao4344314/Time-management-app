@@ -1,8 +1,9 @@
 import sqlite3
+from uuid import uuid4
 from datetime import date, datetime, timedelta
 from sqlite3 import Error as SQLiteError
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from openai import OpenAIError
 from pydantic import BaseModel, SecretStr, ValidationError
@@ -21,6 +22,7 @@ from backend.app.activities import (
 )
 from backend.app.database import create_connection, db_file
 from backend.app.ai_config import is_openai_api_key_configured, save_openai_api_key
+from backend.app.ai_memory import add_completed_turn, get_recent_turns, has_session
 from backend.app.ai_observation_test import send_observation_to_llm
 from backend.app.ai_proposal import InvalidProposalError, get_agent_proposal
 from backend.app.calender import (
@@ -118,17 +120,24 @@ class AIProposalRequest(BaseModel):
 
 
 @app.post("/ai/propose")
-def propose_ai(request: AIProposalRequest):
-    if not request.message.strip():
+def propose_ai(proposal_request: AIProposalRequest, request: Request, response: Response):
+    user_message = proposal_request.message.strip()
+    if not user_message:
         raise HTTPException(status_code=400, detail="Enter a request first.")
     if not is_openai_api_key_configured():
         raise HTTPException(status_code=400, detail="Configure OPENAI_API_KEY first.")
+
+    session_id = request.cookies.get("ai_agent_session")
+    new_session = not has_session(session_id)
+    if new_session:
+        session_id = uuid4().hex
+    recent_turns = get_recent_turns(session_id)
 
     try:
         # Read-only: the proposed add_activity action is never executed here.
         connection = sqlite3.connect(f"{db_file.resolve().as_uri()}?mode=ro", uri=True)
         try:
-            return get_agent_proposal(connection, request.message)
+            proposal = get_agent_proposal(connection, user_message, recent_turns)
         finally:
             connection.close()
     except SQLiteError:
@@ -137,6 +146,14 @@ def propose_ai(request: AIProposalRequest):
         raise HTTPException(status_code=502, detail="OpenAI request failed. Check the key, model access, and network.") from None
     except (InvalidProposalError, ValidationError):
         raise HTTPException(status_code=502, detail="OpenAI did not return a valid proposal.") from None
+
+    add_completed_turn(session_id, user_message, proposal)
+    if new_session:
+        response.set_cookie(
+            key="ai_agent_session", value=session_id, httponly=True,
+            samesite="lax", path="/", secure=request.url.scheme == "https",
+        )
+    return proposal
 
 
 @app.get("/canvas/status")

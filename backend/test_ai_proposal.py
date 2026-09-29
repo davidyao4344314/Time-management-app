@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from backend import fastapi_test as api
 from backend.app import (
-    activity_observation, ai_context_router, ai_memory, ai_proposal,
+    activity_observation, ai_context_router, ai_intent_classifier, ai_memory, ai_proposal,
     exam_observation,
 )
 
@@ -32,6 +32,173 @@ def activity_action(**changes):
 
 
 class AIProposalTests(unittest.TestCase):
+    def test_stage_two_classification_examples(self):
+        cases = (
+            ("What should I study tonight?", "study_planning", "today", True, True,
+             "today", "upcoming"),
+            ("What exams do I have this month?", "exam_query", "month", False, True,
+             None, "month"),
+            ("What am I doing this week?", "schedule_query", "week", True, False,
+             "week", None),
+            ("Don't show me exams, just tell me what I'm doing today.",
+             "schedule_query", "today", True, False, "today", None),
+            ("I've got something important coming up and I'm free after dinner. What should I focus on?",
+             "study_planning", "today", True, True, "today", "upcoming"),
+        )
+        for message, intent, time_scope, activities, exams, activity_scope, exam_scope in cases:
+            with self.subTest(message=message):
+                client = Mock()
+                client.responses.parse.return_value = SimpleNamespace(
+                    status="completed",
+                    output_parsed={
+                        "intent": intent, "time_scope": time_scope,
+                        "include_activities": activities, "include_exams": exams,
+                    },
+                )
+                selected = ai_intent_classifier.select_agent_context(
+                    client, message, [], ai_proposal.PROPOSAL_MODEL,
+                )
+                self.assertEqual(selected, {
+                    "activities_scope": activity_scope,
+                    "include_exams": exams,
+                    "exam_scope": exam_scope,
+                })
+                classifier_input = json.loads(
+                    client.responses.parse.call_args.kwargs["input"][0]["content"]
+                )
+                self.assertEqual(classifier_input["current_message"], message)
+
+    def test_classifier_schema_rejects_unknown_values_and_non_booleans(self):
+        valid = {
+            "intent": "schedule_query", "time_scope": "week",
+            "include_activities": True, "include_exams": False,
+        }
+        self.assertEqual(ai_intent_classifier.validate_intent_classification(valid).model_dump(), valid)
+        invalid = (
+            {**valid, "intent": "career_advice"},
+            {**valid, "time_scope": "year"},
+            {**valid, "include_activities": "true"},
+            {**valid, "include_exams": 0},
+            {**valid, "message": "Here is your answer"},
+        )
+        for value in invalid:
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    ai_intent_classifier.validate_intent_classification(value)
+
+    def test_classification_maps_all_and_unspecified_scopes(self):
+        cases = (
+            ("activity_query", "all", True, False, "all", None),
+            ("general_question", "unspecified", False, False, None, None),
+            ("exam_query", "today", False, True, None, "today"),
+            ("study_planning", "unspecified", True, True, "today", "upcoming"),
+        )
+        for intent, time_scope, activities, exams, activity_scope, exam_scope in cases:
+            with self.subTest(intent=intent, time_scope=time_scope):
+                selected = ai_intent_classifier.context_from_classification({
+                    "intent": intent, "time_scope": time_scope,
+                    "include_activities": activities, "include_exams": exams,
+                })
+                self.assertEqual(selected, {
+                    "activities_scope": activity_scope,
+                    "include_exams": exams,
+                    "exam_scope": exam_scope,
+                })
+
+    def test_classifier_uses_only_brief_history_and_no_observations(self):
+        history = [
+            {
+                "user": f"Earlier request {number}",
+                "assistant": {"message": f"Earlier reply {number}", "actions": [activity_action()]},
+            }
+            for number in range(1, 6)
+        ]
+        client = Mock()
+        client.responses.parse.return_value = SimpleNamespace(
+            status="completed",
+            output_parsed={
+                "intent": "study_planning", "time_scope": "today",
+                "include_activities": True, "include_exams": True,
+            },
+        )
+        ai_intent_classifier.classify_agent_intent(client, "Make it later.", history, "test-model")
+        request = client.responses.parse.call_args.kwargs
+        classifier_input = json.loads(request["input"][0]["content"])
+        self.assertEqual(classifier_input["current_message"], "Make it later.")
+        self.assertEqual([turn["user"] for turn in classifier_input["recent_conversation"]],
+                         ["Earlier request 4", "Earlier request 5"])
+        self.assertEqual(classifier_input["recent_conversation"][-1]["assistant"], "Earlier reply 5")
+        self.assertNotIn("observations", classifier_input)
+        self.assertNotIn("actions", request["input"][0]["content"])
+        self.assertEqual(request["text_format"], ai_intent_classifier.AgentIntentClassification)
+        self.assertEqual(request["model"], "test-model")
+        self.assertFalse(request["store"])
+
+    def test_classifier_failure_or_invalid_output_uses_stage_one(self):
+        message = "What exams do I have this month?"
+        expected = ai_context_router.choose_agent_context(message)
+        client = Mock()
+        for result in (
+            SimpleNamespace(status="incomplete", output_parsed=None),
+            SimpleNamespace(status="completed", output_parsed={
+                "intent": "unknown", "time_scope": "month",
+                "include_activities": False, "include_exams": True,
+            }),
+            SimpleNamespace(status="completed", output_parsed={
+                "intent": "exam_query", "time_scope": "month",
+                "include_activities": False, "include_exams": "yes",
+            }),
+        ):
+            with self.subTest(result=result):
+                client.responses.parse.side_effect = None
+                client.responses.parse.return_value = result
+                self.assertEqual(
+                    ai_intent_classifier.select_agent_context(client, message, [], "test-model"),
+                    expected,
+                )
+        client.responses.parse.side_effect = RuntimeError("classifier unavailable")
+        self.assertEqual(
+            ai_intent_classifier.select_agent_context(client, message, [], "test-model"),
+            expected,
+        )
+
+    def test_stage_two_controls_main_context_and_preserves_five_turns(self):
+        history = [
+            {"user": f"Turn {number}", "assistant": {"message": f"Reply {number}", "actions": []}}
+            for number in range(1, 6)
+        ]
+        message = "Don't show me exams, just tell me what I'm doing today."
+        with patch.object(ai_proposal, "is_openai_api_key_configured", return_value=True), \
+                patch.dict(ai_proposal.os.environ, {"OPENAI_API_KEY": "test-key"}), \
+                patch.object(ai_proposal, "build_activity_observation", return_value={"today": []}) as activities, \
+                patch.object(ai_proposal, "build_exam_observation") as exams, \
+                patch.object(ai_proposal, "OpenAI") as client_class:
+            client = client_class.return_value.__enter__.return_value
+            client.responses.parse.side_effect = [
+                SimpleNamespace(status="completed", output_parsed={
+                    "intent": "schedule_query", "time_scope": "today",
+                    "include_activities": True, "include_exams": False,
+                }),
+                SimpleNamespace(status="completed", output_parsed={"message": "Your schedule", "actions": []}),
+            ]
+            result = ai_proposal.get_agent_proposal(Mock(), message, history)
+            calls = client.responses.parse.call_args_list
+
+        self.assertEqual(result, {"message": "Your schedule", "actions": []})
+        self.assertEqual(len(calls), 2)
+        classifier_input = json.loads(calls[0].kwargs["input"][0]["content"])
+        self.assertNotIn("observations", classifier_input)
+        self.assertEqual(len(classifier_input["recent_conversation"]), 2)
+        main_messages = calls[1].kwargs["input"]
+        self.assertEqual(len(main_messages), 11)
+        self.assertEqual(main_messages[0], {"role": "user", "content": "Turn 1"})
+        self.assertEqual(json.loads(main_messages[1]["content"])["message"], "Reply 1")
+        main_input = json.loads(main_messages[-1]["content"])
+        self.assertEqual(main_input["request"], message)
+        self.assertEqual(main_input["observations"], {"activities": {"today": []}})
+        activities.assert_called_once_with(ANY, scope="today")
+        exams.assert_not_called()
+
     def test_context_router_examples(self):
         cases = (
             ("What should I do today?", "today", False, None),

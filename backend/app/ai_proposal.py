@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
 from backend.app.activity_observation import build_activity_observation
 from backend.app.ai_config import is_openai_api_key_configured
-from backend.app.ai_context_router import choose_agent_context
+from backend.app.ai_intent_classifier import select_agent_context
 from backend.app.exam_observation import build_exam_observation
 
 
@@ -121,31 +121,33 @@ def get_agent_proposal(connection, user_request, recent_turns=None):
     if not isinstance(user_request, str) or not user_request.strip():
         raise ValueError("A user request is required.")
 
-    selection = choose_agent_context(user_request.strip())
-    context = {}
-    if selection["activities_scope"] is not None:
-        context["activities"] = build_activity_observation(
-            connection, scope=selection["activities_scope"],
-        )
-    if selection["include_exams"]:
-        context["exams"] = build_exam_observation(
-            connection, scope=selection["exam_scope"],
-        )
-    model_input = {"request": user_request.strip(), "observations": context}
-    input_messages = []
-    for turn in list(recent_turns or [])[-5:]:
-        input_messages.append({"role": "user", "content": turn["user"]})
-        input_messages.append({
-            "role": "assistant",
-            "content": json.dumps({
-                "message": turn["assistant"]["message"],
-                "proposed_actions_not_executed": turn["assistant"]["actions"],
-            }, ensure_ascii=False),
-        })
-    input_messages.append({
-        "role": "user", "content": json.dumps(model_input, ensure_ascii=False),
-    })
     with OpenAI(api_key=os.environ["OPENAI_API_KEY"].strip(), timeout=60, max_retries=0) as client:
+        selection = select_agent_context(
+            client, user_request.strip(), recent_turns, PROPOSAL_MODEL,
+        )
+        context = {}
+        if selection["activities_scope"] is not None:
+            context["activities"] = build_activity_observation(
+                connection, scope=selection["activities_scope"],
+            )
+        if selection["include_exams"]:
+            context["exams"] = build_exam_observation(
+                connection, scope=selection["exam_scope"],
+            )
+        model_input = {"request": user_request.strip(), "observations": context}
+        input_messages = []
+        for turn in list(recent_turns or [])[-5:]:
+            input_messages.append({"role": "user", "content": turn["user"]})
+            input_messages.append({
+                "role": "assistant",
+                "content": json.dumps({
+                    "message": turn["assistant"]["message"],
+                    "proposed_actions_not_executed": turn["assistant"]["actions"],
+                }, ensure_ascii=False),
+            })
+        input_messages.append({
+            "role": "user", "content": json.dumps(model_input, ensure_ascii=False),
+        })
         response = client.responses.parse(
             model=PROPOSAL_MODEL,
             instructions=STUDY_PLANNING_INSTRUCTIONS,

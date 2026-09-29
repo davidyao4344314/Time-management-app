@@ -78,3 +78,34 @@ def choose_agent_context(user_message):
         "include_exams": include_exams,
         "exam_scope": exam_scope,
     }
+
+
+def assess_stage_one(user_message, recent_turns=None):
+    """Keep the keyword router, but distinguish a clear match from its default."""
+    message = user_message.casefold().replace("’", "'")
+    selection = choose_agent_context(user_message)
+    phrase_groups = (
+        TODAY_PHRASES, WEEK_PHRASES, MONTH_PHRASES, EXAM_WORDS,
+        ALL_ACTIVITY_PHRASES, ALL_CONTEXT_PHRASES, STUDY_WORDS,
+    )
+    if not any(_has_phrase(message, phrases) for phrases in phrase_groups):
+        reason = "no_meaningful_keyword_match"
+    elif re.search(
+        r"\b(?:don't|do not|not|without|exclude|skip)\b[^.!?]{0,80}"
+        r"\b(?:exam|exams|test|tests|assessment|assessments|quiz|quizzes)\b",
+        message,
+    ):
+        reason = "negated_exam_reference"
+    elif sum(bool(_has_phrase(message, phrases)) for phrases in
+             (TODAY_PHRASES, WEEK_PHRASES, MONTH_PHRASES)) > 1:
+        reason = "conflicting_time_scopes"
+    elif recent_turns and re.search(r"\b(?:it|that|those|same|other stuff)\b", message):
+        reason = "depends_on_recent_conversation"
+    else:
+        reason = None
+
+    return {
+        "selection": selection,
+        "confident": reason is None,
+        "reason": reason,
+    }

@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
 from backend.app.activity_observation import build_activity_observation
 from backend.app.ai_config import is_openai_api_key_configured
-from backend.app.ai_intent_classifier import select_agent_context
+from backend.app.ai_routing_pipeline import select_agent_context
 from backend.app.exam_observation import build_exam_observation
 
 

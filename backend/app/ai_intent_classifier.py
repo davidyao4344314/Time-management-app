@@ -5,18 +5,15 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
-from backend.app.ai_context_router import choose_agent_context
-
-
 CLASSIFIER_INSTRUCTIONS = """Classify what context a study assistant needs. Never answer, advise, plan, or request actions.
 
 study_planning: what to focus on or how to use free time; usually needs activities and exams. schedule_query: schedule or availability. exam_query: assessments or deadlines. activity_query: activity details. general_question: none of these.
 
-Read the whole current message, respect exclusions such as 'don't show exams', and use brief conversation only to resolve follow-ups. Tonight or after dinner means today when no other date is given. Use all only when explicitly requested; otherwise use unspecified if no time is implied. Exam-only queries need no activities. Return only intent, time_scope, include_activities, and include_exams."""
+Read the whole current message, respect exclusions such as 'don't show exams', and use brief conversation only to resolve follow-ups. Tonight or after dinner means today when no other date is given. Use all only when explicitly requested; otherwise use unspecified if no time is implied. Exam-only queries need no activities. Set confidence to low only when you cannot reliably decide what information is needed; an ordinary general question can still be high confidence. Return only intent, time_scope, include_activities, include_exams, and confidence."""
 
 
-class AgentIntentClassification(BaseModel):
-    """The only fields Stage 2 may return."""
+class AgentRoutingDecision(BaseModel):
+    """The four routing fields shared by Stage 2 and Stage 3."""
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -29,22 +26,37 @@ class AgentIntentClassification(BaseModel):
     include_exams: bool
 
 
+class AgentIntentClassification(AgentRoutingDecision):
+    """Stage 2 adds only a confidence signal to the shared routing decision."""
+
+    confidence: Literal["high", "low"]
+
+
 def validate_intent_classification(value):
     """Reject unknown labels, non-booleans, and extra response fields."""
     return AgentIntentClassification.model_validate(value)
 
 
-def classify_agent_intent(client, user_message, recent_turns, model):
-    """Call the same OpenAI client with no activity or exam observations."""
-    brief_history = [
+def validate_routing_decision(value):
+    """Validate the four shared routing fields, including Stage 3 output."""
+    return AgentRoutingDecision.model_validate(value)
+
+
+def brief_recent_conversation(recent_turns):
+    """Give routing models only two short completed turns, without actions."""
+    return [
         {
             "user": turn["user"][:300],
             "assistant": turn["assistant"]["message"][:300],
         }
         for turn in list(recent_turns or [])[-2:]
     ]
+
+
+def classify_agent_intent(client, user_message, recent_turns, model):
+    """Call the same OpenAI client with no activity or exam observations."""
     classifier_input = {
-        "recent_conversation": brief_history,
+        "recent_conversation": brief_recent_conversation(recent_turns),
         "current_message": user_message,
     }
     response = client.responses.parse(
@@ -63,7 +75,9 @@ def classify_agent_intent(client, user_message, recent_turns, model):
 
 def context_from_classification(value):
     """Translate Stage 2 into the Stage 1 selection shape used by builders."""
-    classification = validate_intent_classification(value)
+    if isinstance(value, AgentIntentClassification):
+        value = value.model_dump(exclude={"confidence"})
+    classification = validate_routing_decision(value)
     scope = classification.time_scope
     activities_scope = ("today" if scope == "unspecified" else scope) \
         if classification.include_activities else None
@@ -84,13 +98,3 @@ def context_from_classification(value):
         "include_exams": classification.include_exams,
         "exam_scope": exam_scope,
     }
-
-
-def select_agent_context(client, user_message, recent_turns, model):
-    """Use semantic Stage 2 if valid; otherwise retain Stage 1 behavior."""
-    try:
-        classification = classify_agent_intent(client, user_message, recent_turns, model)
-        return context_from_classification(classification)
-    except Exception:
-        # Only the classifier call/validation is inside this fallback boundary.
-        return choose_agent_context(user_message)

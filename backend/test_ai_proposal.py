@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from backend import fastapi_test as api
 from backend.app import (
     activity_observation, ai_context_router, ai_intent_classifier, ai_memory, ai_proposal,
-    exam_observation,
+    ai_routing_pipeline, ai_stage_three_router, exam_observation,
 )
 
 
@@ -53,11 +53,13 @@ class AIProposalTests(unittest.TestCase):
                     output_parsed={
                         "intent": intent, "time_scope": time_scope,
                         "include_activities": activities, "include_exams": exams,
+                        "confidence": "high",
                     },
                 )
-                selected = ai_intent_classifier.select_agent_context(
+                classification = ai_intent_classifier.classify_agent_intent(
                     client, message, [], ai_proposal.PROPOSAL_MODEL,
                 )
+                selected = ai_intent_classifier.context_from_classification(classification)
                 self.assertEqual(selected, {
                     "activities_scope": activity_scope,
                     "include_exams": exams,
@@ -72,6 +74,7 @@ class AIProposalTests(unittest.TestCase):
         valid = {
             "intent": "schedule_query", "time_scope": "week",
             "include_activities": True, "include_exams": False,
+            "confidence": "high",
         }
         self.assertEqual(ai_intent_classifier.validate_intent_classification(valid).model_dump(), valid)
         invalid = (
@@ -79,6 +82,7 @@ class AIProposalTests(unittest.TestCase):
             {**valid, "time_scope": "year"},
             {**valid, "include_activities": "true"},
             {**valid, "include_exams": 0},
+            {**valid, "confidence": "maybe"},
             {**valid, "message": "Here is your answer"},
         )
         for value in invalid:
@@ -119,6 +123,7 @@ class AIProposalTests(unittest.TestCase):
             output_parsed={
                 "intent": "study_planning", "time_scope": "today",
                 "include_activities": True, "include_exams": True,
+                "confidence": "high",
             },
         )
         ai_intent_classifier.classify_agent_intent(client, "Make it later.", history, "test-model")
@@ -134,33 +139,165 @@ class AIProposalTests(unittest.TestCase):
         self.assertEqual(request["model"], "test-model")
         self.assertFalse(request["store"])
 
-    def test_classifier_failure_or_invalid_output_uses_stage_one(self):
+    def test_confident_stage_one_skips_both_models(self):
         message = "What exams do I have this month?"
-        expected = ai_context_router.choose_agent_context(message)
-        client = Mock()
-        for result in (
-            SimpleNamespace(status="incomplete", output_parsed=None),
-            SimpleNamespace(status="completed", output_parsed={
-                "intent": "unknown", "time_scope": "month",
-                "include_activities": False, "include_exams": True,
-            }),
-            SimpleNamespace(status="completed", output_parsed={
-                "intent": "exam_query", "time_scope": "month",
-                "include_activities": False, "include_exams": "yes",
-            }),
-        ):
-            with self.subTest(result=result):
-                client.responses.parse.side_effect = None
-                client.responses.parse.return_value = result
-                self.assertEqual(
-                    ai_intent_classifier.select_agent_context(client, message, [], "test-model"),
-                    expected,
-                )
-        client.responses.parse.side_effect = RuntimeError("classifier unavailable")
-        self.assertEqual(
-            ai_intent_classifier.select_agent_context(client, message, [], "test-model"),
-            expected,
+        with patch.object(ai_routing_pipeline, "classify_agent_intent") as stage_two, \
+                patch.object(ai_routing_pipeline, "classify_stage_three") as stage_three:
+            selected = ai_routing_pipeline.select_agent_context(Mock(), message, [], "stage-two-model")
+        self.assertEqual(selected, {
+            "activities_scope": None, "include_exams": True, "exam_scope": "month",
+        })
+        stage_two.assert_not_called()
+        stage_three.assert_not_called()
+
+    def test_confident_stage_two_skips_stage_three(self):
+        message = "Don't show me exams, just tell me what I'm doing today."
+        self.assertEqual(ai_context_router.assess_stage_one(message)["reason"],
+                         "negated_exam_reference")
+        decision = ai_intent_classifier.AgentIntentClassification(
+            intent="schedule_query", time_scope="today",
+            include_activities=True, include_exams=False, confidence="high",
         )
+        with patch.object(ai_routing_pipeline, "classify_agent_intent", return_value=decision) as stage_two, \
+                patch.object(ai_routing_pipeline, "classify_stage_three") as stage_three:
+            selected = ai_routing_pipeline.select_agent_context(Mock(), message, [], "stage-two-model")
+        self.assertEqual(selected, {
+            "activities_scope": "today", "include_exams": False, "exam_scope": None,
+        })
+        stage_two.assert_called_once()
+        stage_three.assert_not_called()
+
+    def test_uncertain_stage_two_calls_stage_three_once(self):
+        message = "Can you help with that thing we were discussing before, but not the other stuff?"
+        history = [{"user": "Plan my schedule", "assistant": {"message": "Let's look at it.", "actions": []}}]
+        uncertain = ai_intent_classifier.AgentIntentClassification(
+            intent="general_question", time_scope="unspecified",
+            include_activities=False, include_exams=False, confidence="low",
+        )
+        decision = ai_intent_classifier.AgentRoutingDecision(
+            intent="schedule_query", time_scope="week",
+            include_activities=True, include_exams=False,
+        )
+        with patch.object(ai_routing_pipeline, "classify_agent_intent", return_value=uncertain), \
+                patch.object(ai_routing_pipeline, "classify_stage_three", return_value=decision) as stage_three:
+            selected = ai_routing_pipeline.select_agent_context(
+                Mock(), message, history, "stage-two-model",
+            )
+        self.assertEqual(selected, {
+            "activities_scope": "week", "include_exams": False, "exam_scope": None,
+        })
+        stage_three.assert_called_once()
+        stage_one_input = stage_three.call_args.args[3]
+        stage_two_input = stage_three.call_args.args[4]
+        self.assertFalse(stage_one_input["confident"])
+        self.assertEqual(stage_two_input["reason"], "low_confidence")
+        self.assertEqual(stage_two_input["classification"]["confidence"], "low")
+
+    def test_invalid_stage_two_reaches_stage_three(self):
+        message = "I've got a lot happening soon and don't know what to look at."
+        decision = ai_intent_classifier.AgentRoutingDecision(
+            intent="study_planning", time_scope="today",
+            include_activities=True, include_exams=True,
+        )
+        with patch.object(ai_routing_pipeline, "classify_agent_intent", side_effect=ValueError("invalid")), \
+                patch.object(ai_routing_pipeline, "classify_stage_three", return_value=decision) as stage_three:
+            selected = ai_routing_pipeline.select_agent_context(Mock(), message, [], "stage-two-model")
+        self.assertEqual(selected, {
+            "activities_scope": "today", "include_exams": True, "exam_scope": "upcoming",
+        })
+        self.assertEqual(stage_three.call_args.args[4]["reason"], "invalid_or_unavailable")
+
+    def test_stage_three_uses_only_routing_data_and_rejects_actions(self):
+        history = [{"user": "Previous question", "assistant": {"message": "Previous reply", "actions": []}}]
+        stage_one = {"selection": ai_context_router.choose_agent_context("Make it later."),
+                     "confident": False, "reason": "no_meaningful_keyword_match"}
+        stage_two = {"classification": None, "reason": "invalid_or_unavailable"}
+        client = Mock()
+        client.responses.parse.return_value = SimpleNamespace(
+            status="completed",
+            output_parsed={
+                "intent": "study_planning", "time_scope": "today",
+                "include_activities": True, "include_exams": True,
+                "actions": [{"tool": "add_activity"}],
+            },
+        )
+        with self.assertRaises(ValueError):
+            ai_stage_three_router.classify_stage_three(
+                client, "Make it later.", history, stage_one, stage_two,
+            )
+        request = client.responses.parse.call_args.kwargs
+        routing_input = json.loads(request["input"][0]["content"])
+        self.assertEqual(set(routing_input), {
+            "current_message", "recent_conversation", "stage_1", "stage_2",
+        })
+        self.assertNotIn("observations", request["input"][0]["content"])
+        self.assertNotIn("tools", request)
+        self.assertEqual(request["text_format"], ai_intent_classifier.AgentRoutingDecision)
+        self.assertEqual(request["model"], "gpt-6-sol")
+        self.assertEqual(request["reasoning"], {"effort": "xhigh"})
+
+    def test_stage_three_returns_only_valid_routing_metadata(self):
+        client = Mock()
+        client.responses.parse.return_value = SimpleNamespace(
+            status="completed",
+            output_parsed={
+                "intent": "activity_query", "time_scope": "week",
+                "include_activities": True, "include_exams": False,
+            },
+        )
+        decision = ai_stage_three_router.classify_stage_three(
+            client, "Help with that schedule thing.", [],
+            {"selection": None, "confident": False, "reason": "no_meaningful_keyword_match"},
+            {"classification": None, "reason": "invalid_or_unavailable"},
+        )
+        self.assertEqual(decision.model_dump(), {
+            "intent": "activity_query", "time_scope": "week",
+            "include_activities": True, "include_exams": False,
+        })
+
+    def test_stage_three_schema_rejects_invalid_or_action_fields(self):
+        valid = {
+            "intent": "study_planning", "time_scope": "today",
+            "include_activities": True, "include_exams": True,
+        }
+        for invalid in (
+            {**valid, "intent": "unsupported"},
+            {**valid, "time_scope": "year"},
+            {**valid, "include_activities": "true"},
+            {**valid, "include_exams": 1},
+            {**valid, "tool": "add_activity"},
+            {**valid, "actions": []},
+            {**valid, "message": "Here is my advice"},
+        ):
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(ValueError):
+                    ai_intent_classifier.validate_routing_decision(invalid)
+
+    def test_invalid_confident_stage_one_does_not_skip_stage_two(self):
+        malformed = {
+            "selection": {"activities_scope": "year", "include_exams": False, "exam_scope": None},
+            "confident": True, "reason": None,
+        }
+        decision = ai_intent_classifier.AgentIntentClassification(
+            intent="schedule_query", time_scope="week",
+            include_activities=True, include_exams=False, confidence="high",
+        )
+        with patch.object(ai_routing_pipeline, "assess_stage_one", return_value=malformed), \
+                patch.object(ai_routing_pipeline, "classify_agent_intent", return_value=decision) as stage_two, \
+                patch.object(ai_routing_pipeline, "classify_stage_three") as stage_three:
+            selected = ai_routing_pipeline.select_agent_context(Mock(), "This week", [], "stage-two-model")
+        self.assertEqual(selected["activities_scope"], "week")
+        stage_two.assert_called_once()
+        stage_three.assert_not_called()
+
+    def test_stage_three_failure_uses_safe_context_without_looping(self):
+        message = "I'm overwhelmed; what should I be looking at?"
+        with patch.object(ai_routing_pipeline, "classify_agent_intent", side_effect=RuntimeError("down")) as stage_two, \
+                patch.object(ai_routing_pipeline, "classify_stage_three", side_effect=ValueError("invalid")) as stage_three:
+            selected = ai_routing_pipeline.select_agent_context(Mock(), message, [], "stage-two-model")
+        self.assertEqual(selected, ai_routing_pipeline.SAFE_MINIMAL_CONTEXT)
+        stage_two.assert_called_once()
+        stage_three.assert_called_once()
 
     def test_stage_two_controls_main_context_and_preserves_five_turns(self):
         history = [
@@ -178,6 +315,7 @@ class AIProposalTests(unittest.TestCase):
                 SimpleNamespace(status="completed", output_parsed={
                     "intent": "schedule_query", "time_scope": "today",
                     "include_activities": True, "include_exams": False,
+                    "confidence": "high",
                 }),
                 SimpleNamespace(status="completed", output_parsed={"message": "Your schedule", "actions": []}),
             ]
@@ -505,6 +643,7 @@ class AIProposalTests(unittest.TestCase):
         self.assertEqual(latest_request["request"], "Make it later.")
         self.assertEqual(latest_request["observations"]["activities"], updated_observations)
         self.assertIn("trust the latest observations", ai_proposal.STUDY_PLANNING_INSTRUCTIONS)
+        self.assertEqual(client.responses.parse.call_count, 3)
 
     def test_endpoint_session_keeps_five_completed_turns(self):
         connection = Mock()

@@ -6,6 +6,7 @@ import os
 import re
 from collections import deque
 from copy import deepcopy
+from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
 
@@ -34,7 +35,10 @@ def _redact_secrets(value):
 
 def _archive_turn(session_id, turn):
     """Append one JSON record, leaving all earlier archive records intact."""
-    record = {"session_id": session_id, "turn": _redact_secrets(turn)}
+    archived_turn = {key: value for key, value in turn.items() if key != "timestamp"}
+    record = {"session_id": session_id, "turn": _redact_secrets(archived_turn)}
+    if turn.get("timestamp") is not None:
+        record["timestamp"] = turn["timestamp"]
     data = (json.dumps(record, ensure_ascii=False) + "\n").encode("utf-8")
     flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
     descriptor = os.open(ARCHIVE_FILE, flags, 0o600)
@@ -68,7 +72,11 @@ def get_recent_turns(session_id):
 
 def add_completed_turn(session_id, user_message, proposal):
     """Keep five recent turns and archive the oldest before it leaves memory."""
-    turn = {"user": user_message, "assistant": deepcopy(proposal)}
+    turn = {
+        "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "user": user_message,
+        "assistant": deepcopy(proposal),
+    }
     with _lock:
         recent = _sessions.setdefault(session_id, deque(maxlen=MAX_TURNS))
         if len(recent) == MAX_TURNS:

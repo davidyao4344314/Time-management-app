@@ -69,8 +69,8 @@ proposal as a proposal, not as a completed calendar change.
 ### Archive compaction threshold (Stage 1)
 
 `backend/app/ai_memory.py` defines `ARCHIVE_TURN_THRESHOLD = 100` and
-`ARCHIVE_COMPACT_BATCH = 50`. After each turn is appended to
-the existing JSONL archive, the backend counts valid archived turn records
+`ARCHIVE_COMPACT_BATCH = 50`. After each turn is appended to the existing
+JSONL archive, the backend counts valid archived turn records
 across all sessions. `archive_needs_compaction()` returns `True` only when the
 count exceeds 100: 100 turns does not need compaction; 101 does. The backend
 then logs a warning with the turn count, without printing conversation text.
@@ -86,13 +86,41 @@ backend/.venv/bin/python -B -m unittest backend.test_ai_archive_compaction -v
 
 The tests cover archives of 0, 50, 99, 100, 101, and 150 turns.
 
-Stage 2 adds `select_archive_compaction_candidates()`. If the archive exceeds
-the Stage 1 threshold, it returns up to 50 oldest archived turns as read-only
-`compaction_candidates`, along with counts and known timestamp bounds. Dated
-turns are ordered by their stored completion times; undated legacy turns use
-archive file order after dated turns. At 100 archived turns it selects none;
-at 101 it selects 50. It does not read recent in-memory turns or rewrite the
-archive, and no protection, summarization, or deletion happens yet.
+### Archive candidate selection (Stage 2)
+
+`select_archive_compaction_candidates()` uses the Stage 1 threshold. If the
+archive exceeds 100 turns, it returns up to 50 oldest archived turns as
+`compaction_candidates`, along with candidate/remaining counts and known
+timestamp bounds. Dated turns are ordered by their stored completion times;
+undated legacy turns use archive file order after dated turns. At 100 archived
+turns it selects none; at 101 it selects 50 and leaves 51 unselected. This
+function reads only archived turns, not recent in-memory turns. It does not
+rewrite the archive.
+
+### Archive candidate protection labels (Stage 2.5)
+
+`backend/app/ai_archive_protection.py` classifies only the Stage 2 candidate
+list. `classify_archive_candidate()` labels one complete user/assistant turn;
+`classify_compaction_candidates()` groups the batch into `protected`,
+`compactable`, and `uncertain`, preserving order and the original archived
+record in each result. The result also includes counts for each group.
+
+Case-insensitive phrase rules protect explicit memory requests, long-term
+goals or plans, preferences, decisions, requirements, and constraints. Examples
+include "remember this", "from now on", "my long-term goal", "we decided",
+"this is a requirement", and "do not change". Weak words such as "important",
+"goal", and "plan" do not protect a turn on their own; ambiguous turns remain
+`uncertain`. Simple one-off explanation questions can be `compactable`.
+Both the user message and assistant response are checked, but proposed action
+arguments are not treated as conversation text.
+
+These are **labels only**. No model is called, and no turn is yet protected in
+storage, summarized, deleted, moved, or rewritten. To test both read-only
+stages without touching the real archive or calling OpenAI, run:
+
+```bash
+backend/.venv/bin/python -B -m unittest backend.test_ai_archive_compaction backend.test_ai_archive_protection -v
+```
 
 ### Context routing
 

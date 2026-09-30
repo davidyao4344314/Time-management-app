@@ -1,5 +1,6 @@
 .DS_Store
 .env
 .env.*
+backend/ai_memory_archive.jsonl
 __pycache__/
 *.pyc

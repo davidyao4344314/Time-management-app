@@ -567,7 +567,10 @@ class AIProposalTests(unittest.TestCase):
                     self.assertIn("exams", payload["observations"])
 
     def test_only_the_last_five_completed_turns_are_kept(self):
-        with patch.object(ai_memory, "_sessions", {}):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(ai_memory, "ARCHIVE_FILE", Path(directory) / "archive.jsonl"), \
+                patch.object(ai_memory, "_sessions", {}):
+            archive_file = ai_memory.ARCHIVE_FILE
             for number in range(1, 6):
                 ai_memory.add_completed_turn(
                     "session-one", f"Turn {number}",
@@ -577,6 +580,7 @@ class AIProposalTests(unittest.TestCase):
             self.assertEqual([turn["user"] for turn in first_five],
                              [f"Turn {number}" for number in range(1, 6)])
             self.assertEqual(first_five[0]["assistant"]["message"], "Reply 1")
+            self.assertFalse(archive_file.exists())
 
             ai_memory.add_completed_turn(
                 "session-one", "Turn 6", {"message": "Reply 6", "actions": []},
@@ -586,6 +590,79 @@ class AIProposalTests(unittest.TestCase):
                              [f"Turn {number}" for number in range(2, 7)])
             self.assertEqual([turn["assistant"]["message"] for turn in latest_five],
                              [f"Reply {number}" for number in range(2, 7)])
+            archived = [json.loads(line) for line in archive_file.read_text().splitlines()]
+            self.assertEqual([item["turn"]["user"] for item in archived], ["Turn 1"])
+            self.assertEqual(archived[0]["turn"]["assistant"]["message"], "Reply 1")
+            self.assertEqual(archive_file.stat().st_mode & 0o777, 0o600)
+
+            ai_memory.add_completed_turn(
+                "session-one", "Turn 7", {"message": "Reply 7", "actions": []},
+            )
+            self.assertEqual(
+                [turn["user"] for turn in ai_memory.get_recent_turns("session-one")],
+                [f"Turn {number}" for number in range(3, 8)],
+            )
+            archived = [json.loads(line) for line in archive_file.read_text().splitlines()]
+            self.assertEqual([item["turn"]["user"] for item in archived], ["Turn 1", "Turn 2"])
+            self.assertEqual([item["session_id"] for item in archived], ["session-one"] * 2)
+
+    def test_empty_archive_is_appended_and_archived_turns_are_not_sent(self):
+        secret = "sk-proj-" + "A" * 24
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(ai_memory, "ARCHIVE_FILE", Path(directory) / "archive.jsonl"), \
+                patch.object(ai_memory, "_sessions", {}):
+            ai_memory.ARCHIVE_FILE.touch()
+            for number in range(1, 8):
+                reply = f"Reply {number}"
+                if number == 1:
+                    reply += f" {secret}"
+                ai_memory.add_completed_turn(
+                    "session-one", f"Turn {number}", {"message": reply, "actions": []},
+                )
+            recent = ai_memory.get_recent_turns("session-one")
+            archived_text = ai_memory.ARCHIVE_FILE.read_text()
+            archived = [json.loads(line) for line in archived_text.splitlines()]
+
+        self.assertEqual([turn["user"] for turn in recent], ["Turn 3", "Turn 4", "Turn 5", "Turn 6", "Turn 7"])
+        self.assertEqual([item["turn"]["user"] for item in archived], ["Turn 1", "Turn 2"])
+        self.assertNotIn(secret, archived_text)
+        self.assertIn("[redacted API key]", archived[0]["turn"]["assistant"]["message"])
+
+        with patch.object(ai_proposal, "is_openai_api_key_configured", return_value=True), \
+                patch.dict(ai_proposal.os.environ, {"OPENAI_API_KEY": "test-key"}), \
+                patch.object(ai_proposal, "build_activity_observation", return_value={"today": []}), \
+                patch.object(ai_proposal, "build_exam_observation", return_value={"upcoming": []}), \
+                patch.object(ai_proposal, "OpenAI") as client_class:
+            client = client_class.return_value.__enter__.return_value
+            client.responses.parse.return_value = SimpleNamespace(
+                status="completed", output_parsed={"message": "Plan", "actions": []},
+            )
+            ai_proposal.get_agent_proposal(Mock(), "What should I study tonight?", recent)
+            messages = client.responses.parse.call_args.kwargs["input"]
+
+        self.assertEqual(
+            [message["content"] for message in messages if message["role"] == "user"][:-1],
+            ["Turn 3", "Turn 4", "Turn 5", "Turn 6", "Turn 7"],
+        )
+        self.assertNotIn("Turn 1", str(messages))
+        self.assertNotIn("Turn 2", str(messages))
+
+    def test_archive_failure_does_not_drop_the_oldest_turn(self):
+        with patch.object(ai_memory, "_sessions", {}), \
+                patch.object(ai_memory, "_archive_turn", side_effect=OSError("archive unavailable")):
+            for number in range(1, 6):
+                ai_memory.add_completed_turn(
+                    "session-one", f"Turn {number}",
+                    {"message": f"Reply {number}", "actions": []},
+                )
+            with self.assertRaisesRegex(OSError, "archive unavailable"):
+                ai_memory.add_completed_turn(
+                    "session-one", "Turn 6", {"message": "Reply 6", "actions": []},
+                )
+            self.assertEqual(
+                [turn["user"] for turn in ai_memory.get_recent_turns("session-one")],
+                ["Turn 1", "Turn 2", "Turn 3", "Turn 4", "Turn 5"],
+            )
 
     def test_message_only_is_valid(self):
         result = ai_proposal.validate_agent_proposal({
@@ -728,7 +805,9 @@ class AIProposalTests(unittest.TestCase):
             histories.append(list(recent_turns))
             return {"message": f"Reply to {message}", "actions": []}
 
-        with patch.object(ai_memory, "_sessions", {}), \
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(ai_memory, "ARCHIVE_FILE", Path(directory) / "archive.jsonl"), \
+                patch.object(ai_memory, "_sessions", {}), \
                 patch.object(api, "is_openai_api_key_configured", return_value=True), \
                 patch.object(api.sqlite3, "connect", return_value=connection), \
                 patch.object(api, "get_agent_proposal", side_effect=mock_proposal), \
@@ -742,6 +821,9 @@ class AIProposalTests(unittest.TestCase):
             stored = ai_memory.get_recent_turns(session_id)
             response = client.post("/ai/propose", json={"message": "Turn 7"})
             self.assertEqual(response.status_code, 200)
+            archive_rows = [
+                json.loads(line) for line in ai_memory.ARCHIVE_FILE.read_text().splitlines()
+            ]
 
         self.assertEqual([len(history) for history in histories], [0, 1, 2, 3, 4, 5, 5])
         self.assertEqual([turn["user"] for turn in stored],
@@ -749,6 +831,8 @@ class AIProposalTests(unittest.TestCase):
         self.assertEqual(stored[-1]["assistant"]["message"], "Reply to Turn 6")
         self.assertEqual([turn["user"] for turn in histories[-1]],
                          [f"Turn {number}" for number in range(2, 7)])
+        self.assertEqual([item["turn"]["user"] for item in archive_rows],
+                         ["Turn 1", "Turn 2"])
         insert.assert_not_called()
         self.assertEqual(connection.close.call_count, 7)
 

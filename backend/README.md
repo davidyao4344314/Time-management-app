@@ -22,7 +22,7 @@ not the ASGI app. The frontend's Vite `/api` proxy targets port 8001.
 
 ```text
 POST /ai/propose with a user message and browser session
-  -> read up to 5 recent completed conversation turns
+  -> read up to the configured number of recent completed turns (5–100)
   -> choose activity/exam context with the Stage 1/2/3 routing pipeline
   -> build fresh observations from the current SQLite data
   -> send the request, selected observations and recent turns to OpenAI
@@ -37,15 +37,16 @@ the proposal. `/ai/propose` reads the database without writing to it.
 ### Recent conversation memory
 
 A completed turn contains a user message and the assistant's response. The
-backend holds at most five recent completed turns per browser session in memory.
-When a sixth turn succeeds, the oldest turn is appended to the Git-ignored
-`backend/ai_memory_archive.jsonl` file, and the recent window becomes turns 2–6.
-After a seventh turn, it becomes turns 3–7. Archive entries preserve their order
-and include a session identifier.
+backend keeps 5–100 recent completed turns per browser session in memory; the
+default is 5. Change the limit in AI Settings. When a new turn exceeds the
+limit, the oldest turn is appended to the Git-ignored
+`backend/ai_memory_archive.jsonl` file. Lowering the limit archives excess
+in-memory turns before the next AI request; increasing it does not restore
+turns already archived. Archive entries preserve their order and session ID.
 
-Only recent turns are supplied to normal model requests. Archived turns are not
-searched, summarized, or sent to the model. Recent in-memory turns do not survive
-a server restart; the archive is not automatically restored into recent memory.
+Only recent turns are supplied to normal model requests. An archive-search helper
+exists, but it is not automatically called or sent to the model. Recent in-memory
+turns do not survive a server restart; the archive is not automatically restored.
 Failed proposals do not become completed turns. The conversation records a
 proposal as a proposal, not as a completed calendar change.
 
@@ -140,7 +141,7 @@ approval/execution endpoint, and no automatic call to `add_activity` for an
 AI-proposed action. A normal activity can still be added through the existing
 manual app workflow.
 
-Archived conversation retrieval or summarization, Screen Time context routing,
+Automatic archived-conversation retrieval or summarization, Screen Time context routing,
 goals and study-history observations, and observation hash/change caching are
 also not part of this workflow. They should not be assumed to affect a current
 AI response.

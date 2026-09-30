@@ -16,6 +16,43 @@ AGENT_MODEL_OPTIONS = {
 }
 DEFAULT_AGENT_MODEL = "gpt-6-luna"
 DEFAULT_AGENT_REASONING_EFFORT = "none"
+MIN_RECENT_TURNS = 5
+MAX_RECENT_TURNS = 100
+DEFAULT_RECENT_TURNS = 5
+RECENT_TURNS_ENV_KEY = "OPENAI_AGENT_MAX_RECENT_TURNS"
+
+
+def get_max_recent_turns():
+    """Read the local conversation limit, falling back to five if invalid."""
+    load_dotenv(AI_ENV_FILE)
+    try:
+        value = int(os.getenv(RECENT_TURNS_ENV_KEY, str(DEFAULT_RECENT_TURNS)))
+    except ValueError:
+        return DEFAULT_RECENT_TURNS
+    return value if MIN_RECENT_TURNS <= value <= MAX_RECENT_TURNS else DEFAULT_RECENT_TURNS
+
+
+def save_max_recent_turns(value):
+    """Persist the number of completed turns kept before archival."""
+    if type(value) is not int or not MIN_RECENT_TURNS <= value <= MAX_RECENT_TURNS:
+        raise ValueError("Choose a whole number from 5 to 100.")
+
+    try:
+        if AI_ENV_FILE.is_symlink():
+            raise RuntimeError("The local configuration file cannot be a symlink.")
+        if not AI_ENV_FILE.exists():
+            descriptor = os.open(AI_ENV_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            os.close(descriptor)
+        AI_ENV_FILE.chmod(0o600)
+        saved, _, _ = set_key(AI_ENV_FILE, RECENT_TURNS_ENV_KEY, str(value))
+        if not saved:
+            raise RuntimeError("Could not save the conversation limit.")
+        AI_ENV_FILE.chmod(0o600)
+    except OSError:
+        raise RuntimeError("Could not save the conversation limit.") from None
+
+    os.environ[RECENT_TURNS_ENV_KEY] = str(value)
+    return {"max_recent_turns": value}
 
 
 def get_agent_model_settings():

@@ -10,8 +10,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
 
+from backend.app.ai_config import get_max_recent_turns
 
-MAX_TURNS = 5
+
 ARCHIVE_FILE = Path(__file__).resolve().parents[1] / "ai_memory_archive.jsonl"
 _API_KEY_PATTERN = re.compile(r"sk-[A-Za-z0-9_-]{16,}")
 _sessions = {}
@@ -64,22 +65,36 @@ def has_session(session_id):
         return session_id in _sessions
 
 
+def _archive_excess_turns(session_id, recent, limit):
+    """Archive oldest turns before shrinking a session's recent window."""
+    while len(recent) > limit:
+        _archive_turn(session_id, recent[0])
+        recent.popleft()
+
+
 def get_recent_turns(session_id):
     """Return a copy so callers cannot alter stored conversation history."""
+    limit = get_max_recent_turns()
     with _lock:
-        return deepcopy(list(_sessions.get(session_id, ())))
+        recent = _sessions.get(session_id)
+        if recent is None:
+            return []
+        _archive_excess_turns(session_id, recent, limit)
+        return deepcopy(list(recent))
 
 
 def add_completed_turn(session_id, user_message, proposal):
-    """Keep five recent turns and archive the oldest before it leaves memory."""
+    """Keep the configured recent turns and archive older ones safely."""
+    limit = get_max_recent_turns()
     turn = {
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "user": user_message,
         "assistant": deepcopy(proposal),
     }
     with _lock:
-        recent = _sessions.setdefault(session_id, deque(maxlen=MAX_TURNS))
-        if len(recent) == MAX_TURNS:
+        recent = _sessions.setdefault(session_id, deque())
+        _archive_excess_turns(session_id, recent, limit)
+        if len(recent) == limit:
             _archive_turn(session_id, recent[0])
             recent.popleft()
         recent.append(turn)

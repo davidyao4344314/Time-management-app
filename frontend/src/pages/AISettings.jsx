@@ -27,6 +27,12 @@ function AISettings() {
   const [modelError, setModelError] = useState('')
   const [modelMessage, setModelMessage] = useState('')
   const [isSavingModel, setIsSavingModel] = useState(false)
+  const [maxRecentTurns, setMaxRecentTurns] = useState(5)
+  const [memoryBounds, setMemoryBounds] = useState({ min: 5, max: 100 })
+  const [memoryLoaded, setMemoryLoaded] = useState(false)
+  const [memoryError, setMemoryError] = useState('')
+  const [memoryMessage, setMemoryMessage] = useState('')
+  const [isSavingMemory, setIsSavingMemory] = useState(false)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -47,6 +53,28 @@ function AISettings() {
     }
 
     loadModelSettings()
+    return () => controller.abort()
+  }, [])
+
+  useEffect(() => {
+    const controller = new AbortController()
+
+    async function loadMemorySettings() {
+      try {
+        const response = await fetch('/api/ai/memory-config', { signal: controller.signal })
+        if (!response.ok) throw new Error('Could not load the conversation limit. Is the backend running?')
+        const settings = await response.json()
+        setMaxRecentTurns(settings.max_recent_turns)
+        setMemoryBounds({ min: settings.min, max: settings.max })
+        setMemoryLoaded(true)
+      } catch (error) {
+        if (error.name !== 'AbortError') {
+          setMemoryError(error.message || 'Could not load the conversation limit.')
+        }
+      }
+    }
+
+    loadMemorySettings()
     return () => controller.abort()
   }, [])
 
@@ -83,6 +111,35 @@ function AISettings() {
       setModelError(error.message || 'Could not save model settings.')
     } finally {
       setIsSavingModel(false)
+    }
+  }
+
+  async function handleSaveMemory(event) {
+    event.preventDefault()
+    setMemoryError('')
+    setMemoryMessage('')
+
+    const limit = Number(maxRecentTurns)
+    if (!Number.isInteger(limit) || limit < memoryBounds.min || limit > memoryBounds.max) {
+      setMemoryError(`Choose a whole number from ${memoryBounds.min} to ${memoryBounds.max}.`)
+      return
+    }
+
+    setIsSavingMemory(true)
+    try {
+      const response = await fetch('/api/ai/memory-config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ max_recent_turns: limit }),
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.detail || 'Could not save the conversation limit.')
+      setMaxRecentTurns(result.max_recent_turns)
+      setMemoryMessage('Conversation limit saved. It will apply to your next AI request.')
+    } catch (error) {
+      setMemoryError(error.message || 'Could not save the conversation limit.')
+    } finally {
+      setIsSavingMemory(false)
     }
   }
 
@@ -169,6 +226,35 @@ function AISettings() {
         </form>
         {modelError && <p role="alert">{modelError}</p>}
         {modelMessage && <p role="status">{modelMessage}</p>}
+      </section>
+
+      <section className="ai-settings ai-settings-model" aria-labelledby="ai-memory-heading">
+        <h3 id="ai-memory-heading">Conversation context</h3>
+        <p id="ai-memory-note">A turn is one message from you and one AI reply. Older turns are archived when the limit is exceeded. Higher limits send more conversation history to OpenAI, which can increase token usage and API costs.</p>
+        <form className="ai-settings-form" onSubmit={handleSaveMemory} noValidate>
+          <label htmlFor="ai-max-recent-turns">Recent conversation turns before archiving</label>
+          <input
+            id="ai-max-recent-turns"
+            type="number"
+            min={memoryBounds.min}
+            max={memoryBounds.max}
+            step="1"
+            value={maxRecentTurns}
+            onChange={(event) => {
+              setMaxRecentTurns(event.target.value)
+              setMemoryError('')
+              setMemoryMessage('')
+            }}
+            aria-describedby="ai-memory-note"
+            disabled={!memoryLoaded || isSavingMemory}
+            required
+          />
+          <button type="submit" disabled={!memoryLoaded || isSavingMemory}>
+            {isSavingMemory ? 'Saving...' : 'Save Conversation Limit'}
+          </button>
+        </form>
+        {memoryError && <p role="alert">{memoryError}</p>}
+        {memoryMessage && <p role="status">{memoryMessage}</p>}
       </section>
     </main>
   )

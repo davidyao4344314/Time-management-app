@@ -34,6 +34,47 @@ def activity_action(**changes):
 
 
 class AIProposalTests(unittest.TestCase):
+    def setUp(self):
+        # Existing tests describe the default five-turn behavior regardless of
+        # the developer's local, ignored .env setting.
+        for target in (ai_memory, ai_proposal):
+            limit_patch = patch.object(target, "get_max_recent_turns", return_value=5)
+            limit_patch.start()
+            self.addCleanup(limit_patch.stop)
+
+    def test_recent_turn_limit_is_saved_and_validated(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(ai_config, "AI_ENV_FILE", Path(directory) / ".env"), \
+                patch.dict(ai_config.os.environ, {ai_config.RECENT_TURNS_ENV_KEY: "5"}):
+            self.assertEqual(ai_config.get_max_recent_turns(), 5)
+            for value in (4, 101, 5.5, True, "20"):
+                with self.subTest(value=value), self.assertRaises(ValueError):
+                    ai_config.save_max_recent_turns(value)
+
+            self.assertEqual(ai_config.save_max_recent_turns(100), {"max_recent_turns": 100})
+            self.assertEqual(ai_config.get_max_recent_turns(), 100)
+            self.assertIn("OPENAI_AGENT_MAX_RECENT_TURNS", ai_config.AI_ENV_FILE.read_text())
+            self.assertEqual(ai_config.AI_ENV_FILE.stat().st_mode & 0o777, 0o600)
+
+    def test_recent_turn_limit_api(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(ai_config, "AI_ENV_FILE", Path(directory) / ".env"), \
+                patch.dict(ai_config.os.environ, {ai_config.RECENT_TURNS_ENV_KEY: "5"}):
+            client = TestClient(api.app)
+            initial = client.get("/ai/memory-config")
+            invalid_low = client.put("/ai/memory-config", json={"max_recent_turns": 4})
+            invalid_high = client.put("/ai/memory-config", json={"max_recent_turns": 101})
+            invalid_type = client.put("/ai/memory-config", json={"max_recent_turns": "20"})
+            saved = client.put("/ai/memory-config", json={"max_recent_turns": 20})
+            updated = client.get("/ai/memory-config")
+
+        self.assertEqual(initial.json(), {"max_recent_turns": 5, "min": 5, "max": 100})
+        self.assertEqual(invalid_low.status_code, 400)
+        self.assertEqual(invalid_high.status_code, 400)
+        self.assertEqual(invalid_type.status_code, 422)
+        self.assertEqual(saved.json(), {"max_recent_turns": 20})
+        self.assertEqual(updated.json()["max_recent_turns"], 20)
+
     def test_model_settings_allow_only_supported_openai_pairs(self):
         self.assertIn("gpt-6-luna", ai_config.AGENT_MODEL_OPTIONS)
         self.assertNotIn("none", ai_config.AGENT_MODEL_OPTIONS["gpt-6-astra"])
@@ -608,6 +649,71 @@ class AIProposalTests(unittest.TestCase):
             self.assertEqual([item["turn"]["user"] for item in archived], ["Turn 1", "Turn 2"])
             self.assertEqual([item["session_id"] for item in archived], ["session-one"] * 2)
 
+    def test_raised_and_lowered_limit_archives_without_losing_turns(self):
+        selected_limit = [10]
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(ai_memory, "ARCHIVE_FILE", Path(directory) / "archive.jsonl"), \
+                patch.object(ai_memory, "_sessions", {}), \
+                patch.object(ai_memory, "get_max_recent_turns", side_effect=lambda: selected_limit[0]):
+            for number in range(1, 11):
+                ai_memory.add_completed_turn(
+                    "session-one", f"Turn {number}",
+                    {"message": f"Reply {number}", "actions": []},
+                )
+            self.assertEqual(len(ai_memory.get_recent_turns("session-one")), 10)
+            self.assertFalse(ai_memory.ARCHIVE_FILE.exists())
+
+            selected_limit[0] = 5
+            recent = ai_memory.get_recent_turns("session-one")
+            self.assertEqual([turn["user"] for turn in recent], [f"Turn {n}" for n in range(6, 11)])
+            ai_memory.add_completed_turn(
+                "session-one", "Turn 11", {"message": "Reply 11", "actions": []},
+            )
+            archived = [json.loads(line) for line in ai_memory.ARCHIVE_FILE.read_text().splitlines()]
+            self.assertEqual([row["turn"]["user"] for row in archived], [f"Turn {n}" for n in range(1, 7)])
+            self.assertTrue(all(row.get("timestamp") for row in archived))
+            self.assertEqual(
+                [turn["user"] for turn in ai_memory.get_recent_turns("session-one")],
+                [f"Turn {n}" for n in range(7, 12)],
+            )
+
+    def test_limit_can_retain_one_hundred_turns(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(ai_memory, "ARCHIVE_FILE", Path(directory) / "archive.jsonl"), \
+                patch.object(ai_memory, "_sessions", {}), \
+                patch.object(ai_memory, "get_max_recent_turns", return_value=100):
+            for number in range(1, 102):
+                ai_memory.add_completed_turn(
+                    "session-one", f"Turn {number}",
+                    {"message": f"Reply {number}", "actions": []},
+                )
+            recent = ai_memory.get_recent_turns("session-one")
+            archived = [json.loads(line) for line in ai_memory.ARCHIVE_FILE.read_text().splitlines()]
+
+        self.assertEqual(len(recent), 100)
+        self.assertEqual(recent[0]["user"], "Turn 2")
+        self.assertEqual(recent[-1]["user"], "Turn 101")
+        self.assertEqual([row["turn"]["user"] for row in archived], ["Turn 1"])
+
+    def test_saved_limit_controls_the_real_archive_window(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(ai_config, "AI_ENV_FILE", Path(directory) / ".env"), \
+                patch.object(ai_memory, "ARCHIVE_FILE", Path(directory) / "archive.jsonl"), \
+                patch.object(ai_memory, "_sessions", {}), \
+                patch.object(ai_memory, "get_max_recent_turns", wraps=ai_config.get_max_recent_turns), \
+                patch.dict(ai_config.os.environ, {ai_config.RECENT_TURNS_ENV_KEY: "5"}):
+            ai_config.save_max_recent_turns(6)
+            for number in range(1, 8):
+                ai_memory.add_completed_turn(
+                    "session-one", f"Turn {number}",
+                    {"message": f"Reply {number}", "actions": []},
+                )
+            recent = ai_memory.get_recent_turns("session-one")
+            archived = [json.loads(line) for line in ai_memory.ARCHIVE_FILE.read_text().splitlines()]
+
+        self.assertEqual([turn["user"] for turn in recent], [f"Turn {n}" for n in range(2, 8)])
+        self.assertEqual([row["turn"]["user"] for row in archived], ["Turn 1"])
+
     def test_empty_archive_is_appended_and_archived_turns_are_not_sent(self):
         secret = "sk-proj-" + "A" * 24
         with tempfile.TemporaryDirectory() as directory, \
@@ -865,6 +971,29 @@ class AIProposalTests(unittest.TestCase):
         self.assertEqual(latest_request["observations"]["activities"], updated_observations)
         self.assertIn("trust the latest observations", ai_proposal.STUDY_PLANNING_INSTRUCTIONS)
         self.assertEqual(client.responses.parse.call_count, 3)
+
+    def test_main_agent_uses_configured_recent_turn_limit(self):
+        history = [
+            {"user": f"Turn {number}", "assistant": {"message": f"Reply {number}", "actions": []}}
+            for number in range(1, 9)
+        ]
+        selection = {"activities_scope": None, "include_exams": False, "exam_scope": None}
+        with patch.object(ai_proposal, "is_openai_api_key_configured", return_value=True), \
+                patch.object(ai_proposal, "get_max_recent_turns", return_value=8), \
+                patch.object(ai_proposal, "select_agent_context", return_value=selection), \
+                patch.dict(ai_proposal.os.environ, {"OPENAI_API_KEY": "test-key"}), \
+                patch.object(ai_proposal, "OpenAI") as client_class:
+            client = client_class.return_value.__enter__.return_value
+            client.responses.parse.return_value = SimpleNamespace(
+                status="completed", output_parsed={"message": "Reply", "actions": []},
+            )
+            ai_proposal.get_agent_proposal(Mock(), "What should I do?", history)
+            messages = client.responses.parse.call_args.kwargs["input"]
+
+        self.assertEqual(len(messages), 17)
+        self.assertEqual(messages[0], {"role": "user", "content": "Turn 1"})
+        self.assertEqual(messages[-2]["role"], "assistant")
+        self.assertEqual(json.loads(messages[-1]["content"])["request"], "What should I do?")
 
     def test_endpoint_session_keeps_five_completed_turns(self):
         connection = Mock()

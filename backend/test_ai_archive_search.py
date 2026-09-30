@@ -34,6 +34,9 @@ class ArchiveSearchTests(unittest.TestCase):
         archive_patch = patch.object(ai_memory, "ARCHIVE_FILE", self.archive_file)
         archive_patch.start()
         self.addCleanup(archive_patch.stop)
+        limit_patch = patch.object(ai_memory, "get_max_recent_turns", return_value=5)
+        limit_patch.start()
+        self.addCleanup(limit_patch.stop)
 
     def write_archive(self, *records):
         self.archive_file.write_text(

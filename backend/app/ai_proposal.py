@@ -10,7 +10,11 @@ from openai import OpenAI
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
 from backend.app.activity_observation import build_activity_observation
-from backend.app.ai_config import get_agent_model_settings, is_openai_api_key_configured
+from backend.app.ai_config import (
+    get_agent_model_settings,
+    get_max_recent_turns,
+    is_openai_api_key_configured,
+)
 from backend.app.ai_routing_pipeline import select_agent_context
 from backend.app.exam_observation import build_exam_observation
 
@@ -176,7 +180,7 @@ def get_agent_proposal(connection, user_request, recent_turns=None):
             )
         model_input = {"request": user_request.strip(), "observations": context}
         input_messages = []
-        for turn in list(recent_turns or [])[-5:]:
+        for turn in list(recent_turns or [])[-get_max_recent_turns():]:
             input_messages.append({"role": "user", "content": turn["user"]})
             input_messages.append({
                 "role": "assistant",

@@ -6,7 +6,7 @@ from sqlite3 import Error as SQLiteError
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from openai import OpenAIError
-from pydantic import BaseModel, SecretStr, ValidationError
+from pydantic import BaseModel, SecretStr, StrictInt, ValidationError
 
 from backend.app.activities import (
     add_activity,
@@ -23,9 +23,13 @@ from backend.app.activities import (
 from backend.app.database import create_connection, db_file
 from backend.app.ai_config import (
     AGENT_MODEL_OPTIONS,
+    MAX_RECENT_TURNS,
+    MIN_RECENT_TURNS,
     get_agent_model_settings,
+    get_max_recent_turns,
     is_openai_api_key_configured,
     save_agent_model_settings,
+    save_max_recent_turns,
     save_openai_api_key,
 )
 from backend.app.ai_memory import add_completed_turn, get_recent_turns, has_session
@@ -111,6 +115,29 @@ def configure_ai_model(config_request: AIModelConfigRequest):
         raise HTTPException(status_code=400, detail=str(error)) from None
     except RuntimeError:
         raise HTTPException(status_code=500, detail="Could not save model settings locally.") from None
+
+
+class AIMemoryConfigRequest(BaseModel):
+    max_recent_turns: StrictInt
+
+
+@app.get("/ai/memory-config")
+def ai_memory_config():
+    return {
+        "max_recent_turns": get_max_recent_turns(),
+        "min": MIN_RECENT_TURNS,
+        "max": MAX_RECENT_TURNS,
+    }
+
+
+@app.put("/ai/memory-config")
+def configure_ai_memory(config_request: AIMemoryConfigRequest):
+    try:
+        return save_max_recent_turns(config_request.max_recent_turns)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from None
+    except RuntimeError:
+        raise HTTPException(status_code=500, detail="Could not save the conversation limit locally.") from None
 
 
 @app.post("/ai/test-observation")

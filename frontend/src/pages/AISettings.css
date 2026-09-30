@@ -13,12 +13,22 @@
   font-weight: 600;
 }
 
-.ai-settings-form input {
+.ai-settings-form input,
+.ai-settings-form select {
   width: 100%;
   padding: 0.6rem;
   border: 1px solid #dddddd;
   border-radius: 0.25rem;
   font: inherit;
+}
+
+.ai-settings-model {
+  padding-top: 1.5rem;
+  border-top: 1px solid #dddddd;
+}
+
+.ai-settings-model h3 {
+  margin: 0;
 }
 
 .ai-settings-form button {

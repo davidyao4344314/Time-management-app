@@ -21,7 +21,13 @@ from backend.app.activities import (
     remove_duplicate_activities,
 )
 from backend.app.database import create_connection, db_file
-from backend.app.ai_config import is_openai_api_key_configured, save_openai_api_key
+from backend.app.ai_config import (
+    AGENT_MODEL_OPTIONS,
+    get_agent_model_settings,
+    is_openai_api_key_configured,
+    save_agent_model_settings,
+    save_openai_api_key,
+)
 from backend.app.ai_memory import add_completed_turn, get_recent_turns, has_session
 from backend.app.ai_observation_test import send_observation_to_llm
 from backend.app.ai_proposal import InvalidProposalError, get_agent_proposal
@@ -79,6 +85,32 @@ def configure_ai(config_request: AIConfigRequest):
             detail="Could not save the API key locally. Check file permissions.",
         ) from None
     return {"configured": True}
+
+
+class AIModelConfigRequest(BaseModel):
+    model: str
+    reasoning_effort: str
+
+
+@app.get("/ai/model-config")
+def ai_model_config():
+    return {
+        **get_agent_model_settings(),
+        "models": [
+            {"id": model, "efforts": efforts}
+            for model, efforts in AGENT_MODEL_OPTIONS.items()
+        ],
+    }
+
+
+@app.put("/ai/model-config")
+def configure_ai_model(config_request: AIModelConfigRequest):
+    try:
+        return save_agent_model_settings(config_request.model, config_request.reasoning_effort)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from None
+    except RuntimeError:
+        raise HTTPException(status_code=500, detail="Could not save model settings locally.") from None
 
 
 @app.post("/ai/test-observation")

@@ -10,7 +10,7 @@ from openai import OpenAI
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
 from backend.app.activity_observation import build_activity_observation
-from backend.app.ai_config import is_openai_api_key_configured
+from backend.app.ai_config import get_agent_model_settings, is_openai_api_key_configured
 from backend.app.ai_routing_pipeline import select_agent_context
 from backend.app.exam_observation import build_exam_observation
 
@@ -121,7 +121,15 @@ def get_agent_proposal(connection, user_request, recent_turns=None):
     if not isinstance(user_request, str) or not user_request.strip():
         raise ValueError("A user request is required.")
 
-    with OpenAI(api_key=os.environ["OPENAI_API_KEY"].strip(), timeout=60, max_retries=0) as client:
+    agent_settings = get_agent_model_settings()
+    effort = agent_settings["reasoning_effort"]
+    output_limit = {
+        "none": 1200, "low": 1600, "medium": 3000,
+        "high": 5000, "xhigh": 8000, "max": 10000,
+    }[effort]
+    timeout = 180 if effort in {"high", "xhigh", "max"} else 60
+
+    with OpenAI(api_key=os.environ["OPENAI_API_KEY"].strip(), timeout=timeout, max_retries=0) as client:
         selection = select_agent_context(
             client, user_request.strip(), recent_turns, PROPOSAL_MODEL,
         )
@@ -149,12 +157,12 @@ def get_agent_proposal(connection, user_request, recent_turns=None):
             "role": "user", "content": json.dumps(model_input, ensure_ascii=False),
         })
         response = client.responses.parse(
-            model=PROPOSAL_MODEL,
+            model=agent_settings["model"],
             instructions=STUDY_PLANNING_INSTRUCTIONS,
             input=input_messages,
             text_format=AgentProposal,
-            reasoning={"effort": "none"},
-            max_output_tokens=1200,
+            reasoning={"effort": effort},
+            max_output_tokens=output_limit,
             store=False,
         )
     if response.status != "completed" or response.output_parsed is None:

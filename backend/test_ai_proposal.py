@@ -2,8 +2,10 @@
 
 import json
 import sqlite3
+import tempfile
 import unittest
 from datetime import date
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import ANY, Mock, patch
 
@@ -11,7 +13,7 @@ from fastapi.testclient import TestClient
 
 from backend import fastapi_test as api
 from backend.app import (
-    activity_observation, ai_context_router, ai_intent_classifier, ai_memory, ai_proposal,
+    activity_observation, ai_config, ai_context_router, ai_intent_classifier, ai_memory, ai_proposal,
     ai_routing_pipeline, ai_stage_three_router, exam_observation,
 )
 
@@ -32,6 +34,53 @@ def activity_action(**changes):
 
 
 class AIProposalTests(unittest.TestCase):
+    def test_model_settings_allow_only_supported_openai_pairs(self):
+        self.assertIn("gpt-6-luna", ai_config.AGENT_MODEL_OPTIONS)
+        self.assertNotIn("none", ai_config.AGENT_MODEL_OPTIONS["gpt-6-astra"])
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(ai_config, "AI_ENV_FILE", Path(directory) / ".env"), \
+                patch.dict(ai_config.os.environ, {
+                    "OPENAI_AGENT_MODEL": "gpt-6-luna",
+                    "OPENAI_AGENT_REASONING_EFFORT": "none",
+                }):
+            with self.assertRaisesRegex(ValueError, "supported OpenAI model"):
+                ai_config.save_agent_model_settings("not-an-openai-model", "low")
+            with self.assertRaisesRegex(ValueError, "supported by that model"):
+                ai_config.save_agent_model_settings("gpt-6-astra", "none")
+            self.assertFalse(ai_config.AI_ENV_FILE.exists())
+
+            saved = ai_config.save_agent_model_settings("gpt-6.1-sol", "high")
+            self.assertEqual(saved, {"model": "gpt-6.1-sol", "reasoning_effort": "high"})
+            self.assertEqual(ai_config.get_agent_model_settings(), saved)
+            self.assertIn("OPENAI_AGENT_MODEL", ai_config.AI_ENV_FILE.read_text())
+            self.assertEqual(ai_config.AI_ENV_FILE.stat().st_mode & 0o777, 0o600)
+
+    def test_model_settings_api_returns_choices_and_rejects_invalid_pair(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(ai_config, "AI_ENV_FILE", Path(directory) / ".env"), \
+                patch.dict(ai_config.os.environ, {
+                    "OPENAI_AGENT_MODEL": "gpt-6-luna",
+                    "OPENAI_AGENT_REASONING_EFFORT": "none",
+                }):
+            client = TestClient(api.app)
+            status = client.get("/ai/model-config")
+            invalid = client.put("/ai/model-config", json={
+                "model": "gpt-6-astra", "reasoning_effort": "none",
+            })
+            valid = client.put("/ai/model-config", json={
+                "model": "gpt-6-sol", "reasoning_effort": "xhigh",
+            })
+            updated = client.get("/ai/model-config")
+
+        self.assertEqual(status.status_code, 200)
+        self.assertEqual(status.json()["model"], "gpt-6-luna")
+        self.assertIn("gpt-6-sol", [choice["id"] for choice in status.json()["models"]])
+        self.assertNotIn("api_key", status.json())
+        self.assertEqual(invalid.status_code, 400)
+        self.assertEqual(valid.status_code, 200)
+        self.assertEqual(updated.json()["model"], "gpt-6-sol")
+        self.assertEqual(updated.json()["reasoning_effort"], "xhigh")
+
     def test_stage_two_classification_examples(self):
         cases = (
             ("What should I study tonight?", "study_planning", "today", True, True,
@@ -612,6 +661,31 @@ class AIProposalTests(unittest.TestCase):
         self.assertEqual(model_input["observations"], {
             "activities": {"today": []}, "exams": {"upcoming": []},
         })
+
+    def test_saved_model_and_effort_apply_only_to_main_agent(self):
+        selection = {
+            "activities_scope": "today", "include_exams": False, "exam_scope": None,
+        }
+        with patch.object(ai_proposal, "is_openai_api_key_configured", return_value=True), \
+                patch.object(ai_proposal, "get_agent_model_settings", return_value={
+                    "model": "gpt-6-astra", "reasoning_effort": "high",
+                }), \
+                patch.dict(ai_proposal.os.environ, {"OPENAI_API_KEY": "test-key"}), \
+                patch.object(ai_proposal, "select_agent_context", return_value=selection) as router, \
+                patch.object(ai_proposal, "build_activity_observation", return_value={"today": []}), \
+                patch.object(ai_proposal, "OpenAI") as client_class:
+            client = client_class.return_value.__enter__.return_value
+            client.responses.parse.return_value = SimpleNamespace(
+                status="completed", output_parsed={"message": "You have time to study.", "actions": []},
+            )
+            ai_proposal.get_agent_proposal(Mock(), "What should I do today?")
+            request = client.responses.parse.call_args.kwargs
+
+        self.assertEqual(request["model"], "gpt-6-astra")
+        self.assertEqual(request["reasoning"], {"effort": "high"})
+        self.assertEqual(request["max_output_tokens"], 5000)
+        self.assertEqual(router.call_args.args[-1], ai_proposal.PROPOSAL_MODEL)
+        self.assertEqual(client_class.call_args.kwargs["timeout"], 180)
 
     def test_follow_up_receives_both_sides_of_the_turn_and_fresh_observations(self):
         history = [{

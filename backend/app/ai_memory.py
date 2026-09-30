@@ -2,6 +2,7 @@
 
 import fcntl
 import json
+import logging
 import os
 import re
 from collections import deque
@@ -14,9 +15,42 @@ from backend.app.ai_config import get_max_recent_turns
 
 
 ARCHIVE_FILE = Path(__file__).resolve().parents[1] / "ai_memory_archive.jsonl"
+ARCHIVE_TURN_THRESHOLD = 100
+ARCHIVE_COMPACT_BATCH = 50  # Reserved for a future compaction stage.
 _API_KEY_PATTERN = re.compile(r"sk-[A-Za-z0-9_-]{16,}")
 _sessions = {}
 _lock = Lock()
+_logger = logging.getLogger(__name__)
+
+
+def get_archive_turn_count():
+    """Count valid archived turns across all sessions without changing the file."""
+    try:
+        descriptor = os.open(
+            ARCHIVE_FILE, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        )
+    except FileNotFoundError:
+        return 0
+
+    count = 0
+    with os.fdopen(descriptor, "r", encoding="utf-8") as archive:
+        fcntl.flock(archive.fileno(), fcntl.LOCK_SH)
+        try:
+            for line in archive:
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(record, dict) and isinstance(record.get("turn"), dict):
+                    count += 1
+        finally:
+            fcntl.flock(archive.fileno(), fcntl.LOCK_UN)
+    return count
+
+
+def archive_needs_compaction(archive_turn_count):
+    """Report whether the archived-turn count exceeds the configured threshold."""
+    return archive_turn_count > ARCHIVE_TURN_THRESHOLD
 
 
 def _redact_secrets(value):
@@ -58,6 +92,19 @@ def _archive_turn(session_id, turn):
             fcntl.flock(descriptor, fcntl.LOCK_UN)
         finally:
             os.close(descriptor)
+
+    # This diagnostic must not fail a completed archive append: callers remove
+    # the recent turn only after _archive_turn returns.
+    try:
+        archive_turn_count = get_archive_turn_count()
+    except (OSError, UnicodeError):
+        _logger.warning("Could not check the archive compaction threshold.")
+    else:
+        if archive_needs_compaction(archive_turn_count):
+            _logger.warning(
+                "Archive compaction required: %d archived turns.",
+                archive_turn_count,
+            )
 
 
 def has_session(session_id):

@@ -1,7 +1,8 @@
-# Study Planning App Backend
+# Study Planning App
 
-This README describes the backend as it currently works. In particular, the AI
-agent can **propose** an activity, but cannot yet save an AI-proposed activity.
+This README explains how to run the project and describes the backend as it
+currently works. The AI agent can **propose** an activity, but cannot yet save
+an AI-proposed activity.
 
 ## Run the API
 
@@ -17,6 +18,21 @@ Open `http://127.0.0.1:8001/docs` for the API documentation. Press `Ctrl+C` in
 the terminal to stop the server. The FastAPI `app` is in
 `backend/fastapi_test.py`; `backend/app/main.py` is an interactive Python program,
 not the ASGI app. The frontend's Vite `/api` proxy targets port 8001.
+
+## Run the frontend
+
+Open a second terminal and, from the project root, run:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+`npm install` is only needed the first time or after dependencies change. Open
+the local URL printed by Vite, usually `http://localhost:5173/`. Keep the
+backend running in the first terminal for features that use the API. Press
+`Ctrl+C` in the frontend terminal to stop Vite.
 
 ## AI study-planning workflow: implemented
 

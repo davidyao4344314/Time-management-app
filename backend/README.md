@@ -66,6 +66,34 @@ turns do not survive a server restart; the archive is not automatically restored
 Failed proposals do not become completed turns. The conversation records a
 proposal as a proposal, not as a completed calendar change.
 
+### Archive compaction threshold (Stage 1)
+
+`backend/app/ai_memory.py` defines `ARCHIVE_TURN_THRESHOLD = 100` and
+`ARCHIVE_COMPACT_BATCH = 50`. After each turn is appended to
+the existing JSONL archive, the backend counts valid archived turn records
+across all sessions. `archive_needs_compaction()` returns `True` only when the
+count exceeds 100: 100 turns does not need compaction; 101 does. The backend
+then logs a warning with the turn count, without printing conversation text.
+
+This is detection only. It does not summarize, delete, or compact archived
+turns, change the recent-memory limit, or send archived turns to normal model
+requests. To test the boundary cases without changing the real archive or
+calling OpenAI, run from the project root:
+
+```bash
+backend/.venv/bin/python -B -m unittest backend.test_ai_archive_compaction -v
+```
+
+The tests cover archives of 0, 50, 99, 100, 101, and 150 turns.
+
+Stage 2 adds `select_archive_compaction_candidates()`. If the archive exceeds
+the Stage 1 threshold, it returns up to 50 oldest archived turns as read-only
+`compaction_candidates`, along with counts and known timestamp bounds. Dated
+turns are ordered by their stored completion times; undated legacy turns use
+archive file order after dated turns. At 100 archived turns it selects none;
+at 101 it selects 50. It does not read recent in-memory turns or rewrite the
+archive, and no protection, summarization, or deletion happens yet.
+
 ### Context routing
 
 Routing chooses *which data to include*; the router does not answer the user or

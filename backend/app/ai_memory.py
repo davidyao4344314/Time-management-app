@@ -16,41 +16,98 @@ from backend.app.ai_config import get_max_recent_turns
 
 ARCHIVE_FILE = Path(__file__).resolve().parents[1] / "ai_memory_archive.jsonl"
 ARCHIVE_TURN_THRESHOLD = 100
-ARCHIVE_COMPACT_BATCH = 50  # Reserved for a future compaction stage.
+ARCHIVE_COMPACT_BATCH = 50
 _API_KEY_PATTERN = re.compile(r"sk-[A-Za-z0-9_-]{16,}")
 _sessions = {}
 _lock = Lock()
 _logger = logging.getLogger(__name__)
 
 
-def get_archive_turn_count():
-    """Count valid archived turns across all sessions without changing the file."""
+def _iter_archived_turns():
+    """Read valid JSONL archive records with their file positions."""
     try:
         descriptor = os.open(
             ARCHIVE_FILE, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
         )
     except FileNotFoundError:
-        return 0
+        return
 
-    count = 0
     with os.fdopen(descriptor, "r", encoding="utf-8") as archive:
         fcntl.flock(archive.fileno(), fcntl.LOCK_SH)
         try:
-            for line in archive:
+            for position, line in enumerate(archive):
                 try:
                     record = json.loads(line)
                 except json.JSONDecodeError:
                     continue
                 if isinstance(record, dict) and isinstance(record.get("turn"), dict):
-                    count += 1
+                    yield position, record
         finally:
             fcntl.flock(archive.fileno(), fcntl.LOCK_UN)
-    return count
+
+
+def get_archive_turn_count():
+    """Count valid archived turns across all sessions without changing the file."""
+    return sum(1 for _ in _iter_archived_turns())
 
 
 def archive_needs_compaction(archive_turn_count):
     """Report whether the archived-turn count exceeds the configured threshold."""
     return archive_turn_count > ARCHIVE_TURN_THRESHOLD
+
+
+def _archive_timestamp(record):
+    """Return a comparable completion time, or None for an undated record."""
+    value = record.get("timestamp") or record["turn"].get("timestamp")
+    if not isinstance(value, str):
+        return None
+    try:
+        timestamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+        return None
+    return timestamp.astimezone(timezone.utc)
+
+
+def select_archive_compaction_candidates(*, batch_size=None):
+    """Select the oldest archived turns; do not change archive or recent memory."""
+    if batch_size is None:
+        batch_size = ARCHIVE_COMPACT_BATCH
+    if isinstance(batch_size, bool) or not isinstance(batch_size, int) or batch_size < 0:
+        raise ValueError("batch_size must be a non-negative integer.")
+
+    entries = [
+        (position, record, _archive_timestamp(record))
+        for position, record in _iter_archived_turns()
+    ]
+    archive_turn_count = len(entries)
+    needs_compaction = archive_needs_compaction(archive_turn_count)
+    candidates = []
+    if needs_compaction and batch_size:
+        # Undated legacy turns have no reliable completion time. Keep their
+        # original file order after the timestamped records rather than
+        # inventing dates or treating append order as a timestamp.
+        ordered = sorted(
+            entries,
+            key=lambda entry: (
+                entry[2] is None,
+                entry[2] or datetime.max.replace(tzinfo=timezone.utc),
+                entry[0],
+            ),
+        )
+        candidates = ordered[:batch_size]
+
+    known_times = [timestamp for _, _, timestamp in candidates if timestamp is not None]
+    return {
+        "needs_compaction": needs_compaction,
+        "archive_turn_count": archive_turn_count,
+        "candidate_count": len(candidates),
+        "remaining_turn_count": archive_turn_count - len(candidates),
+        "compaction_candidates": [record for _, record, _ in candidates],
+        "oldest_candidate_timestamp": min(known_times).isoformat() if known_times else None,
+        "newest_candidate_timestamp": max(known_times).isoformat() if known_times else None,
+    }
 
 
 def _redact_secrets(value):

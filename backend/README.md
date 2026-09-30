@@ -114,12 +114,90 @@ include "remember this", "from now on", "my long-term goal", "we decided",
 Both the user message and assistant response are checked, but proposed action
 arguments are not treated as conversation text.
 
-These are **labels only**. No model is called, and no turn is yet protected in
-storage, summarized, deleted, moved, or rewritten. To test both read-only
-stages without touching the real archive or calling OpenAI, run:
+Stage 2.5 itself produces **labels only**: it makes no model call and changes
+no archive records. Later stages use these labels to decide what may be
+summarized and persisted. To test both read-only stages without touching the
+real archive or calling OpenAI, run:
 
 ```bash
 backend/.venv/bin/python -B -m unittest backend.test_ai_archive_compaction backend.test_ai_archive_protection -v
+```
+
+### Resolve uncertain archive candidates (Stage 3)
+
+`backend/app/ai_archive_llm_classifier.py` sends only Stage 2.5 `uncertain`
+turns to a small OpenAI classification call. Its structured result must label
+each candidate `protected` or `compactable` with a compatible category. A
+missing key, failed call, or invalid response keeps the affected batch
+`protected` rather than risking its removal. This stage does not edit the
+archive. Its tests mock OpenAI:
+
+```bash
+backend/.venv/bin/python -B -m unittest backend.test_ai_archive_llm_classifier -v
+```
+
+### Summarize compactable turns (Stage 4)
+
+`backend/app/ai_archive_summary.py` summarizes only candidates with final
+`compactable` status. It produces short bullets and keywords under the fixed
+categories `activities`, `exams_tests`, `study_topics`, `technical_issues`, and
+`general`, plus the source-turn refs and time range. It can flag meaningful
+`general` bullets for a category review. Protected candidates are excluded.
+The result is still in memory; no raw archive turns are removed.
+
+### Review a possible new category (Stage 4.5)
+
+`backend/app/ai_archive_category_review.py` runs a second, small model call
+only when Stage 4 flags unresolved `general` items. The model may propose at
+most one broad new category. Python checks the name, duplicates/synonyms,
+protected-memory categories, and evidence from at least two matching summary
+items. If accepted, only those summary bullets move to the new category in
+the in-memory result. Rejected bullets stay under `general`; no archive file
+is changed at this stage. These tests also mock OpenAI:
+
+```bash
+backend/.venv/bin/python -B -m unittest backend.test_ai_archive_summary backend.test_ai_archive_category_review -v
+```
+
+### Persist a compacted summary (Stage 5)
+
+`backend/app/ai_archive_persistence.py` exposes
+`persist_compacted_archive(final_result, classified_candidates)`. It accepts
+the final Stage 4/4.5 result and the same final classified-candidate list used
+to make it. Stage 5 makes **no** model call and does not decide anew which
+turns are compactable. It validates the summary, source count and refs, time
+range, and each source's final `compactable` status before touching the
+archive. Missing, duplicate, ambiguous, or protected source matches abort
+without removing raw turns.
+
+The existing Git-ignored `backend/ai_memory_archive.jsonl` now supports two
+record kinds: raw turns (with `turn` and, for new turns, a UUID `turn_id`) and
+`compressed_summary` records. A compressed record contains a distinct UUID
+`summary_id`, `created_at`, `period_start`, `period_end`,
+`source_turn_count`, categorized summary bullets/keywords,
+`source_turn_refs`, and a source fingerprint. Older raw turns without IDs
+must match their complete stored record *uniquely*; otherwise Stage 5 stops.
+Existing archive search still reads raw turns only—it does not retrieve
+compressed summaries yet.
+
+Stage 5 writes and verifies a temporary copy containing the summary while
+retaining all raw turns. It then prepares and verifies the final copy with
+only the matched raw turns removed. A single most-recent private backup,
+`backend/ai_memory_archive.backup.jsonl`, preserves the previous archive
+before the atomic replacement. Archive appends and replacement share a stable
+lock file. If validation or a write fails, the original archive stays in
+place; if post-replacement verification fails, Stage 5 attempts to restore
+it. If restoration itself fails, the backup remains for recovery. Archive,
+backup, lock, and temporary files are ignored by Git. Retrying the same
+source set returns `already_persisted` instead of adding a second summary.
+
+Stage 5 is implemented but is **not automatically run** when the Stage 1
+threshold is crossed, and it has not been run on the live archive as part of
+development. To exercise normal success and failure cases A–G safely using
+temporary files, run:
+
+```bash
+backend/.venv/bin/python -B -m unittest backend.test_ai_archive_persistence -v
 ```
 
 ### Context routing
@@ -213,10 +291,10 @@ approval/execution endpoint, and no automatic call to `add_activity` for an
 AI-proposed action. A normal activity can still be added through the existing
 manual app workflow.
 
-Automatic archived-conversation retrieval or summarization, Screen Time context routing,
-goals and study-history observations, and observation hash/change caching are
-also not part of this workflow. They should not be assumed to affect a current
-AI response.
+Automatic archive-compaction runs and automatic retrieval of archived turns or
+compressed summaries, Screen Time context routing, goals and study-history
+observations, and observation hash/change caching are not part of the normal
+AI request flow. They should not be assumed to affect a current AI response.
 
 The intended later workflow is: show a validated proposal to the user, ask for
 approval, then use a separate backend action to save an approved activity and

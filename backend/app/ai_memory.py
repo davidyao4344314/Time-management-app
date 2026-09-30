@@ -5,7 +5,9 @@ import json
 import logging
 import os
 import re
+import uuid
 from collections import deque
+from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,6 +23,23 @@ _API_KEY_PATTERN = re.compile(r"sk-[A-Za-z0-9_-]{16,}")
 _sessions = {}
 _lock = Lock()
 _logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def _archive_write_lock():
+    """Lock a stable sidecar inode across appends and archive replacements."""
+    lock_path = ARCHIVE_FILE.with_name(ARCHIVE_FILE.name + ".lock")
+    flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(lock_path, flags, 0o600)
+    try:
+        os.fchmod(descriptor, 0o600)
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+    finally:
+        os.close(descriptor)
 
 
 def _iter_archived_turns():
@@ -128,27 +147,32 @@ def _redact_secrets(value):
 def _archive_turn(session_id, turn):
     """Append one JSON record, leaving all earlier archive records intact."""
     archived_turn = {key: value for key, value in turn.items() if key != "timestamp"}
-    record = {"session_id": session_id, "turn": _redact_secrets(archived_turn)}
+    record = {
+        "turn_id": str(uuid.uuid4()),
+        "session_id": session_id,
+        "turn": _redact_secrets(archived_turn),
+    }
     if turn.get("timestamp") is not None:
         record["timestamp"] = turn["timestamp"]
     data = (json.dumps(record, ensure_ascii=False) + "\n").encode("utf-8")
     flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
-    descriptor = os.open(ARCHIVE_FILE, flags, 0o600)
-    try:
-        fcntl.flock(descriptor, fcntl.LOCK_EX)
-        os.fchmod(descriptor, 0o600)
-        remaining = data
-        while remaining:
-            written = os.write(descriptor, remaining)
-            if written == 0:
-                raise OSError("Could not append the archived conversation turn.")
-            remaining = remaining[written:]
-        os.fsync(descriptor)
-    finally:
+    with _archive_write_lock():
+        descriptor = os.open(ARCHIVE_FILE, flags, 0o600)
         try:
-            fcntl.flock(descriptor, fcntl.LOCK_UN)
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            os.fchmod(descriptor, 0o600)
+            remaining = data
+            while remaining:
+                written = os.write(descriptor, remaining)
+                if written == 0:
+                    raise OSError("Could not append the archived conversation turn.")
+                remaining = remaining[written:]
+            os.fsync(descriptor)
         finally:
-            os.close(descriptor)
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+            finally:
+                os.close(descriptor)
 
     # This diagnostic must not fail a completed archive append: callers remove
     # the recent turn only after _archive_turn returns.

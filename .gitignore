@@ -2,5 +2,8 @@
 .env
 .env.*
 backend/ai_memory_archive.jsonl
+backend/ai_memory_archive.jsonl.lock
+backend/ai_memory_archive.backup.jsonl
+backend/.archive-stage5-*
 __pycache__/
 *.pyc

@@ -57,6 +57,9 @@ class ArchiveSummaryTests(unittest.TestCase):
         self.client = self.openai.return_value.__enter__.return_value
 
     def set_response(self, value, *, status="completed"):
+        if isinstance(value, dict) and "needs_category_review" not in value:
+            value = {**value, "needs_category_review": False,
+                     "uncategorized_item_refs": []}
         self.client.responses.parse.return_value = SimpleNamespace(
             status=status, output_parsed=value,
         )
@@ -225,6 +228,39 @@ class ArchiveSummaryTests(unittest.TestCase):
         self.assertEqual(set(result["categories"]), set(categories()))
         self.assertEqual(result["categories"]["general"], {"summary": [], "keywords": []})
         self.assertEqual(result["source_turn_count"], 5)
+
+    def test_stage_four_flags_only_selected_general_items_for_review(self):
+        self.set_response({
+            **categories(general={
+                "summary": ["Discussed internship applications.", "Discussed CV preparation."],
+                "keywords": ["internships", "CV"],
+            }),
+            "needs_category_review": True,
+            "uncategorized_item_refs": [0, 1],
+        })
+        result = summary.summarize_compactable_archive_turns([
+            classified("What about internships and CVs?"),
+        ])
+        self.assertTrue(result["success"])
+        self.assertEqual(result["uncategorized_item_refs"], [0, 1])
+        self.assertTrue(result["needs_category_review"])
+        self.assertEqual(set(result["categories"]), set(summary.BASE_ARCHIVE_CATEGORIES))
+
+    def test_stage_four_rejects_invalid_review_refs(self):
+        general = categories(general={"summary": ["Travel discussion."], "keywords": []})
+        invalid = (
+            {**general, "needs_category_review": True, "uncategorized_item_refs": []},
+            {**general, "needs_category_review": False, "uncategorized_item_refs": [0]},
+            {**general, "needs_category_review": True, "uncategorized_item_refs": [1]},
+            {**general, "needs_category_review": True, "uncategorized_item_refs": [0, 0]},
+        )
+        for output in invalid:
+            with self.subTest(output=output):
+                self.set_response(output)
+                result = summary.summarize_compactable_archive_turns([
+                    classified("Travel discussion"),
+                ])
+                self.assertFalse(result["success"])
 
 
 if __name__ == "__main__":

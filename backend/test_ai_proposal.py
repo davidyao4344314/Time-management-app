@@ -371,7 +371,9 @@ class AIProposalTests(unittest.TestCase):
             result = ai_proposal.get_agent_proposal(Mock(), message, history)
             calls = client.responses.parse.call_args_list
 
-        self.assertEqual(result, {"message": "Your schedule", "actions": []})
+        self.assertEqual(result, {
+            "message": "Your schedule", "actions": [], "memory_request": None,
+        })
         self.assertEqual(len(calls), 2)
         classifier_input = json.loads(calls[0].kwargs["input"][0]["content"])
         self.assertNotIn("observations", classifier_input)
@@ -670,6 +672,74 @@ class AIProposalTests(unittest.TestCase):
             "actions": [],
         })
         self.assertEqual(result.model_dump()["actions"], [])
+        self.assertIsNone(result.memory_request)
+
+    def test_memory_request_supports_time_topic_and_both(self):
+        cases = (
+            ({"time_reference": "yesterday", "search_terms": []},
+             "yesterday", []),
+            ({"time_reference": None, "search_terms": ["screen time"]},
+             None, ["screen time"]),
+            ({"time_reference": "last_week", "search_terms": ["COMPSCI", "study plan"]},
+             "last_week", ["COMPSCI", "study plan"]),
+            ({"time_reference": "unspecified", "search_terms": []},
+             "unspecified", []),
+        )
+        for request, time_reference, terms in cases:
+            with self.subTest(request=request):
+                result = ai_proposal.validate_agent_proposal({
+                    "message": "I need to look up that earlier conversation.",
+                    "actions": [], "memory_request": request,
+                })
+                self.assertEqual(result.memory_request.time_reference, time_reference)
+                self.assertEqual(result.memory_request.search_terms, terms)
+
+    def test_invalid_memory_requests_are_rejected(self):
+        invalid_requests = (
+            {"time_reference": "last_year", "search_terms": ["COMPSCI"]},
+            {"time_reference": "2026-09-30", "search_terms": []},
+            {"time_reference": None, "search_terms": ["what did we about"]},
+            {"time_reference": None, "search_terms": [" "]},
+            {"time_reference": None, "search_terms": list("abcdef")},
+            {"time_reference": None, "search_terms": "COMPSCI"},
+            {"time_reference": None, "search_terms": [123]},
+            {"time_reference": "yesterday", "search_terms": [], "archive_content": "made up"},
+            {"search_terms": ["COMPSCI"]},
+        )
+        for request in invalid_requests:
+            with self.subTest(request=request):
+                with self.assertRaises(ai_proposal.InvalidProposalError):
+                    ai_proposal.validate_agent_proposal({
+                        "message": "I need to look that up.",
+                        "actions": [], "memory_request": request,
+                    })
+
+    def test_model_can_return_memory_request_without_reading_archive(self):
+        expected_request = {"time_reference": "last_week", "search_terms": ["COMPSCI"]}
+        with patch.object(ai_proposal, "is_openai_api_key_configured", return_value=True), \
+                patch.dict(ai_proposal.os.environ, {"OPENAI_API_KEY": "test-key"}), \
+                patch.object(ai_proposal, "select_agent_context", return_value={
+                    "activities_scope": None, "include_exams": False, "exam_scope": None,
+                }), \
+                patch.object(ai_proposal, "OpenAI") as client_class, \
+                patch.object(ai_memory, "_archive_turn") as archive:
+            client = client_class.return_value.__enter__.return_value
+            client.responses.parse.return_value = SimpleNamespace(
+                status="completed", output_parsed={
+                    "message": "I need to look up that earlier conversation.",
+                    "actions": [], "memory_request": expected_request,
+                },
+            )
+            result = ai_proposal.get_agent_proposal(
+                Mock(), "What did we talk about last week about COMPSCI?",
+            )
+            request = client.responses.parse.call_args.kwargs
+
+        self.assertEqual(result["memory_request"], expected_request)
+        self.assertEqual(result["actions"], [])
+        self.assertEqual(request["text_format"], ai_proposal.AgentProposal)
+        self.assertNotIn("archived", str(request["input"]))
+        archive.assert_not_called()
 
     def test_add_activity_proposal_is_valid(self):
         result = ai_proposal.validate_agent_proposal({
@@ -716,7 +786,7 @@ class AIProposalTests(unittest.TestCase):
             ai_proposal.validate_agent_proposal({"message": "Plan", "actions": [incomplete]})
 
     def test_model_receives_separate_observations_and_returns_proposal(self):
-        expected = {"message": "No change needed.", "actions": []}
+        expected = {"message": "No change needed.", "actions": [], "memory_request": None}
         with patch.object(ai_proposal, "is_openai_api_key_configured", return_value=True), \
                 patch.dict(ai_proposal.os.environ, {"OPENAI_API_KEY": "test-key"}), \
                 patch.object(ai_proposal, "build_activity_observation", return_value={"today": []}), \
@@ -878,6 +948,8 @@ class AIProposalTests(unittest.TestCase):
             "only allowed tool is add_activity",
             "Never execute a tool, generate SQL",
             '"message": "response for the user", "actions": []',
+            '"memory_request": null',
+            "Do not claim to remember or invent archived details",
         ):
             with self.subTest(rule=rule):
                 self.assertIn(rule, instructions)

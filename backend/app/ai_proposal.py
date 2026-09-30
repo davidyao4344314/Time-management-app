@@ -25,7 +25,11 @@ Recent user and assistant messages are conversation context for follow-up reques
 
 Keep normal advice in the user-facing message. Put proposed app changes only in the separate actions list. Propose an action only when a calendar change would help; otherwise return an empty actions list. The only allowed tool is add_activity. Never execute a tool, generate SQL, or claim an action was completed or saved without backend confirmation.
 
-Return the required structure: {"message": "response for the user", "actions": []}. For an add_activity proposal, use the existing name, category, subject, activity_type, date, weekday, start_time, and end_time fields. Activity type must be one_time, daily, or weekly. Use YYYY-MM-DD dates, Monday-Sunday weekdays, HH:MM times, and null for fields that do not apply. Do not present proposed activities as already scheduled."""
+Return the required structure: {"message": "response for the user", "actions": [], "memory_request": null}. For an add_activity proposal, use the existing name, category, subject, activity_type, date, weekday, start_time, and end_time fields. Activity type must be one_time, daily, or weekly. Use YYYY-MM-DD dates, Monday-Sunday weekdays, HH:MM times, and null for fields that do not apply. Do not present proposed activities as already scheduled.
+
+Set memory_request only when the user clearly asks about an older conversation that is not available in the recent turns, such as a plan discussed before or what they said last week. Do not request archived memory for an ordinary schedule, activity, or exam question. Do not claim to remember or invent archived details: when requesting memory, say briefly that the earlier conversation needs to be looked up. This stage cannot read archives or execute the request.
+
+For memory_request, return {"time_reference": null, "search_terms": ["screen time"]} when only a topic is known, or {"time_reference": "yesterday", "search_terms": []} when only a time is known. Use only the symbolic time_reference values today, yesterday, last_week, this_week, last_month, this_month, or unspecified; use null when no time is given. Use unspecified for a broad request about older conversation with no identifiable date or topic. Never calculate exact dates. Include at most five meaningful topic terms, not generic words such as the, what, did, we, or about. If no older-conversation lookup is needed, use memory_request: null."""
 
 
 class AddActivityArguments(BaseModel):
@@ -86,11 +90,39 @@ class AddActivityAction(BaseModel):
     arguments: AddActivityArguments
 
 
+class MemoryRequest(BaseModel):
+    """A request to retrieve older conversation later, not retrieved content."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    time_reference: Literal[
+        "today", "yesterday", "last_week", "this_week",
+        "last_month", "this_month", "unspecified",
+    ] | None
+    search_terms: list[str]
+
+    @model_validator(mode="after")
+    def validate_search(self):
+        if len(self.search_terms) > 5:
+            raise ValueError("Memory requests can contain at most five search terms.")
+        generic_words = {"the", "what", "did", "we", "about", "was", "that", "before"}
+        cleaned_terms = []
+        for term in self.search_terms:
+            cleaned = term.strip()
+            words = re.findall(r"[\w]+", cleaned.casefold())
+            if not cleaned or not words or all(word in generic_words for word in words):
+                raise ValueError("Memory search terms must name a meaningful topic.")
+            cleaned_terms.append(cleaned)
+        self.search_terms = cleaned_terms
+        return self
+
+
 class AgentProposal(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     message: str
     actions: list[AddActivityAction]
+    memory_request: MemoryRequest | None = None
 
     @model_validator(mode="after")
     def validate_message(self):
@@ -105,7 +137,7 @@ class InvalidProposalError(ValueError):
 
 
 def validate_agent_proposal(value):
-    """Reject unknown tools, extra fields, and invalid activity details."""
+    """Reject unknown tools, malformed activities, and invalid memory requests."""
     try:
         if isinstance(value, AgentProposal):
             value = value.model_dump()

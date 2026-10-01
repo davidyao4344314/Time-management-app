@@ -4,13 +4,11 @@ from sqlite3 import Error as SQLiteError
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, SecretStr
 
+from backend.app import activity_service
 from backend.app.activities import (
-    add_activity,
     delete_activity,
     delte_all_activities,
-    edit_activity,
     get_activities_by_name,
-    get_activity_by_id,
     get_activity_name_by_id,
     get_all_activities,
     move_activity,
@@ -251,25 +249,15 @@ def exam_to_dict(exam):
 
 
 def normalize_optional_time(value):
-    if value is None or not value.strip():
-        return None
-
-    return datetime.strptime(value.strip(), "%H:%M").strftime("%H:%M")
+    return activity_service.normalize_optional_time(value)
 
 
 def validate_optional_time_range(start_time, end_time):
-    if start_time is None or end_time is None:
-        return
-
-    parsed_start = datetime.strptime(start_time, "%H:%M")
-    parsed_end = datetime.strptime(end_time, "%H:%M")
-
-    if parsed_start >= parsed_end:
-        raise HTTPException(
-            status_code=400,
-            detail="End time must be later than start time.",
-        )
-
+    # Exams retain the same HTTP helper and error response.
+    try:
+        activity_service.validate_optional_time_range(start_time, end_time)
+    except activity_service.ActivityValidationError as error:
+        raise HTTPException(status_code=error.status_code, detail=error.detail) from None
 
 @app.get("/exams")
 def all_exams():
@@ -472,104 +460,17 @@ def all_activities():
 
 @app.post("/activities", status_code=201)
 def create_activity(activity_request: AddActivityRequest):
-    name = activity_request.name.strip()
-    category = activity_request.category.strip()
-    subject = activity_request.subject.strip() if activity_request.subject else None
-    activity_type = activity_request.activity_type.strip().lower()
-
-    if not name or not category:
-        raise HTTPException(status_code=400, detail="Name and category are required.")
-
-    if activity_type not in {"one_time", "daily", "weekly"}:
-        raise HTTPException(status_code=400, detail="Invalid activity type.")
-
     try:
-        start_time = normalize_optional_time(activity_request.start_time)
-        end_time = normalize_optional_time(activity_request.end_time)
-    except (AttributeError, ValueError):
-        raise HTTPException(
-            status_code=400,
-            detail="Times must use HH:MM format.",
-        ) from None
-
-    validate_optional_time_range(start_time, end_time)
-
-    activity_date = None
-    weekday = None
-
-    if activity_type == "one_time":
-        if not activity_request.date:
-            raise HTTPException(
-                status_code=400,
-                detail="A date is required for a one-time activity.",
-            )
-
-        try:
-            activity_date = str(date.fromisoformat(activity_request.date.strip()))
-        except ValueError:
-            raise HTTPException(
-                status_code=400,
-                detail="Date must use YYYY-MM-DD format.",
-            ) from None
-
-    elif activity_type == "weekly":
-        valid_weekdays = {
-            "monday": "Monday",
-            "tuesday": "Tuesday",
-            "wednesday": "Wednesday",
-            "thursday": "Thursday",
-            "friday": "Friday",
-            "saturday": "Saturday",
-            "sunday": "Sunday",
-        }
-        requested_weekday = (
-            activity_request.weekday.strip().lower()
-            if activity_request.weekday
-            else ""
-        )
-        weekday = valid_weekdays.get(requested_weekday)
-
-        if weekday is None:
-            raise HTTPException(
-                status_code=400,
-                detail="A valid weekday is required for a weekly activity.",
-            )
-
-    columns = [
-        "name",
-        "category",
-        "subject",
-        "activity_type",
-        "date",
-        "weekday",
-        "start_time",
-        "end_time",
-    ]
-    values = [
-        name,
-        category,
-        subject,
-        activity_type,
-        activity_date,
-        weekday,
-        start_time,
-        end_time,
-    ]
+        prepared = activity_service.prepare_new_activity(activity_request.model_dump())
+    except activity_service.ActivityValidationError as error:
+        raise HTTPException(status_code=error.status_code, detail=error.detail) from None
 
     connection = create_connection()
-
     try:
-        add_activity(connection, columns, values)
-        activity_id = connection.execute("SELECT last_insert_rowid()").fetchone()[0]
-        created_activity = connection.execute(
-            "SELECT * FROM activities WHERE id = ?",
-            (activity_id,),
-        ).fetchone()
+        created_activity = activity_service.create_activity_record(connection, prepared)
     finally:
         connection.close()
-
     return activity_to_dict(created_activity)
-
 
 @app.post("/activities/remove-duplicates")
 def clear_duplicate_activities():
@@ -624,156 +525,21 @@ def search_activities_by_name(name: str):
 
 @app.put("/activities/{activity_id}")
 def update_activity(activity_id: int, edit_request: EditActivityRequest):
-    if edit_request.activity_id != activity_id:
-        raise HTTPException(
-            status_code=400,
-            detail="The activity ID in the URL and request body must match.",
-        )
-
-    editable_columns = {
-        "name",
-        "category",
-        "subject",
-        "activity_type",
-        "date",
-        "weekday",
-        "start_time",
-        "end_time",
-    }
-    column_name = edit_request.column_name.strip()
-
-    if column_name not in editable_columns:
-        raise HTTPException(status_code=400, detail="That field cannot be edited.")
+    fields = edit_request.model_dump()
+    try:
+        # Preserve validation-before-connection for ID/column errors.
+        activity_service.validate_activity_edit(activity_id, fields)
+    except activity_service.ActivityValidationError as error:
+        raise HTTPException(status_code=error.status_code, detail=error.detail) from None
 
     connection = create_connection()
-
     try:
-        activity = get_activity_by_id(connection, activity_id)
-
-        if activity is None:
-            raise HTTPException(status_code=404, detail="Activity ID not found.")
-
-        current_activity_type = activity[4]
-        new_value = edit_request.new_value
-
-        if column_name in {"name", "category"}:
-            new_value = new_value.strip() if new_value else ""
-
-            if not new_value:
-                field_name = column_name.replace("_", " ").title()
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"{field_name} is required.",
-                )
-
-        elif column_name == "subject":
-            new_value = new_value.strip() if new_value else None
-
-        elif column_name == "activity_type":
-            new_value = new_value.strip().lower() if new_value else ""
-
-            if new_value not in {"one_time", "daily", "weekly"}:
-                raise HTTPException(status_code=400, detail="Invalid activity type.")
-
-            if new_value == "one_time":
-                try:
-                    selected_date = edit_request.date if edit_request.date is not None else activity[5]
-                    selected_date = date.fromisoformat(selected_date.strip()).isoformat()
-                except (AttributeError, ValueError):
-                    raise HTTPException(status_code=400, detail="Choose a date for the one-time activity.") from None
-            elif new_value == "weekly":
-                selected_weekday = edit_request.weekday if edit_request.weekday is not None else activity[6]
-                weekdays = {day.lower(): day for day in ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")}
-                selected_weekday = weekdays.get(selected_weekday.strip().lower()) if selected_weekday else None
-                if selected_weekday is None:
-                    raise HTTPException(status_code=400, detail="Choose a weekday for the weekly activity.")
-
-        elif column_name == "date":
-            if current_activity_type != "one_time":
-                raise HTTPException(
-                    status_code=400,
-                    detail="Date can only be edited for a one-time activity.",
-                )
-
-            try:
-                new_value = str(date.fromisoformat(new_value.strip()))
-            except (AttributeError, ValueError):
-                raise HTTPException(
-                    status_code=400,
-                    detail="Date must use YYYY-MM-DD format.",
-                ) from None
-
-        elif column_name == "weekday":
-            if current_activity_type != "weekly":
-                raise HTTPException(
-                    status_code=400,
-                    detail="Weekday can only be edited for a weekly activity.",
-                )
-
-            valid_weekdays = {
-                "monday": "Monday",
-                "tuesday": "Tuesday",
-                "wednesday": "Wednesday",
-                "thursday": "Thursday",
-                "friday": "Friday",
-                "saturday": "Saturday",
-                "sunday": "Sunday",
-            }
-            requested_weekday = new_value.strip().lower() if new_value else ""
-            new_value = valid_weekdays.get(requested_weekday)
-
-            if new_value is None:
-                raise HTTPException(status_code=400, detail="Invalid weekday.")
-
-        elif column_name in {"start_time", "end_time"}:
-            try:
-                new_value = normalize_optional_time(new_value)
-            except (AttributeError, ValueError):
-                raise HTTPException(
-                    status_code=400,
-                    detail="Time must use HH:MM format.",
-                ) from None
-
-            start_time_value = new_value if column_name == "start_time" else activity[7]
-            end_time_value = new_value if column_name == "end_time" else activity[8]
-
-            try:
-                start_time_value = normalize_optional_time(start_time_value)
-                end_time_value = normalize_optional_time(end_time_value)
-            except (AttributeError, ValueError):
-                raise HTTPException(
-                    status_code=400,
-                    detail="The stored activity time is invalid.",
-                ) from None
-
-            validate_optional_time_range(start_time_value, end_time_value)
-
-        edit_activity(connection, activity_id, column_name, new_value)
-
-        if column_name == "activity_type":
-            if new_value == "one_time":
-                edit_activity(connection, activity_id, "date", selected_date)
-            elif new_value == "weekly":
-                edit_activity(connection, activity_id, "weekday", selected_weekday)
-
-        resulting_activity_type = (
-            new_value if column_name == "activity_type" else current_activity_type
-        )
-
-        if resulting_activity_type == "one_time":
-            edit_activity(connection, activity_id, "weekday", None)
-        elif resulting_activity_type == "daily":
-            edit_activity(connection, activity_id, "date", None)
-            edit_activity(connection, activity_id, "weekday", None)
-        elif resulting_activity_type == "weekly":
-            edit_activity(connection, activity_id, "date", None)
-
-        updated_activity = get_activity_by_id(connection, activity_id)
+        updated_activity = activity_service.update_activity_record(connection, activity_id, fields)
+    except activity_service.ActivityValidationError as error:
+        raise HTTPException(status_code=error.status_code, detail=error.detail) from None
     finally:
         connection.close()
-
     return activity_to_dict(updated_activity)
-
 
 @app.delete("/activities/{activity_id}")
 def remove_activity_by_id(activity_id: int):
@@ -907,6 +673,9 @@ def move_calendar_activity(activity_id: int, move_request: MoveActivityRequest):
 from backend.app.infrastructure.module_compat import forward_module
 
 forward_module(__name__, {
+    "add_activity": (activity_service, "add_activity"),
+    "edit_activity": (activity_service, "edit_activity"),
+    "get_activity_by_id": (activity_service, "get_activity_by_id"),
     "AIConfigRequest": (ai_routes, "AIConfigRequest"),
     "AIModelConfigRequest": (ai_routes, "AIModelConfigRequest"),
     "AIMemoryConfigRequest": (ai_routes, "AIMemoryConfigRequest"),

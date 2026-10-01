@@ -11,6 +11,21 @@ from backend.app.memory import archive_store, recent, settings
 
 
 class RefactorBoundaryTests(unittest.TestCase):
+    def test_activity_service_has_no_http_or_agent_dependency(self):
+        code = """
+import sys
+sys.modules['fastapi'] = None
+sys.modules['backend.app.agent.service'] = None
+sys.modules['backend.app.api.ai'] = None
+from backend.app import activity_service
+assert not hasattr(activity_service, 'HTTPException')
+assert not hasattr(activity_service, 'get_agent_proposal')
+"""
+        result = subprocess.run([sys.executable, "-B", "-c", code],
+                                cwd=Path(__file__).resolve().parents[1],
+                                capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_main_reasoning_does_not_import_observations_or_crud(self):
         code = """
 import sys

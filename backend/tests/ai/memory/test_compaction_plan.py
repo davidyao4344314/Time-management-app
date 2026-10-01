@@ -5,9 +5,9 @@ from copy import deepcopy
 from unittest.mock import patch
 
 from backend.app.infrastructure import atomic_files
-from backend.app.memory import compaction_plan as plan
-from backend.app.memory.records import canonical_bytes, parse_archive_lines
-from backend.test_ai_archive_persistence import _records, _classified_and_summary
+from backend.app.ai.memory import compaction_plan as plan
+from backend.app.ai.memory.records import canonical_bytes, parse_archive_lines
+from backend.tests.ai.memory.test_ai_archive_persistence import _records, _classified_and_summary
 
 
 class CompactionPlanTests(unittest.TestCase):

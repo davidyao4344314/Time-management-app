@@ -15,13 +15,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 # Temporary compatibility facades forward multi-owner patch points used by this CLI.
-from backend.app import ai_memory as memory, ai_durable_memory as durable
-from backend.app.memory import (
+from backend.app.ai.compat import memory, durable_memory as durable
+from backend.app.ai.memory import (
     protection, classification as classifier, summary,
     category_review as review, compaction as persistence,
 )
 
-from backend.app.memory.compaction_plan import preview_compacted_archive
+from backend.app.ai.memory.compaction_plan import preview_compacted_archive
 
 
 DEBUG_ARCHIVE_THRESHOLD = 10

@@ -4,6 +4,7 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from backend.tests.paths import BACKEND_DIRECTORY, PROJECT_DIRECTORY
 from textwrap import dedent
 
 from pydantic import ValidationError
@@ -12,9 +13,9 @@ from backend.app import (
     ai_archive_category_review, ai_archive_llm_classifier,
     ai_archive_summary, ai_proposal,
 )
-from backend.app.actions import contracts as actions
-from backend.app.agent import contracts as agent
-from backend.app.memory import contracts as memory
+from backend.app.ai.actions import contracts as actions
+from backend.app.ai.agent import contracts as agent
+from backend.app.ai.memory import contracts as memory
 
 
 class SharedContractTests(unittest.TestCase):
@@ -84,7 +85,7 @@ class SharedContractTests(unittest.TestCase):
     def _assert_isolated_import(self, code):
         result = subprocess.run(
             [sys.executable, "-B", "-c", dedent(code)],
-            cwd=Path(__file__).resolve().parents[1],
+            cwd=PROJECT_DIRECTORY,
             capture_output=True, text=True, timeout=20,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -94,13 +95,13 @@ class SharedContractTests(unittest.TestCase):
             import sys
             sys.modules["openai"] = None
             sys.modules["sqlite3"] = None
-            from backend.app.actions.contracts import AddActivityArguments
-            from backend.app.agent.contracts import AgentProposal
-            from backend.app.memory.contracts import MemoryRequest, ArchiveCategorySummary
+            from backend.app.ai.actions.contracts import AddActivityArguments
+            from backend.app.ai.agent.contracts import AgentProposal
+            from backend.app.ai.memory.contracts import MemoryRequest, ArchiveCategorySummary
             assert AgentProposal.model_validate({"message": "Hello", "actions": []}).memory_request is None
             for name in (
                 "backend.app.ai_proposal", "backend.app.ai_memory",
-                "backend.app.ai_config", "backend.app.ai_archive_summary",
+                "backend.app.ai.config", "backend.app.ai_archive_summary",
                 "backend.app.ai_archive_llm_classifier", "backend.app.ai_archive_category_review",
                 "backend.app.ai_archive_persistence", "backend.app.ai_durable_memory",
             ):
@@ -113,7 +114,7 @@ class SharedContractTests(unittest.TestCase):
             sys.modules["openai"] = None
             sys.modules["sqlite3"] = None
             from backend.app.ai_archive_search import MemoryRequest
-            from backend.app.memory.contracts import MemoryRequest as SharedMemoryRequest
+            from backend.app.ai.memory.contracts import MemoryRequest as SharedMemoryRequest
             assert MemoryRequest is SharedMemoryRequest
             for name in (
                 "backend.app.ai_proposal", "backend.app.ai_routing_pipeline",

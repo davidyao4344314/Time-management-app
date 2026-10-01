@@ -9,6 +9,7 @@ import unittest
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
+from backend.tests.paths import BACKEND_DIRECTORY, PROJECT_DIRECTORY
 from textwrap import dedent
 from unittest.mock import patch
 
@@ -18,7 +19,7 @@ from backend.app import ai_durable_memory as durable
 from backend.app import ai_memory
 from backend.app.infrastructure import atomic_files, privacy
 from backend.app.infrastructure.errors import MemoryUtilityError
-from backend.app.memory import paths, records
+from backend.app.ai.memory import paths, records
 
 
 class MemoryUtilityTests(unittest.TestCase):
@@ -49,7 +50,7 @@ class MemoryUtilityTests(unittest.TestCase):
                 self.assertIs(original, shared)
 
     def test_original_storage_locations_are_preserved(self):
-        backend_directory = Path(__file__).resolve().parent
+        backend_directory = BACKEND_DIRECTORY
         self.assertEqual(paths.BACKEND_DIRECTORY, backend_directory)
         self.assertEqual(ai_memory.ARCHIVE_FILE, backend_directory / "ai_memory_archive.jsonl")
         self.assertEqual(durable.DURABLE_MEMORY_FILE, backend_directory / "ai_durable_memories.json")
@@ -231,7 +232,7 @@ class MemoryUtilityTests(unittest.TestCase):
                     pass
 
     def test_utilities_import_without_services_or_storage_side_effects(self):
-        root = Path(__file__).resolve().parents[1]
+        root = PROJECT_DIRECTORY
         with tempfile.TemporaryDirectory() as directory:
             code = dedent(f"""
                 import sys
@@ -240,11 +241,11 @@ class MemoryUtilityTests(unittest.TestCase):
                 sys.modules["openai"] = None
                 sys.modules["sqlite3"] = None
                 from backend.app.infrastructure import atomic_files, privacy
-                from backend.app.memory import paths, records
+                from backend.app.ai.memory import paths, records
                 for name in (
                     "backend.app.ai_memory", "backend.app.ai_archive_persistence",
                     "backend.app.ai_archive_summary", "backend.app.ai_durable_memory",
-                    "backend.app.ai_config", "backend.app.ai_proposal",
+                    "backend.app.ai.config", "backend.app.ai_proposal",
                 ):
                     assert name not in sys.modules, name
                 assert not list(Path.cwd().iterdir())
@@ -263,10 +264,10 @@ class MemoryUtilityTests(unittest.TestCase):
             ):
                 sys.modules[name] = None
             from backend.app import ai_durable_memory
-            assert ai_durable_memory._source_identity.__module__ == "backend.app.memory.records"
+            assert ai_durable_memory._source_identity.__module__ == "backend.app.ai.memory.records"
         """)
         result = subprocess.run([sys.executable, "-B", "-c", code],
-                                cwd=Path(__file__).resolve().parents[1],
+                                cwd=PROJECT_DIRECTORY,
                                 capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stderr)
 

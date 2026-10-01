@@ -5,9 +5,9 @@ import os
 
 from openai import OpenAI
 
-from backend.app.observations.activities import build_activity_observation
-from backend.app.ai_config import is_openai_api_key_configured
-from backend.app.observations.exams import build_exam_observation
+from backend.app.ai.observations.activities import build_activity_observation
+from backend.app.ai.config import is_openai_api_key_configured
+from backend.app.ai.observations.exams import build_exam_observation
 
 
 TEST_MODEL = "gpt-6-luna"

@@ -1,8 +1,6 @@
-"""Stable existing storage locations, independent of consumer module locations."""
+"""Compatibility entry point for backend.app.ai.memory.paths."""
 
-from pathlib import Path
+import sys
+from backend.app.ai.memory import paths as _implementation
 
-
-BACKEND_DIRECTORY = Path(__file__).resolve().parents[2]
-ARCHIVE_FILE = BACKEND_DIRECTORY / "ai_memory_archive.jsonl"
-DURABLE_MEMORY_FILE = BACKEND_DIRECTORY / "ai_durable_memories.json"
+sys.modules[__name__] = _implementation

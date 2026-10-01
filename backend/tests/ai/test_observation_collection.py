@@ -3,7 +3,7 @@
 import unittest
 from unittest.mock import Mock
 
-from backend.app.observations.collect import collect_agent_observations
+from backend.app.ai.observations.collect import collect_agent_observations
 
 
 class ObservationCollectionTests(unittest.TestCase):

@@ -1,0 +1,326 @@
+from datetime import date
+
+
+"""
+this function gets the clomun the table and put it into an list got columns
+"""
+def get_clomuns(connection, table_name):
+    # send an requrest to sql for information and store it in cursor
+    cursor = connection.execute(f"PRAGMA table_info({table_name})")
+    # get all rows by pagrama table info and put them all in an tuple list
+    table_data = cursor.fetchall()
+
+    columns = []
+    # for loop to add everything from the table to
+    for column in table_data:
+        comumn_name = column[1]
+
+        if comumn_name not in {"id", "source", "external_id"}:
+            columns.append(comumn_name)
+    return columns
+"""
+This function get user input base on how much cloumn name in cloumns and put the input in somthing called values
+"""
+def get_user_values(columns):
+    values = []
+    # repeating asking for values base the number of columns
+    for column in columns:
+        user_value = input(f"Enter {column}: ").strip()
+
+        if user_value.lower() == "quit":
+            return None
+
+        values.append(user_value)
+
+    return values
+def find_equivalent_activity_id(connection, columns, values):
+    """Match converted activity data, including NULLs and active date ranges."""
+    activity = dict(zip(columns, values))
+    fields = (
+        "name", "category", "subject", "activity_type", "date", "weekday",
+        "start_time", "end_time", "active_start_date", "active_end_date",
+    )
+    # Field names are fixed here, never taken from user input. IS matches NULL.
+    conditions = " AND ".join(f"{field} IS ?" for field in fields)
+    row = connection.execute(
+        f"SELECT id FROM activities WHERE {conditions} ORDER BY id LIMIT 1",
+        tuple(activity.get(field) for field in fields),
+    ).fetchone()
+    return row[0] if row is not None else None
+
+
+def activity_exists(connection, columns, values):
+    return find_equivalent_activity_id(connection, columns, values) is not None
+
+
+def save_uoa_external_ids(connection, activity_id, external_ids):
+    """Link every UID to its grouped activity without repeating a mapping."""
+    added = 0
+    with connection:
+        for external_id in external_ids:
+            cursor = connection.execute(
+                """INSERT INTO uoa_activity_external_ids (activity_id, external_id)
+                   VALUES (?, ?) ON CONFLICT(activity_id, external_id) DO NOTHING""",
+                (activity_id, external_id),
+            )
+            added += cursor.rowcount
+    return added
+
+
+def add_activity(connection, columns, values):
+    column_names = ", ".join(columns)
+    placeholders = ", ".join(["?"] * len(columns))
+
+    sql = f"""
+        INSERT INTO activities ({column_names})
+        VALUES ({placeholders})
+    """
+
+    cursor = connection.execute(sql, values)
+    connection.commit()
+    return cursor.lastrowid
+
+"""
+print all the activities in the database
+"""
+def print_all_activities(connection):
+    # this take every line in from the activities table  select all coluns
+    cursor = connection.execute("SELECT * FROM activities")
+    # take all rows from curosor and store them
+    activities = cursor.fetchall()
+    # print all activities.
+    for activity in activities:
+        print(f"ID: {activity[0]}")
+        print(f"Name: {activity[1]}")
+        print(f"Category: {activity[2]}")
+        print(f"Subject: {activity[3]}")
+        print(f"Activity type: {activity[4]}")
+        print(f"Date: {activity[5]}")
+        print(f"Weekday: {activity[6]}")
+        print(f"Start time: {activity[7]}")
+        print(f"End time: {activity[8]}")
+        print()
+
+
+def search_activity(connection, value_name):
+    cursor = connection.execute("SELECT * FROM activities where name = ?", (value_name,))
+    results = cursor.fetchall()
+    if results != []:
+        for activity in results:
+            print("\n----------------------")
+            print("Activity found")
+            print("----------------------")
+            print(f"ID: {activity[0]}")
+            print(f"Name: {activity[1]}")
+            print(f"Category: {activity[2]}")
+            print(f"Subject: {activity[3]}")
+            print(f"Activity type: {activity[4]}")
+            print(f"Date: {activity[5]}")
+            print(f"Weekday: {activity[6]}")
+            print(f"Start time: {activity[7]}")
+            print(f"End time: {activity[8]}")
+            print("----------------------")
+            return activity[0]
+    else:
+        print(f"No activity found for {value_name}")
+
+def get_activities_by_name(connection, value_name):
+    cursor = connection.execute(
+        "SELECT * FROM activities WHERE name = ? ORDER BY id",
+        (value_name,),
+    )
+
+    return cursor.fetchall()
+
+def delete_activity(connection, activity_id):
+    connection.execute(
+        "DELETE FROM activities WHERE id = ?",
+        (activity_id,)
+    )
+
+    connection.commit()
+
+def remove_duplicate_activities(connection):
+    """Keep the lowest ID for each identical set of activity fields."""
+    # GROUP BY treats matching NULL fields as part of the same group.
+    # IDs choose which copy survives, but are not compared as activity data.
+    with connection:
+        cursor = connection.execute("""
+            DELETE FROM activities
+            WHERE id NOT IN (
+                SELECT MIN(id)
+                FROM activities
+                GROUP BY name, category, subject, activity_type,
+                         date, weekday, start_time, end_time,
+                         active_start_date, active_end_date
+            )
+        """)
+        number_removed = cursor.rowcount
+
+    return number_removed
+
+
+def backfill_activity_date_range(connection, activity_id, start_date, end_date):
+    """Repair a feed-matched legacy row; the caller owns the transaction."""
+    cursor = connection.execute(
+        """
+        UPDATE activities SET active_start_date = ?, active_end_date = ?
+        WHERE id = ? AND active_start_date IS NULL AND active_end_date IS NULL
+        """,
+        (start_date, end_date, activity_id),
+    )
+    return cursor.rowcount
+
+
+def edit_activity(connection, activity_id, column_name, new_value):
+    sql = f"""
+        UPDATE activities
+        SET {column_name} = ?
+        WHERE id = ?
+    """
+
+    connection.execute(sql, (new_value, activity_id))
+    connection.commit()
+
+def get_end_time(connection, activity_id):
+    cursor = connection.execute(
+        "SELECT end_time FROM activities WHERE id = ?",
+        (activity_id,)
+    )
+
+    result = cursor.fetchone()
+
+    if result:
+        return result[0]
+
+    return None
+def get_activity_schedule(connection, activity_id):
+    cursor = connection.execute(
+        """
+        SELECT activity_type, date, weekday, start_time, end_time
+        FROM activities
+        WHERE id = ?
+        """,
+        (activity_id,)
+    )
+
+    return cursor.fetchone()
+
+def get_activity_name_by_id(connection, activity_id):
+    cursor = connection.execute(
+        "SELECT name FROM activities WHERE id = ?",
+        (activity_id,)
+    )
+
+    result = cursor.fetchone()
+
+    if result is None:
+        return None
+
+    return result[0]
+
+def get_activity_by_id(connection, activity_id):
+    cursor = connection.execute(
+        "SELECT * FROM activities WHERE id = ?",
+        (activity_id,),
+    )
+
+    return cursor.fetchone()
+
+def get_all_activities(connection):
+    cursor = connection.execute(
+        "SELECT * FROM activities"
+    )
+
+    return cursor.fetchall()
+
+
+def move_activity(
+    connection,
+    activity_id,
+    activity_type,
+    destination_date,
+    destination_weekday,
+):
+    cursor = connection.execute(
+        "SELECT id, activity_type, date, weekday FROM activities WHERE id = ?",
+        (activity_id,),
+    )
+    activity = cursor.fetchone()
+
+    if activity is None:
+        return None
+
+    stored_activity_type = activity[1].strip().lower()
+    requested_activity_type = activity_type.strip().lower()
+
+    if requested_activity_type != stored_activity_type:
+        raise ValueError("The requested activity type does not match the stored activity.")
+
+    if stored_activity_type not in {"one_time", "weekly", "daily"}:
+        raise ValueError("The stored activity type cannot be moved.")
+
+    try:
+        parsed_destination_date = date.fromisoformat(destination_date.strip())
+    except (AttributeError, ValueError):
+        raise ValueError("The destination date must use YYYY-MM-DD format.") from None
+
+    correct_weekday = parsed_destination_date.strftime("%A")
+
+    if destination_weekday.strip().lower() != correct_weekday.lower():
+        raise ValueError("The destination weekday does not match the destination date.")
+
+    updated = False
+
+    if stored_activity_type == "one_time":
+        edit_activity(
+            connection,
+            activity_id,
+            "date",
+            str(parsed_destination_date),
+        )
+        updated = True
+
+    elif stored_activity_type == "weekly":
+        edit_activity(
+            connection,
+            activity_id,
+            "weekday",
+            correct_weekday,
+        )
+        updated = True
+
+    return {
+        "activity_id": activity_id,
+        "activity_type": stored_activity_type,
+        "destination_date": str(parsed_destination_date),
+        "destination_weekday": correct_weekday,
+        "updated": updated,
+    }
+
+def search_by_id(connection, value_name):
+    cursor = connection.execute("SELECT * FROM activities where id = ?", (value_name,))
+    results = cursor.fetchall()
+    if results != []:
+        for activity in results:
+            print("\n----------------------")
+            print("Activity found")
+            print("----------------------")
+            print(f"ID: {activity[0]}")
+            print(f"Name: {activity[1]}")
+            print(f"Category: {activity[2]}")
+            print(f"Subject: {activity[3]}")
+            print(f"Activity type: {activity[4]}")
+            print(f"Date: {activity[5]}")
+            print(f"Weekday: {activity[6]}")
+            print(f"Start time: {activity[7]}")
+            print(f"End time: {activity[8]}")
+            print("----------------------")
+            return activity[0]
+    else:
+        print(f"No activity found for {value_name}")
+
+def delte_all_activities(connection):
+    connection.execute("DELETE FROM activities")
+    connection.execute("DELETE FROM sqlite_sequence WHERE name = 'activities'")
+    connection.commit()

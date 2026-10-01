@@ -1,18 +1,19 @@
 # Backend architecture
 
 This is a behavior-preserving refactor, not a new memory or planning feature.
-The existing API entry point is still `backend.fastapi_test:app`. Activities
-and exams still use the same SQLite database and CRUD functions.
+The canonical API entry point is `backend.app.server:app`;
+`backend.fastapi_test:app` remains a compatibility entry point to the same app.
+Activities and exams still use the same SQLite database and CRUD functions.
 
 ## Normal request flow
 
 ```text
-React -> api/ai.py -> agent/service.py
+React -> api/ai.py -> ai/agent/service.py
                         |
-                        +-> context/selection.py -> keywords / intent / fallback
-                        +-> observations/collect.py -> activities / exams -> existing CRUD/calendar
-                        +-> agent/reasoning.py -> OpenAI -> validated proposal
-api/ai.py -> memory/recent.py -> memory/archive_store.py when the recent limit is exceeded
+                        +-> ai/context/selection.py -> keywords / intent / fallback
+                        +-> ai/observations/collect.py -> activities / exams -> existing CRUD/calendar
+                        +-> ai/agent/reasoning.py -> OpenAI -> validated proposal
+api/ai.py -> ai/memory/recent.py -> ai/memory/archive_store.py when the recent limit is exceeded
 ```
 
 Observations are current factual application data. Recent memory is conversation
@@ -23,123 +24,163 @@ retrieved or included in the normal prompt. Proposed actions are not executed.
 
 ```text
 backend/
-├── fastapi_test.py          # Existing ASGI entry point and non-AI HTTP routes
+├── fastapi_test.py              # Compatibility entry point/exports
 ├── README.md
 ├── ARCHITECTURE.md
+├── requirements.txt
+├── .venv/
+├── tests/
+│   ├── ai/                     # Proposal, routing, HTTP and observation tests
+│   │   └── memory/             # Archive/compaction/durable/debug stage tests
+│   ├── planner/                # Activity service, current/next, source and UID
+│   ├── integrations/           # Import deduplication and UoA date ranges
+│   ├── screen_time/            # Summary storage/formatting checks
+│   ├── paths.py                # Test repository paths
+│   ├── test_architecture.py    # Import graph/boundary checks
+│   ├── test_refactor_boundaries.py
+│   └── test_folder_layout.py   # Relocation/entry point/path compatibility
 └── app/
-    ├── activities.py        # Existing activity SQL/CRUD; unchanged
-    ├── exams.py             # Existing exam SQL/CRUD; unchanged
-    ├── database.py          # Existing connection/schema logic; unchanged
-    ├── calender.py          # Existing recurrence/calendar logic; unchanged
-    ├── ai_config.py         # Existing local settings/key configuration; unchanged
-    ├── activity_service.py  # Add/edit validation and reuse of existing CRUD
-    ├── actions/
-    │   └── contracts.py     # Allowed proposal arguments, not execution
-    ├── agent/
-    │   ├── contracts.py     # AgentProposal and validation
-    │   ├── service.py       # Coordinate a proposal request
-    │   └── reasoning.py     # Prompt, message construction and model response
+    ├── server.py               # FastAPI assembly, no business logic
+    ├── cli.py                  # Existing interactive planner CLI
+    ├── database.py             # Existing connection/schema logic; unchanged
+    ├── ai/
+    │   ├── config.py           # Existing local key/model/context configuration
+    │   ├── actions/
+    │   │   └── contracts.py    # Allowed proposals, not execution
+    │   ├── agent/
+    │   │   ├── contracts.py    # AgentProposal and validation
+    │   │   ├── service.py      # Coordinate a proposal request
+    │   │   └── reasoning.py    # Prompt, model messages and response
+    │   ├── context/
+    │   │   ├── keywords.py     # Stage 1 routing
+    │   │   ├── intent.py       # Stage 2 classification/schemas
+    │   │   ├── fallback.py     # Stage 3 fallback classification
+    │   │   └── selection.py    # First confident route; safe fallback
+    │   ├── observations/
+    │   │   ├── formatting.py   # Shared time/date formatting and ordering
+    │   │   ├── activities.py   # Compact activity/calendar scopes
+    │   │   ├── exams.py        # Compact upcoming assessments
+    │   │   ├── screen_time.py  # Existing formatter; not in agent requests
+    │   │   └── collect.py      # Only selected activity/exam sections
+    │   ├── memory/
+    │   │   ├── contracts.py    # Request, archive and durable schemas
+    │   │   ├── paths.py        # Existing ignored file locations
+    │   │   ├── settings.py     # Threshold and candidate batch size
+    │   │   ├── records.py      # Serialization, hashes, IDs/timestamps
+    │   │   ├── recent.py       # In-process per-session recent turns
+    │   │   ├── archive_store.py # Raw append/read/count and shared lock
+    │   │   ├── selection.py    # Threshold and oldest candidate selection
+    │   │   ├── protection.py   # Deterministic candidate protection
+    │   │   ├── classification.py # Uncertain candidate model classification
+    │   │   ├── summary.py      # Confirmed candidate model summaries
+    │   │   ├── category_policy.py # Pure category safeguards
+    │   │   ├── category_review.py # Review and accepted categories
+    │   │   ├── compaction_plan.py # Pure validation/replacement/preview
+    │   │   ├── compaction.py   # Verified backup/replacement/recovery
+    │   │   ├── durable.py      # Protected-turn model extraction
+    │   │   ├── durable_store.py # Deduplication/verified file writes
+    │   │   └── search.py       # Bounded, session-scoped archive search
+    │   └── compat/             # Name forwarding for older split facades
+    ├── planner/
+    │   ├── activities.py       # Existing activity SQL/CRUD
+    │   ├── activity_service.py # Existing add/edit validation/use cases
+    │   ├── exams.py            # Existing exam SQL/CRUD
+    │   └── calendar.py         # Existing recurrence/calendar logic
+    ├── screen_time/
+    │   └── storage.py          # Existing daily summary CRUD
+    ├── integrations/
+    │   ├── ical_import.py      # Shared download/VEVENT parsing
+    │   ├── canvas_import.py    # Canvas classification/conversion/import
+    │   └── uoa_timetable_import.py # Grouped weekly classes and UID mapping
     ├── api/
-    │   └── ai.py            # AI HTTP requests/errors, read-only DB lifetime, cookies
-    ├── context/
-    │   ├── keywords.py      # Existing Stage 1 routing
-    │   ├── intent.py        # Existing Stage 2 classification and routing schemas
-    │   ├── fallback.py      # Existing Stage 3 fallback classification
-    │   └── selection.py     # Stop at the first confident route; safe fallback
-    ├── observations/
-    │   ├── formatting.py    # Shared time/date formatting and ordering
-    │   ├── activities.py    # Compact activity/calendar scopes
-    │   ├── exams.py         # Compact upcoming assessments
-    │   ├── screen_time.py   # Existing formatter; not added to agent requests
-    │   └── collect.py       # Build only the selected activity/exam sections
-    ├── memory/
-    │   ├── contracts.py     # Memory request, archive and durable-memory schemas
-    │   ├── paths.py         # Stable paths to existing ignored memory files
-    │   ├── settings.py      # Archive threshold and candidate batch size
-    │   ├── records.py       # Pure serialization, hashes, IDs and timestamps
-    │   ├── recent.py        # In-process per-session recent turns
-    │   ├── archive_store.py # Raw-turn append/read, count and shared archive lock
-    │   ├── selection.py     # Threshold diagnostic and oldest candidate selection
-    │   ├── protection.py    # Deterministic candidate protection
-    │   ├── classification.py # Model classification of uncertain candidates
-    │   ├── summary.py       # Model summaries of confirmed compactable candidates
-    │   ├── category_policy.py # Pure category acceptance safeguards
-    │   ├── category_review.py # Model review plus application of accepted categories
-    │   ├── compaction_plan.py # Pure validation, replacement bytes and dry-run preview
-    │   ├── compaction.py    # Locked, verified backup/replacement/recovery
-    │   ├── durable.py       # Model extraction from explicitly supplied protected turns
-    │   ├── durable_store.py # Conservative deduplication and verified durable-file writes
-    │   └── search.py        # Existing bounded, session-scoped raw archive search
+    │   ├── ai.py              # AI HTTP, read-only DB and session cookies
+    │   ├── activities.py      # Manual activity CRUD HTTP endpoints
+    │   ├── exams.py           # Exam CRUD HTTP endpoints
+    │   ├── calendar.py        # Today/current/week/move HTTP endpoints
+    │   ├── imports.py         # Canvas/UoA status/import HTTP endpoints
+    │   └── common.py          # Existing row formatting/time adapters
     ├── infrastructure/
-    │   ├── atomic_files.py  # Regular-file checks, locking, private temps and fsync
-    │   ├── errors.py        # Shared safe utility error
-    │   ├── privacy.py       # Secret redaction
-    │   └── module_compat.py # Temporary legacy-name forwarding
+    │   ├── paths.py           # Stable project/backend locations
+    │   ├── atomic_files.py    # Regular files, locks, private temps and fsync
+    │   ├── errors.py          # Shared safe utility error
+    │   ├── privacy.py         # Secret redaction
+    │   └── module_compat.py   # Temporary legacy-name forwarding
     └── dev/
-        ├── memory_debug.py # Standalone fake-data trace; not called by normal requests
-        └── observation_smoke.py # Existing explicit observation receipt test
+        ├── memory_debug.py    # Explicit disposable fake-data trace
+        └── observation_smoke.py # Explicit observation receipt test
 ```
 
-Package `__init__.py` files contain descriptions only; they do not initialize
-stores or call models. Legacy wrapper files are omitted from this tree.
+Package imports do not initialize stores or call models. Most `__init__.py`
+files contain descriptions only; `screen_time/__init__.py` also forwards the
+previous module's function names. Legacy wrappers are omitted from this tree.
 
 ## Function ownership
 
 | Owner | Functions / contracts | Keep out |
 | --- | --- | --- |
-| `memory/recent.py` | `has_session`, `get_recent_turns`, `add_completed_turn`, recent deque/lock | Raw file-write implementation, model reasoning |
-| `memory/archive_store.py` | `archive_write_lock`, `append_archived_turn`, `iter_archived_turns`, `get_archive_turn_count` | Recent session state, summarization, model calls |
-| `memory/selection.py` | `archive_needs_compaction`, `select_archive_compaction_candidates`, size reporting | Archive replacement, model calls |
-| `memory/protection.py` | `classify_archive_candidate`, `classify_compaction_candidates`, protection rules | Model calls or deletion |
-| `memory/classification.py` | `classify_uncertain_archive_candidates` and its small model request | Reading/replacing the live archive |
-| `memory/summary.py` | `summarize_compactable_archive_turns` | Archive replacement or durable extraction |
-| `memory/category_policy.py` | Category name, synonym and protected-content safeguards | Model/configuration calls or persistence |
-| `memory/category_review.py` | Existing category review and in-memory summary redistribution | Raw archive deletion |
-| `memory/compaction_plan.py` | `prepare_compaction`, `preview_compacted_archive`, source/final-state validation | File I/O, models, choosing protection labels |
-| `memory/compaction.py` | `persist_compacted_archive`, locked verified writes and recovery | Summarization or new classification |
-| `memory/durable.py` | `extract_durable_memories`, protected-source/extraction validation | Implementing file replacement |
-| `memory/durable_store.py` | Conservative content keys, provenance merging, lock/persistence | OpenAI calls, reading the raw archive |
-| `memory/search.py` | `resolve_time_reference`, `search_archived_memory` | Automatic retrieval, summaries or main-agent calls |
-| `observations/activities.py` | `build_activity_observation` | New recurrence rules or memory storage |
-| `observations/exams.py` | `build_exam_observation` | Activity recurrence, calendar changes |
-| `observations/screen_time.py` | Existing `build_screen_time_observation` | New agent routing or tracking |
-| `observations/formatting.py` | `compact_time`, `chronological_key`, `observation_date_range` | SQL or model calls |
-| `observations/collect.py` | `collect_agent_observations` | Deciding intent or formatting conversation history |
-| `context/selection.py` | `select_agent_context`, Stage 1/2/3 ordering | Building observations, answering the user |
-| `context/keywords.py` | `choose_agent_context`, `assess_stage_one` | LLM calls |
-| `context/intent.py`, `fallback.py` | Existing strict classification models and small classifier calls | Full observations, advice or tool execution |
-| `agent/service.py` | `get_agent_proposal`: key/settings checks, client lifetime, routing/collection | Archive compaction, SQL writes or executing proposals |
-| `agent/reasoning.py` | Prompt, `build_agent_messages`, request budgets, model request/response parsing | CRUD, archive reading, recurrence |
+| `ai/memory/recent.py` | `has_session`, `get_recent_turns`, `add_completed_turn`, recent deque/lock | Raw file-write implementation, model reasoning |
+| `ai/memory/archive_store.py` | `archive_write_lock`, `append_archived_turn`, `iter_archived_turns`, `get_archive_turn_count` | Recent session state, summarization, model calls |
+| `ai/memory/selection.py` | `archive_needs_compaction`, `select_archive_compaction_candidates`, size reporting | Archive replacement, model calls |
+| `ai/memory/protection.py` | `classify_archive_candidate`, `classify_compaction_candidates`, protection rules | Model calls or deletion |
+| `ai/memory/classification.py` | `classify_uncertain_archive_candidates` and its small model request | Reading/replacing the live archive |
+| `ai/memory/summary.py` | `summarize_compactable_archive_turns` | Archive replacement or durable extraction |
+| `ai/memory/category_policy.py` | Category name, synonym and protected-content safeguards | Model/configuration calls or persistence |
+| `ai/memory/category_review.py` | Existing category review and in-memory summary redistribution | Raw archive deletion |
+| `ai/memory/compaction_plan.py` | `prepare_compaction`, `preview_compacted_archive`, source/final-state validation | File I/O, models, choosing protection labels |
+| `ai/memory/compaction.py` | `persist_compacted_archive`, locked verified writes and recovery | Summarization or new classification |
+| `ai/memory/durable.py` | `extract_durable_memories`, protected-source/extraction validation | Implementing file replacement |
+| `ai/memory/durable_store.py` | Conservative content keys, provenance merging, lock/persistence | OpenAI calls, reading the raw archive |
+| `ai/memory/search.py` | `resolve_time_reference`, `search_archived_memory` | Automatic retrieval, summaries or main-agent calls |
+| `ai/observations/activities.py` | `build_activity_observation` | New recurrence rules or memory storage |
+| `ai/observations/exams.py` | `build_exam_observation` | Activity recurrence, calendar changes |
+| `ai/observations/screen_time.py` | Existing `build_screen_time_observation` | New agent routing or tracking |
+| `ai/observations/formatting.py` | `compact_time`, `chronological_key`, `observation_date_range` | SQL or model calls |
+| `ai/observations/collect.py` | `collect_agent_observations` | Deciding intent or formatting conversation history |
+| `ai/context/selection.py` | `select_agent_context`, Stage 1/2/3 ordering | Building observations, answering the user |
+| `ai/context/keywords.py` | `choose_agent_context`, `assess_stage_one` | LLM calls |
+| `ai/context/intent.py`, `fallback.py` | Existing strict classification models and small classifier calls | Full observations, advice or tool execution |
+| `ai/agent/service.py` | `get_agent_proposal`: key/settings checks, client lifetime, routing/collection | Archive compaction, SQL writes or executing proposals |
+| `ai/agent/reasoning.py` | Prompt, `build_agent_messages`, request budgets, model request/response parsing | CRUD, archive reading, recurrence |
 | `api/ai.py` | Existing AI routes, HTTP errors, read-only connection and session-cookie handling | Planning prompt or activity SQL |
-| `activity_service.py` | `prepare_new_activity`, `create_activity_record`, `validate_activity_edit`, `update_activity_record` | HTTP dependencies, agent approval/execution |
+| `planner/activity_service.py` | `prepare_new_activity`, `create_activity_record`, `validate_activity_edit`, `update_activity_record` | HTTP dependencies, agent approval/execution |
 | `infrastructure/` | Shared file checks/atomic writes, safe errors, redaction and compatibility forwarding | Agent/domain decisions |
 
 The three contract modules contain validation/schema definitions, not tool
-handlers. `memory/contracts.py` also owns the durable-memory models; their
+handlers. `ai/memory/contracts.py` also owns the durable-memory models; their
 validation semantics were retained.
 
 ## Moves and compatibility
 
 | Previous module | Canonical implementation |
 | --- | --- |
-| `ai_memory.py` | `memory/recent.py`, `archive_store.py`, `selection.py`, `settings.py` |
-| `ai_archive_protection.py` | `memory/protection.py` |
-| `ai_archive_llm_classifier.py` | `memory/classification.py` |
-| `ai_archive_summary.py` | `memory/summary.py` |
-| `ai_archive_category_review.py` | `memory/category_review.py` and `category_policy.py` |
-| `ai_archive_persistence.py` | `memory/compaction.py` and `compaction_plan.py` |
-| `ai_durable_memory.py` | `memory/durable.py`, `durable_store.py` and `contracts.py` |
-| `ai_archive_search.py` | `memory/search.py` |
-| `ai_context_router.py` | `context/keywords.py` |
-| `ai_intent_classifier.py` | `context/intent.py` |
-| `ai_stage_three_router.py` | `context/fallback.py` |
-| `ai_routing_pipeline.py` | `context/selection.py` |
-| `activity_observation.py`, `exam_observation.py` | `observations/activities.py`, `exams.py` |
-| `screen_time_observation.py`, `observation_utils.py` | `observations/screen_time.py`, `formatting.py` |
-| `ai_proposal.py` | `agent/service.py`, `reasoning.py` and shared contracts |
+| `ai_memory.py` | `ai/memory/recent.py`, `archive_store.py`, `selection.py`, `settings.py` |
+| `ai_archive_protection.py` | `ai/memory/protection.py` |
+| `ai_archive_llm_classifier.py` | `ai/memory/classification.py` |
+| `ai_archive_summary.py` | `ai/memory/summary.py` |
+| `ai_archive_category_review.py` | `ai/memory/category_review.py` and `category_policy.py` |
+| `ai_archive_persistence.py` | `ai/memory/compaction.py` and `compaction_plan.py` |
+| `ai_durable_memory.py` | `ai/memory/durable.py`, `durable_store.py` and `contracts.py` |
+| `ai_archive_search.py` | `ai/memory/search.py` |
+| `ai_context_router.py` | `ai/context/keywords.py` |
+| `ai_intent_classifier.py` | `ai/context/intent.py` |
+| `ai_stage_three_router.py` | `ai/context/fallback.py` |
+| `ai_routing_pipeline.py` | `ai/context/selection.py` |
+| `activity_observation.py`, `exam_observation.py` | `ai/observations/activities.py`, `exams.py` |
+| `screen_time_observation.py`, `observation_utils.py` | `ai/observations/screen_time.py`, `formatting.py` |
+| `ai_proposal.py` | `ai/agent/service.py`, `reasoning.py` and shared contracts |
 | AI handlers in `backend/fastapi_test.py` | `api/ai.py`; mounted on the original app |
-| Activity add/edit validation in `backend/fastapi_test.py` | `activity_service.py`; same manual HTTP endpoints |
+| Activity add/edit validation in `backend/fastapi_test.py` | `planner/activity_service.py`; same manual HTTP endpoints |
 | `memory_debug.py`, `ai_observation_test.py` | `dev/memory_debug.py`, `observation_smoke.py` |
+| Old `agent/`, `context/`, `observations/`, `memory/`, `actions/` | Corresponding packages under `ai/`; old paths alias canonical owners |
+| `ai_config.py` | `ai/config.py` |
+| `activities.py`, `activity_service.py`, `exams.py` | Corresponding modules under `planner/` |
+| `calender.py` | `planner/calendar.py` (spelling corrected) |
+| `screen_time.py` | `screen_time/storage.py`; package exports and old manual script stay compatible |
+| Canvas, UoA and generic iCal modules | Corresponding modules under `integrations/` |
+| Non-AI handlers in `backend/fastapi_test.py` | `api/activities.py`, `exams.py`, `calendar.py`, `imports.py`, `common.py` |
+| FastAPI app assembly | `server.py`; original entry point forwards to the same instance |
+| `main.py` | `cli.py`; old script forwards to `main()` |
+| `backend/test_*.py` | Feature groups under `backend/tests/` |
 
 Old module names remain compatibility wrappers. Whole-module moves alias the
 same module object. Split modules use name forwarding so state, paths and test
@@ -153,9 +194,25 @@ Do not remove wrappers until downstream scripts/tests have migrated. Moving a
 function is not permission to change its prompt, recurrence rules, schema or
 error response. Existing logger names were retained for compatibility.
 
+## Stable data paths
+
+`infrastructure/paths.py` defines the project and backend directories. Relocated
+config/import/memory modules use these constants rather than depending on their
+new folder depth. These files stay in place:
+
+- Project-root `.env` (and any existing `.env.save`)
+- `backend/study_app.db` and project-root `activities.sql`
+- `backend/ai_memory_archive.jsonl`
+- `backend/ai_durable_memories.json`
+
+Only Python modules/tests and documentation moved or changed; this grouping
+does not migrate schemas, modify records or copy secrets.
+
 ## Import direction and safety
 
+- `server.py` assembles routers; routers never import the server/legacy entry point.
 - HTTP adapters import services, not the other way around.
+- `planner/`, `screen_time/` and `integrations/` do not import AI or HTTP layers.
 - Agent coordination imports routing, collectors and the reasoner.
 - Routing does not import observation builders, CRUD or archive files.
 - Observations import current calendar/CRUD functions, never the main agent.
@@ -199,7 +256,7 @@ repeating SELECT logic in the HTTP layer.
 Run from the project root:
 
 ```bash
-backend/.venv/bin/python -B -m unittest discover -s backend -p 'test_*.py'
+backend/.venv/bin/python -B -m unittest discover -s backend/tests -t . -p 'test_*.py'
 backend/.venv/bin/python -B -m backend.app.dev.memory_debug --stage all --skip-llm
 ```
 
@@ -220,6 +277,24 @@ errors and resulting rows matched for Manual, Canvas and UoA records.
 No frontend files, database schema, SQLite rows, Canvas/UoA import behavior,
 local environment configuration, production archives or durable store contents
 were changed. No live OpenAI call is necessary for this refactor's tests.
+
+## Running the grouped backend
+
+From the project root:
+
+```bash
+backend/.venv/bin/python -m uvicorn backend.app.server:app --reload --port 8001
+```
+
+The old `backend.fastapi_test:app` command remains valid. Tests now use
+`backend.tests...` import paths; for example:
+
+```bash
+backend/.venv/bin/python -B -m unittest backend.tests.ai.test_ai_proposal -v
+```
+
+The full OpenAPI schema was checked again after grouping the feature routers.
+All 23 API paths, request schemas and response contracts are unchanged.
 
 ## Future extensions (not implemented)
 

@@ -10,7 +10,7 @@ from openai import OpenAIError
 from pydantic import BaseModel, SecretStr, StrictInt, ValidationError
 
 from backend.app.database import db_file
-from backend.app.ai_config import (
+from backend.app.ai.config import (
     AGENT_MODEL_OPTIONS,
     MAX_RECENT_TURNS,
     MIN_RECENT_TURNS,
@@ -21,10 +21,10 @@ from backend.app.ai_config import (
     save_max_recent_turns,
     save_openai_api_key,
 )
-from backend.app.memory.recent import add_completed_turn, get_recent_turns, has_session
+from backend.app.ai.memory.recent import add_completed_turn, get_recent_turns, has_session
 from backend.app.dev.observation_smoke import send_observation_to_llm
-from backend.app.agent.contracts import InvalidProposalError
-from backend.app.agent.service import get_agent_proposal
+from backend.app.ai.agent.contracts import InvalidProposalError
+from backend.app.ai.agent.service import get_agent_proposal
 
 router = APIRouter()
 

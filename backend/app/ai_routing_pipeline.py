@@ -1,6 +1,6 @@
-"""Compatibility entry point for backend.app.context.selection."""
+"""Compatibility entry point for backend.app.ai.context.selection."""
 
 import sys
-from backend.app.context import selection as _implementation
+from backend.app.ai.context import selection as _implementation
 
 sys.modules[__name__] = _implementation

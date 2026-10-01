@@ -1,53 +1,6 @@
-"""Compatibility facade for durable-memory contracts, extraction and storage."""
+"""Compatibility entry point for backend.app.ai.compat.durable_memory."""
 
-from backend.app.infrastructure.module_compat import forward_module
-from backend.app.memory import contracts, durable, durable_store
+import sys
+from backend.app.ai.compat import durable_memory as _implementation
 
-forward_module(__name__, {
-    "MAX_MEMORY_CONTENT_LENGTH": (contracts, "MAX_MEMORY_CONTENT_LENGTH"),
-    "MemoryType": (contracts, "MemoryType"),
-    "MemoryFields": (contracts, "MemoryFields"),
-    "ExtractedMemory": (contracts, "ExtractedMemory"),
-    "DurableMemoryExtraction": (contracts, "DurableMemoryExtraction"),
-    "SourceTurnReference": (contracts, "SourceTurnReference"),
-    "StoredDurableMemory": (contracts, "StoredDurableMemory"),
-    "DurableMemoryStore": (contracts, "DurableMemoryStore"),
-    "re": (contracts, "re"),
-    "uuid": (contracts, "uuid"),
-    "BaseModel": (contracts, "BaseModel"),
-    "ConfigDict": (contracts, "ConfigDict"),
-    "model_validator": (contracts, "model_validator"),
-    "_StorageError": (durable_store, "_StorageError"),
-    "_normalized_content": (durable_store, "_normalized_content"),
-    "_memory_key": (durable_store, "_memory_key"),
-    "_merge_memories": (durable_store, "_merge_memories"),
-    "_durable_write_lock": (durable_store, "_durable_write_lock"),
-    "_persist_memories": (durable_store, "_persist_memories"),
-    "DURABLE_MEMORY_FILE": (durable_store, "DURABLE_MEMORY_FILE"),
-    "exclusive_file_lock": (durable_store, "exclusive_file_lock"),
-    "_fsync_directory": (durable_store, "_fsync_directory"),
-    "_read_archive_bytes": (durable_store, "_read_archive_bytes"),
-    "_write_verified_temp": (durable_store, "_write_verified_temp"),
-    "_canonical_bytes": (durable_store, "_canonical_bytes"),
-    "contextmanager": (durable_store, "contextmanager"),
-    "unicodedata": (durable_store, "unicodedata"),
-    "datetime": (durable_store, "datetime"),
-    "timezone": (durable_store, "timezone"),
-    "_protected_sources": (durable, "_protected_sources"),
-    "_resolve_extraction": (durable, "_resolve_extraction"),
-    "_failed": (durable, "_failed"),
-    "extract_durable_memories": (durable, "extract_durable_memories"),
-    "DURABLE_MEMORY_INSTRUCTIONS": (durable, "DURABLE_MEMORY_INSTRUCTIONS"),
-    "DURABLE_MEMORY_MODEL": (durable, "DURABLE_MEMORY_MODEL"),
-    "DURABLE_MEMORY_BATCH_SIZE": (durable, "DURABLE_MEMORY_BATCH_SIZE"),
-    "DEFAULT_AGENT_MODEL": (durable, "DEFAULT_AGENT_MODEL"),
-    "is_openai_api_key_configured": (durable, "is_openai_api_key_configured"),
-    "_redact_secrets": (durable, "_redact_secrets"),
-    "_first_timestamp": (durable, "_first_timestamp"),
-    "_source_identity": (durable, "_source_identity"),
-    "_source_timestamp": (durable, "_source_timestamp"),
-    "OpenAI": (durable, "OpenAI"),
-    "os": (durable, "os"),
-    "json": (durable, "json"),
-    "deepcopy": (durable, "deepcopy"),
-})
+sys.modules[__name__] = _implementation

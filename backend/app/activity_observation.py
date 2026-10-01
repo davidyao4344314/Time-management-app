@@ -1,7 +1,7 @@
-"""Compatibility entry point for backend.app.observations.activities."""
+"""Compatibility entry point for backend.app.ai.observations.activities."""
 
 import sys
-from backend.app.observations import activities as _implementation
+from backend.app.ai.observations import activities as _implementation
 
 if __name__ == "__main__":
     _implementation.main()

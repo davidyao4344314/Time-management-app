@@ -1,4 +1,4 @@
-"""Run from the project root: backend/.venv/bin/python -m unittest backend.test_uoa_active_dates -v"""
+"""Run from the project root: backend/.venv/bin/python -m unittest backend.tests.integrations.test_uoa_active_dates -v"""
 import sqlite3
 import tempfile
 import unittest
@@ -7,8 +7,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from backend.app import calender, database
-from backend.app.activities import add_activity, remove_duplicate_activities
-from backend.app.uoa_timetable_import import (
+from backend.app.planner.activities import add_activity, remove_duplicate_activities
+from backend.app.integrations.uoa_timetable_import import (
     backfill_uoa_activity_ranges,
     convert_uoa_event_to_activity,
     import_uoa_timetable_to_activities,

@@ -1,6 +1,6 @@
-"""Compatibility entry point for backend.app.observations.formatting."""
+"""Compatibility entry point for backend.app.ai.observations.formatting."""
 
 import sys
-from backend.app.observations import formatting as _implementation
+from backend.app.ai.observations import formatting as _implementation
 
 sys.modules[__name__] = _implementation

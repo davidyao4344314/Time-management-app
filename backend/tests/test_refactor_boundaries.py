@@ -4,10 +4,11 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from backend.tests.paths import BACKEND_DIRECTORY, PROJECT_DIRECTORY
 from unittest.mock import patch
 
 from backend.app import ai_memory
-from backend.app.memory import archive_store, recent, settings
+from backend.app.ai.memory import archive_store, recent, settings
 
 
 class RefactorBoundaryTests(unittest.TestCase):
@@ -15,31 +16,31 @@ class RefactorBoundaryTests(unittest.TestCase):
         code = """
 import sys
 sys.modules['fastapi'] = None
-sys.modules['backend.app.agent.service'] = None
+sys.modules['backend.app.ai.agent.service'] = None
 sys.modules['backend.app.api.ai'] = None
 from backend.app import activity_service
 assert not hasattr(activity_service, 'HTTPException')
 assert not hasattr(activity_service, 'get_agent_proposal')
 """
         result = subprocess.run([sys.executable, "-B", "-c", code],
-                                cwd=Path(__file__).resolve().parents[1],
+                                cwd=PROJECT_DIRECTORY,
                                 capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_main_reasoning_does_not_import_observations_or_crud(self):
         code = """
 import sys
-sys.modules['backend.app.observations.activities'] = None
-sys.modules['backend.app.observations.exams'] = None
-sys.modules['backend.app.activities'] = None
-sys.modules['backend.app.exams'] = None
-sys.modules['backend.app.memory.archive_store'] = None
-from backend.app.agent import reasoning
+sys.modules['backend.app.ai.observations.activities'] = None
+sys.modules['backend.app.ai.observations.exams'] = None
+sys.modules['backend.app.planner.activities'] = None
+sys.modules['backend.app.planner.exams'] = None
+sys.modules['backend.app.ai.memory.archive_store'] = None
+from backend.app.ai.agent import reasoning
 assert not hasattr(reasoning, 'add_activity')
 assert reasoning.proposal_request_limits('high') == (5000, 180)
 """
         result = subprocess.run([sys.executable, "-B", "-c", code],
-                                cwd=Path(__file__).resolve().parents[1],
+                                cwd=PROJECT_DIRECTORY,
                                 capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -47,15 +48,15 @@ assert reasoning.proposal_request_limits('high') == (5000, 180)
         code = """
 import sys
 sys.modules['openai'] = None
-sys.modules['backend.app.memory.durable'] = None
-from backend.app.memory import durable_store
-from backend.app.memory.contracts import DurableMemoryStore
+sys.modules['backend.app.ai.memory.durable'] = None
+from backend.app.ai.memory import durable_store
+from backend.app.ai.memory.contracts import DurableMemoryStore
 assert durable_store.DurableMemoryStore is DurableMemoryStore
 assert not hasattr(durable_store, 'OpenAI')
 assert not hasattr(durable_store, 'extract_durable_memories')
 """
         result = subprocess.run([sys.executable, "-B", "-c", code],
-                                cwd=Path(__file__).resolve().parents[1],
+                                cwd=PROJECT_DIRECTORY,
                                 capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -63,14 +64,14 @@ assert not hasattr(durable_store, 'extract_durable_memories')
         code = """
 import sys
 sys.modules['openai'] = None
-sys.modules['backend.app.memory.summary'] = None
-sys.modules['backend.app.memory.category_review'] = None
-from backend.app.memory.category_policy import _category_rejection
+sys.modules['backend.app.ai.memory.summary'] = None
+sys.modules['backend.app.ai.memory.category_review'] = None
+from backend.app.ai.memory.category_policy import _category_rejection
 assert _category_rejection('career', {'general'}) is None
 assert _category_rejection('canvas_errors', {'general'}) is not None
 """
         result = subprocess.run([sys.executable, "-B", "-c", code],
-                                cwd=Path(__file__).resolve().parents[1],
+                                cwd=PROJECT_DIRECTORY,
                                 capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -93,15 +94,15 @@ assert _category_rejection('canvas_errors', {'general'}) is not None
         code = """
 import sys
 sys.modules['openai'] = None
-sys.modules['backend.app.memory.recent'] = None
+sys.modules['backend.app.ai.memory.recent'] = None
 sys.modules['backend.app.ai_proposal'] = None
-from backend.app.memory import archive_store
-assert 'backend.app.memory.selection' not in sys.modules
+from backend.app.ai.memory import archive_store
+assert 'backend.app.ai.memory.selection' not in sys.modules
 assert not hasattr(archive_store, '_sessions')
 """
         result = subprocess.run(
             [sys.executable, "-B", "-c", code],
-            cwd=Path(__file__).resolve().parents[1],
+            cwd=PROJECT_DIRECTORY,
             capture_output=True, text=True, timeout=15,
         )
         self.assertEqual(result.returncode, 0, result.stderr)

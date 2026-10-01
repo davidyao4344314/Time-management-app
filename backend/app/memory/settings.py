@@ -1,4 +1,6 @@
-"""Existing archive-compaction thresholds; no compaction is triggered here."""
+"""Compatibility entry point for backend.app.ai.memory.settings."""
 
-ARCHIVE_TURN_THRESHOLD = 100
-ARCHIVE_COMPACT_BATCH = 50
+import sys
+from backend.app.ai.memory import settings as _implementation
+
+sys.modules[__name__] = _implementation

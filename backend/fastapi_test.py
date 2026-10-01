@@ -1,681 +1,85 @@
+"""Compatibility ASGI entry point; prefer backend.app.server:app."""
 from datetime import date, datetime, timedelta
 from sqlite3 import Error as SQLiteError
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, SecretStr
 
-from backend.app import activity_service
-from backend.app.activities import (
-    delete_activity,
-    delte_all_activities,
-    get_activities_by_name,
-    get_activity_name_by_id,
-    get_all_activities,
-    move_activity,
-    remove_duplicate_activities,
-)
-from backend.app.database import create_connection
+from backend.app import server
+from backend.app.api import activities as activities_routes
 from backend.app.api import ai as ai_routes
-from backend.app.calender import (
-    check_activity_current,
-    get_current_and_next_activities,
-    get_current_time,
-    get_todays_activities,
-    get_week_activities,
-    get_current_week,
-)
-from backend.app.canvas_import import (
-    get_canvas_events,
-    is_canvas_calendar_configured,
-    save_canvas_calendar_url,
-    sort_out_canvas_events,
-)
-from backend.app.exams import (
-    add_exam,
-    delete_exam,
-    edit_exam,
-    get_all_exams,
-    get_exam_by_id,
-    get_exam_name_by_id,
-    search_exams_by_name,
-)
-from backend.app.uoa_timetable_import import (
-    get_uoa_timetable_events,
-    import_uoa_timetable_to_activities,
-    is_uoa_timetable_configured,
-    save_uoa_timetable_url,
-)
-
-app = FastAPI()
-app.include_router(ai_routes.router)
-
-
-@app.get("/canvas/status")
-def canvas_status():
-    return {"configured": is_canvas_calendar_configured()}
-
-
-class CanvasImportRequest(BaseModel):
-    calendar_url: SecretStr | None = None
-
-
-@app.post("/canvas/import")
-def import_canvas_calendar(import_request: CanvasImportRequest):
-    calendar_url = (
-        import_request.calendar_url.get_secret_value()
-        if import_request.calendar_url is not None
-        else None
-    )
-
-    if calendar_url is None and not is_canvas_calendar_configured():
-        raise HTTPException(status_code=400, detail="Enter your Canvas iCal feed URL first.")
-
-    try:
-        events = get_canvas_events(calendar_url)
-    except ValueError:
-        raise HTTPException(
-            status_code=400,
-            detail="Enter a valid HTTPS Canvas iCal feed URL ending in .ics.",
-        ) from None
-    except (RuntimeError, TypeError, AttributeError):
-        raise HTTPException(
-            status_code=502,
-            detail="Could not download or read the Canvas calendar. Check the feed URL and try again.",
-        ) from None
-
-    if calendar_url is not None:
-        try:
-            save_canvas_calendar_url(calendar_url)
-        except RuntimeError:
-            raise HTTPException(
-                status_code=500,
-                detail="Could not save the Canvas calendar configuration. Check local file permissions.",
-            ) from None
-
-    connection = None
-    try:
-        connection = create_connection()
-        sort_out_canvas_events(connection, events)
-    except (ValueError, SQLiteError):
-        raise HTTPException(
-            status_code=500,
-            detail="Could not save all Canvas events. Check the event dates and database; some events may already have been saved.",
-        ) from None
-    finally:
-        if connection is not None:
-            connection.close()
-
-    return {"message": "Canvas import completed."}
-
-
-@app.get("/uoa/status")
-def uoa_status():
-    return {"configured": is_uoa_timetable_configured()}
-
-
-class UoaImportRequest(BaseModel):
-    timetable_url: SecretStr | None = None
-
-
-@app.post("/uoa/import")
-def import_uoa_timetable(import_request: UoaImportRequest):
-    timetable_url = (
-        import_request.timetable_url.get_secret_value()
-        if import_request.timetable_url is not None
-        else None
-    )
-    if timetable_url is None and not is_uoa_timetable_configured():
-        raise HTTPException(status_code=400, detail="Enter your UoA timetable subscription URL first.")
-
-    try:
-        events = get_uoa_timetable_events(timetable_url)
-    except ValueError:
-        raise HTTPException(
-            status_code=400,
-            detail="Enter a valid HTTP, HTTPS or webcal UoA timetable subscription URL.",
-        ) from None
-    except (RuntimeError, TypeError, AttributeError):
-        raise HTTPException(
-            status_code=502,
-            detail="Could not download or read the UoA timetable. Check your subscription URL and try again.",
-        ) from None
-
-    if timetable_url is not None:
-        try:
-            save_uoa_timetable_url(timetable_url)
-        except RuntimeError:
-            raise HTTPException(
-                status_code=500,
-                detail="Could not save the UoA timetable configuration. Check local file permissions.",
-            ) from None
-
-    connection = None
-    try:
-        connection = create_connection()
-        result = import_uoa_timetable_to_activities(connection, events)
-    except (ValueError, SQLiteError):
-        raise HTTPException(
-            status_code=500,
-            detail="Could not save all timetable classes. Check the database; some classes may already have been saved.",
-        ) from None
-    finally:
-        if connection is not None:
-            connection.close()
-
-    if result["imported"] == 0 and result["skipped"]:
-        raise HTTPException(
-            status_code=422,
-            detail="No classes could be imported. The timetable events are missing valid names or start/end times.",
-        )
-
-    return {
-        "message": "UoA timetable imported successfully.",
-        "imported": result["imported"],
-        "skipped": len(result["skipped"]),
-    }
-
-
-class MoveActivityRequest(BaseModel):
-    activity_id: int
-    activity_type: str
-    destination_date: str
-    destination_weekday: str
-
-
-class AddActivityRequest(BaseModel):
-    name: str
-    category: str
-    subject: str | None = None
-    activity_type: str
-    date: str | None = None
-    weekday: str | None = None
-    start_time: str | None = None
-    end_time: str | None = None
-
-
-class EditActivityRequest(BaseModel):
-    activity_id: int
-    column_name: str
-    new_value: str | None = None
-    date: str | None = None
-    weekday: str | None = None
-
-
-class AddExamRequest(BaseModel):
-    name: str
-    category: str
-    subject: str | None = None
-    date: str
-    start_time: str | None = None
-    end_time: str | None = None
-
-
-class EditExamRequest(BaseModel):
-    exam_id: int
-    column_name: str
-    new_value: str | None = None
-
-
-def activity_to_dict(activity):
-    return {
-        "id": activity[0],
-        "name": activity[1],
-        "category": activity[2],
-        "subject": activity[3],
-        "activity_type": activity[4],
-        "date": activity[5],
-        "weekday": activity[6],
-        "start_time": activity[7],
-        "end_time": activity[8],
-        "active_start_date": activity[9],
-        "active_end_date": activity[10],
-        "source": activity[11],
-        "external_id": activity[12],
-    }
-
-
-def exam_to_dict(exam):
-    return {
-        "id": exam[0],
-        "name": exam[1],
-        "category": exam[2],
-        "subject": exam[3],
-        "date": exam[4],
-        "start_time": exam[5],
-        "end_time": exam[6],
-        "source": exam[7],
-        "external_id": exam[8],
-    }
-
-
-def normalize_optional_time(value):
-    return activity_service.normalize_optional_time(value)
-
-
-def validate_optional_time_range(start_time, end_time):
-    # Exams retain the same HTTP helper and error response.
-    try:
-        activity_service.validate_optional_time_range(start_time, end_time)
-    except activity_service.ActivityValidationError as error:
-        raise HTTPException(status_code=error.status_code, detail=error.detail) from None
-
-@app.get("/exams")
-def all_exams():
-    connection = create_connection()
-
-    try:
-        exam_rows = get_all_exams(connection)
-    finally:
-        connection.close()
-
-    return [exam_to_dict(exam) for exam in exam_rows]
-
-
-@app.post("/exams", status_code=201)
-def create_exam(exam_request: AddExamRequest):
-    name = exam_request.name.strip()
-    category = exam_request.category.strip()
-    subject = exam_request.subject.strip() if exam_request.subject else None
-
-    if not name or not category:
-        raise HTTPException(status_code=400, detail="Name and category are required.")
-
-    try:
-        exam_date = str(date.fromisoformat(exam_request.date.strip()))
-    except ValueError:
-        raise HTTPException(
-            status_code=400,
-            detail="Date must use YYYY-MM-DD format.",
-        ) from None
-
-    try:
-        start_time = normalize_optional_time(exam_request.start_time)
-        end_time = normalize_optional_time(exam_request.end_time)
-    except (AttributeError, ValueError):
-        raise HTTPException(
-            status_code=400,
-            detail="Times must use HH:MM format.",
-        ) from None
-
-    validate_optional_time_range(start_time, end_time)
-
-    columns = [
-        "name",
-        "category",
-        "subject",
-        "date",
-        "start_time",
-        "end_time",
-    ]
-    values = [
-        name,
-        category,
-        subject,
-        exam_date,
-        start_time,
-        end_time,
-    ]
-
-    connection = create_connection()
-
-    try:
-        add_exam(connection, columns, values)
-    finally:
-        connection.close()
-
-    return {"message": "Exam created."}
-
-
-@app.get("/exams/search")
-def search_exam_records_by_name(name: str):
-    requested_name = name.strip()
-
-    if not requested_name:
-        raise HTTPException(status_code=400, detail="Exam name is required.")
-
-    connection = create_connection()
-
-    try:
-        matching_exams = search_exams_by_name(connection, requested_name)
-    finally:
-        connection.close()
-
-    return [exam_to_dict(exam) for exam in matching_exams]
-
-
-@app.put("/exams/{exam_id}")
-def update_exam(exam_id: int, edit_request: EditExamRequest):
-    if edit_request.exam_id != exam_id:
-        raise HTTPException(
-            status_code=400,
-            detail="The exam ID in the URL and request body must match.",
-        )
-
-    editable_columns = {
-        "name",
-        "category",
-        "subject",
-        "date",
-        "start_time",
-        "end_time",
-    }
-    column_name = edit_request.column_name.strip()
-
-    if column_name not in editable_columns:
-        raise HTTPException(status_code=400, detail="That field cannot be edited.")
-
-    connection = create_connection()
-
-    try:
-        exam = get_exam_by_id(connection, exam_id)
-
-        if exam is None:
-            raise HTTPException(status_code=404, detail="Exam ID not found.")
-
-        new_value = edit_request.new_value
-
-        if column_name in {"name", "category"}:
-            new_value = new_value.strip() if new_value else ""
-
-            if not new_value:
-                field_name = column_name.title()
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"{field_name} is required.",
-                )
-
-        elif column_name == "subject":
-            new_value = new_value.strip() if new_value else None
-
-        elif column_name == "date":
-            try:
-                new_value = str(date.fromisoformat(new_value.strip()))
-            except (AttributeError, ValueError):
-                raise HTTPException(
-                    status_code=400,
-                    detail="Date must use YYYY-MM-DD format.",
-                ) from None
-
-        elif column_name in {"start_time", "end_time"}:
-            try:
-                new_value = normalize_optional_time(new_value)
-            except (AttributeError, ValueError):
-                raise HTTPException(
-                    status_code=400,
-                    detail="Time must use HH:MM format.",
-                ) from None
-
-            start_time_value = new_value if column_name == "start_time" else exam[5]
-            end_time_value = new_value if column_name == "end_time" else exam[6]
-
-            try:
-                start_time_value = normalize_optional_time(start_time_value)
-                end_time_value = normalize_optional_time(end_time_value)
-            except (AttributeError, ValueError):
-                raise HTTPException(
-                    status_code=400,
-                    detail="The stored exam time is invalid.",
-                ) from None
-
-            validate_optional_time_range(start_time_value, end_time_value)
-
-        edit_exam(connection, exam_id, column_name, new_value)
-        updated_exam = get_exam_by_id(connection, exam_id)
-    finally:
-        connection.close()
-
-    return exam_to_dict(updated_exam)
-
-
-@app.delete("/exams/{exam_id}")
-def remove_exam_by_id(exam_id: int):
-    connection = create_connection()
-
-    try:
-        exam_name = get_exam_name_by_id(connection, exam_id)
-
-        if exam_name is None:
-            raise HTTPException(status_code=404, detail="Exam ID not found.")
-
-        delete_exam(connection, exam_id)
-    finally:
-        connection.close()
-
-    return {
-        "message": "Exam deleted.",
-        "exam_id": exam_id,
-    }
-
-
-@app.get("/activities")
-def all_activities():
-    connection = create_connection()
-
-    activity_rows = get_all_activities(connection)
-
-    connection.close()
-
-    return [activity_to_dict(activity) for activity in activity_rows]
-
-
-@app.post("/activities", status_code=201)
-def create_activity(activity_request: AddActivityRequest):
-    try:
-        prepared = activity_service.prepare_new_activity(activity_request.model_dump())
-    except activity_service.ActivityValidationError as error:
-        raise HTTPException(status_code=error.status_code, detail=error.detail) from None
-
-    connection = create_connection()
-    try:
-        created_activity = activity_service.create_activity_record(connection, prepared)
-    finally:
-        connection.close()
-    return activity_to_dict(created_activity)
-
-@app.post("/activities/remove-duplicates")
-def clear_duplicate_activities():
-    connection = None
-    try:
-        connection = create_connection()
-        number_removed = remove_duplicate_activities(connection)
-    except SQLiteError:
-        raise HTTPException(
-            status_code=500,
-            detail="Could not remove duplicate activities. Please try again.",
-        ) from None
-    finally:
-        if connection is not None:
-            connection.close()
-
-    return {"number_removed": number_removed}
-
-
-@app.delete("/activities/all")
-def remove_all_activities():
-    connection = create_connection()
-
-    try:
-        deleted_count = len(get_all_activities(connection))
-        delte_all_activities(connection)
-    finally:
-        connection.close()
-
-    return {
-        "message": "All activities deleted.",
-        "deleted_count": deleted_count,
-    }
-
-
-@app.get("/activities/search")
-def search_activities_by_name(name: str):
-    requested_name = name.strip()
-
-    if not requested_name:
-        raise HTTPException(status_code=400, detail="Activity name is required.")
-
-    connection = create_connection()
-
-    try:
-        matching_activities = get_activities_by_name(connection, requested_name)
-    finally:
-        connection.close()
-
-    return [activity_to_dict(activity) for activity in matching_activities]
-
-
-@app.put("/activities/{activity_id}")
-def update_activity(activity_id: int, edit_request: EditActivityRequest):
-    fields = edit_request.model_dump()
-    try:
-        # Preserve validation-before-connection for ID/column errors.
-        activity_service.validate_activity_edit(activity_id, fields)
-    except activity_service.ActivityValidationError as error:
-        raise HTTPException(status_code=error.status_code, detail=error.detail) from None
-
-    connection = create_connection()
-    try:
-        updated_activity = activity_service.update_activity_record(connection, activity_id, fields)
-    except activity_service.ActivityValidationError as error:
-        raise HTTPException(status_code=error.status_code, detail=error.detail) from None
-    finally:
-        connection.close()
-    return activity_to_dict(updated_activity)
-
-@app.delete("/activities/{activity_id}")
-def remove_activity_by_id(activity_id: int):
-    connection = create_connection()
-
-    try:
-        activity_name = get_activity_name_by_id(connection, activity_id)
-
-        if activity_name is None:
-            raise HTTPException(status_code=404, detail="Activity ID not found.")
-
-        delete_activity(connection, activity_id)
-    finally:
-        connection.close()
-
-    return {
-        "message": "Activity deleted.",
-        "activity_id": activity_id,
-    }
-
-
-@app.get("/activities/today")
-def todays_activities():
-    connection = create_connection()
-
-    activities = get_todays_activities(connection)
-
-    connection.close()
-
-    return [activity_to_dict(activity) for activity in activities]
-
-
-@app.get("/activities/current-next")
-def current_and_next_activities():
-    connection = create_connection()
-    try:
-        current, next_activity = get_current_and_next_activities(connection)
-        return {
-            "current": [activity_to_dict(activity) for activity in current] or None,
-            "next": activity_to_dict(next_activity) if next_activity is not None else None,
-        }
-    finally:
-        connection.close()
-
-
-@app.get("/activities/current")
-def current_activities():
-    connection = create_connection()
-
-    activities_today = get_todays_activities(connection)
-    current_time = get_current_time()
-    current_activity_ids = check_activity_current(
-        activities_today,
-        current_time,
-    )
-
-    activities_current = [
-        activity
-        for activity in activities_today
-        if activity[0] in current_activity_ids
-    ]
-
-    connection.close()
-
-    return [activity_to_dict(activity) for activity in activities_current]
-
-
-@app.get("/activities/week")
-def weekly_activities(week_start: date | None = None, include_exams: bool = False):
-    if week_start is not None and week_start > date(9999, 12, 25):
-        raise HTTPException(status_code=400, detail="The requested week is outside the supported date range.")
-    connection = create_connection()
-    try:
-        items = [
-            {**activity, "event_type": "activity"}
-            for activity in get_week_activities(connection, week_start)
-        ]
-        # Only the Calendar opts in; other activity-only consumers stay unchanged.
-        if include_exams:
-            first_day = week_start if week_start is not None else get_current_week()[0]
-            last_day = first_day + timedelta(days=6)
-            for exam in get_all_exams(connection):
-                item = exam_to_dict(exam)
-                try:
-                    exam_date = date.fromisoformat(item["date"].strip())
-                except (AttributeError, TypeError, ValueError):
-                    continue
-                if first_day <= exam_date <= last_day:
-                    items.append({
-                        **item,
-                        "event_type": "exam",
-                        "activity_type": "one_time",
-                        "calendar_date": exam_date.isoformat(),
-                    })
-        return items
-    finally:
-        connection.close()
-
-
-@app.put("/activities/{activity_id}/move")
-def move_calendar_activity(activity_id: int, move_request: MoveActivityRequest):
-    if move_request.activity_id != activity_id:
-        raise HTTPException(
-            status_code=400,
-            detail="The activity ID in the URL and request body must match.",
-        )
-
-    connection = create_connection()
-
-    try:
-        moved_activity = move_activity(
-            connection,
-            activity_id,
-            move_request.activity_type,
-            move_request.destination_date,
-            move_request.destination_weekday,
-        )
-    except ValueError as error:
-        raise HTTPException(status_code=400, detail=str(error)) from error
-    finally:
-        connection.close()
-
-    if moved_activity is None:
-        raise HTTPException(status_code=404, detail="Activity not found.")
-
-    return moved_activity
-
-
-# Compatibility exports for scripts/tests using the original API module.
-# Owners live in api.ai; no second copy of settings, session state or handlers.
+from backend.app.api import calendar as calendar_routes
+from backend.app.api import common
+from backend.app.api import exams as exams_routes
+from backend.app.api import imports as imports_routes
+from backend.app.planner import activity_service
 from backend.app.infrastructure.module_compat import forward_module
 
 forward_module(__name__, {
+    "create_connection": (common, "create_connection"),
+    "activity_to_dict": (common, "activity_to_dict"),
+    "exam_to_dict": (common, "exam_to_dict"),
+    "normalize_optional_time": (common, "normalize_optional_time"),
+    "validate_optional_time_range": (common, "validate_optional_time_range"),
     "add_activity": (activity_service, "add_activity"),
     "edit_activity": (activity_service, "edit_activity"),
     "get_activity_by_id": (activity_service, "get_activity_by_id"),
+    "canvas_status": (imports_routes, "canvas_status"),
+    "CanvasImportRequest": (imports_routes, "CanvasImportRequest"),
+    "import_canvas_calendar": (imports_routes, "import_canvas_calendar"),
+    "uoa_status": (imports_routes, "uoa_status"),
+    "UoaImportRequest": (imports_routes, "UoaImportRequest"),
+    "import_uoa_timetable": (imports_routes, "import_uoa_timetable"),
+    "AddExamRequest": (exams_routes, "AddExamRequest"),
+    "EditExamRequest": (exams_routes, "EditExamRequest"),
+    "all_exams": (exams_routes, "all_exams"),
+    "create_exam": (exams_routes, "create_exam"),
+    "search_exam_records_by_name": (exams_routes, "search_exam_records_by_name"),
+    "update_exam": (exams_routes, "update_exam"),
+    "remove_exam_by_id": (exams_routes, "remove_exam_by_id"),
+    "AddActivityRequest": (activities_routes, "AddActivityRequest"),
+    "EditActivityRequest": (activities_routes, "EditActivityRequest"),
+    "all_activities": (activities_routes, "all_activities"),
+    "create_activity": (activities_routes, "create_activity"),
+    "clear_duplicate_activities": (activities_routes, "clear_duplicate_activities"),
+    "remove_all_activities": (activities_routes, "remove_all_activities"),
+    "search_activities_by_name": (activities_routes, "search_activities_by_name"),
+    "update_activity": (activities_routes, "update_activity"),
+    "remove_activity_by_id": (activities_routes, "remove_activity_by_id"),
+    "MoveActivityRequest": (calendar_routes, "MoveActivityRequest"),
+    "todays_activities": (calendar_routes, "todays_activities"),
+    "current_and_next_activities": (calendar_routes, "current_and_next_activities"),
+    "current_activities": (calendar_routes, "current_activities"),
+    "weekly_activities": (calendar_routes, "weekly_activities"),
+    "move_calendar_activity": (calendar_routes, "move_calendar_activity"),
+    "delete_activity": (activities_routes, "delete_activity"),
+    "delte_all_activities": (activities_routes, "delte_all_activities"),
+    "get_activities_by_name": (activities_routes, "get_activities_by_name"),
+    "get_activity_name_by_id": (activities_routes, "get_activity_name_by_id"),
+    "get_all_activities": (activities_routes, "get_all_activities"),
+    "remove_duplicate_activities": (activities_routes, "remove_duplicate_activities"),
+    "move_activity": (calendar_routes, "move_activity"),
+    "check_activity_current": (calendar_routes, "check_activity_current"),
+    "get_current_and_next_activities": (calendar_routes, "get_current_and_next_activities"),
+    "get_current_time": (calendar_routes, "get_current_time"),
+    "get_todays_activities": (calendar_routes, "get_todays_activities"),
+    "get_week_activities": (calendar_routes, "get_week_activities"),
+    "get_current_week": (calendar_routes, "get_current_week"),
+    "get_canvas_events": (imports_routes, "get_canvas_events"),
+    "is_canvas_calendar_configured": (imports_routes, "is_canvas_calendar_configured"),
+    "save_canvas_calendar_url": (imports_routes, "save_canvas_calendar_url"),
+    "sort_out_canvas_events": (imports_routes, "sort_out_canvas_events"),
+    "get_uoa_timetable_events": (imports_routes, "get_uoa_timetable_events"),
+    "import_uoa_timetable_to_activities": (imports_routes, "import_uoa_timetable_to_activities"),
+    "is_uoa_timetable_configured": (imports_routes, "is_uoa_timetable_configured"),
+    "save_uoa_timetable_url": (imports_routes, "save_uoa_timetable_url"),
+    "add_exam": (exams_routes, "add_exam"),
+    "delete_exam": (exams_routes, "delete_exam"),
+    "edit_exam": (exams_routes, "edit_exam"),
+    "get_all_exams": (exams_routes, "get_all_exams"),
+    "get_exam_by_id": (exams_routes, "get_exam_by_id"),
+    "get_exam_name_by_id": (exams_routes, "get_exam_name_by_id"),
+    "search_exams_by_name": (exams_routes, "search_exams_by_name"),
     "AIConfigRequest": (ai_routes, "AIConfigRequest"),
     "AIModelConfigRequest": (ai_routes, "AIModelConfigRequest"),
     "AIMemoryConfigRequest": (ai_routes, "AIMemoryConfigRequest"),
@@ -712,4 +116,5 @@ forward_module(__name__, {
     "OpenAIError": (ai_routes, "OpenAIError"),
     "StrictInt": (ai_routes, "StrictInt"),
     "ValidationError": (ai_routes, "ValidationError"),
+    "app": (server, "app"),
 })

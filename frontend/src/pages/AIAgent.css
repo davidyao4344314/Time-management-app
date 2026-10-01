@@ -94,6 +94,97 @@
   color: #11104f;
 }
 
+.ai-agent-content button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.ai-agent-response {
+  margin-top: 1.5rem;
+}
+
+.ai-agent-response-text,
+.agent-context-excerpt {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+
+.agent-context {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid #dddddd;
+  border-radius: 0.75rem;
+  color: #222222;
+  overflow-wrap: anywhere;
+}
+
+.agent-context summary {
+  cursor: pointer;
+  color: #11104f;
+  font-weight: 600;
+}
+
+.agent-context summary:focus-visible {
+  outline: 2px solid #11104f;
+  outline-offset: 3px;
+}
+
+.agent-context section + section {
+  margin-top: 1.25rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid #eeeeee;
+}
+
+.agent-context-note {
+  color: #555555;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.agent-context-list {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0;
+  list-style: none;
+}
+
+.agent-context-list > li {
+  padding: 0.75rem;
+  background: #f7f7fb;
+  border-radius: 0.5rem;
+}
+
+.agent-context-list p {
+  margin-block: 0.5rem;
+}
+
+.agent-context-authority {
+  display: inline-block;
+  margin-left: 0.5rem;
+  color: #555555;
+  font-size: 0.85rem;
+}
+
+.agent-context-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: 0.4rem 0.75rem;
+}
+
+.agent-context-field {
+  display: contents;
+}
+
+.agent-context-fields dt {
+  font-weight: 600;
+}
+
+.agent-context-fields dd {
+  margin: 0;
+  min-width: 0;
+}
+
 @media (max-width: 36rem) {
   .ai-agent-suggestions {
     grid-template-columns: 1fr;

@@ -159,10 +159,13 @@ def propose_ai(proposal_request: AIProposalRequest, request: Request, response: 
         # Read-only: the proposed add_activity action is never executed here.
         connection = sqlite3.connect(f"{db_file.resolve().as_uri()}?mode=ro", uri=True)
         try:
-            proposal = get_agent_proposal(connection, user_message, recent_turns, session_id=session_id)
+            proposal = get_agent_proposal(connection, user_message, recent_turns,
+                                          session_id=session_id, include_context=True)
         finally:
             connection.close()
-        add_completed_turn(session_id, user_message, proposal)
+        # Transparency is HTTP-only: never feed it back as conversation history.
+        add_completed_turn(session_id, user_message,
+                           {key: value for key, value in proposal.items() if key != "agent_context"})
     except SQLiteError:
         raise HTTPException(status_code=500, detail="Could not read the observation data.") from None
     except OpenAIError:

@@ -1007,7 +1007,7 @@ class AIProposalTests(unittest.TestCase):
         client = TestClient(api.app)
         histories = []
 
-        def mock_proposal(_connection, message, recent_turns, *, session_id=None):
+        def mock_proposal(_connection, message, recent_turns, *, session_id=None, include_context=False):
             histories.append(list(recent_turns))
             return {"message": f"Reply to {message}", "actions": []}
 
@@ -1056,7 +1056,7 @@ class AIProposalTests(unittest.TestCase):
     def test_separate_browser_sessions_do_not_share_history(self):
         histories = []
 
-        def mock_proposal(_connection, _message, recent_turns, *, session_id=None):
+        def mock_proposal(_connection, _message, recent_turns, *, session_id=None, include_context=False):
             histories.append(recent_turns)
             return {"message": "Reply", "actions": []}
 

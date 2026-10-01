@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import AgentContextInspector from '../components/AgentContextInspector'
 import './AIAgent.css'
 
 const suggestions = [
@@ -23,15 +24,48 @@ const suggestions = [
 function AIAgent() {
   const [request, setRequest] = useState('')
   const [message, setMessage] = useState('')
+  const [proposal, setProposal] = useState(null)
+  const [isLoading, setIsLoading] = useState(false)
+  const pendingRequest = useRef(null)
+
+  useEffect(() => () => pendingRequest.current?.abort(), [])
 
   function chooseSuggestion(example) {
     setRequest(example)
     setMessage('')
   }
 
-  function handleAsk(event) {
+  async function handleAsk(event) {
     event.preventDefault()
-    setMessage('AI Agent connection will be added next.')
+    if (pendingRequest.current) return
+    if (!request.trim()) {
+      setMessage('Enter a request first.')
+      return
+    }
+    const controller = new AbortController()
+    pendingRequest.current = controller
+    setMessage('')
+    setProposal(null)
+    setIsLoading(true)
+    try {
+      const response = await fetch('/api/ai/propose', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ message: request.trim() }),
+        signal: controller.signal,
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(typeof result.detail === 'string' ? result.detail : 'The AI request failed.')
+      setProposal(result)
+    } catch (error) {
+      if (error.name !== 'AbortError') setMessage(error.message || 'Could not reach the backend.')
+    } finally {
+      if (pendingRequest.current === controller) {
+        pendingRequest.current = null
+        setIsLoading(false)
+      }
+    }
   }
 
   return (
@@ -47,12 +81,16 @@ function AIAgent() {
             rows={5}
             placeholder="Ask the AI to help plan your study, manage activities, or think about your future..."
             value={request}
+            disabled={isLoading}
             onChange={(event) => {
               setRequest(event.target.value)
               setMessage('')
             }}
           />
-          <button className="ai-agent-ask" type="submit">Ask AI</button>
+          <button className="ai-agent-ask" type="submit" disabled={isLoading}>
+            {isLoading ? 'Asking AI…' : 'Ask AI'}
+          </button>
+          <p className="agent-context-note">Uses your configured OpenAI API key. Requests may incur charges.</p>
         </form>
 
         <div className="ai-agent-suggestions" aria-label="Request suggestions">
@@ -61,6 +99,7 @@ function AIAgent() {
               className="ai-agent-suggestion"
               key={suggestion.title}
               type="button"
+              disabled={isLoading}
               onClick={() => chooseSuggestion(suggestion.request)}
             >
               <strong>{suggestion.title}</strong>
@@ -70,6 +109,12 @@ function AIAgent() {
         </div>
 
         {message && <p className="ai-agent-message" role="status">{message}</p>}
+        {proposal && (
+          <section className="ai-agent-response" aria-label="AI response">
+            <p className="ai-agent-response-text">{proposal.message}</p>
+            <AgentContextInspector context={proposal.agent_context} actions={proposal.actions} />
+          </section>
+        )}
       </section>
     </main>
   )

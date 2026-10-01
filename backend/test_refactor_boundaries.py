@@ -11,6 +11,23 @@ from backend.app.memory import archive_store, recent, settings
 
 
 class RefactorBoundaryTests(unittest.TestCase):
+    def test_main_reasoning_does_not_import_observations_or_crud(self):
+        code = """
+import sys
+sys.modules['backend.app.observations.activities'] = None
+sys.modules['backend.app.observations.exams'] = None
+sys.modules['backend.app.activities'] = None
+sys.modules['backend.app.exams'] = None
+sys.modules['backend.app.memory.archive_store'] = None
+from backend.app.agent import reasoning
+assert not hasattr(reasoning, 'add_activity')
+assert reasoning.proposal_request_limits('high') == (5000, 180)
+"""
+        result = subprocess.run([sys.executable, "-B", "-c", code],
+                                cwd=Path(__file__).resolve().parents[1],
+                                capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_durable_storage_imports_without_extraction_or_openai(self):
         code = """
 import sys

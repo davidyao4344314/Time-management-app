@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 from backend.app.memory import archive_store as ai_memory
 from backend.app.memory.compaction_plan import (
+    SUMMARY_RECORD_TYPE,
     _validate_final_summary, _match_raw_sources, _verify_final_state, prepare_compaction,
 )
 from backend.app.infrastructure.atomic_files import (
@@ -27,7 +28,6 @@ from backend.app.memory.records import (
 from backend.app.memory.contracts import ArchiveCategorySummary, BASE_ARCHIVE_CATEGORIES
 
 
-SUMMARY_RECORD_TYPE = "compressed_summary"
 _logger = logging.getLogger("backend.app.ai_archive_persistence")
 
 

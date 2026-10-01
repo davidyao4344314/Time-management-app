@@ -34,6 +34,29 @@ the local URL printed by Vite, usually `http://localhost:5173/`. Keep the
 backend running in the first terminal for features that use the API. Press
 `Ctrl+C` in the frontend terminal to stop Vite.
 
+## Backend structure after the refactor
+
+The refactor separates responsibilities without adding agent features. See
+[Backend architecture](ARCHITECTURE.md) for the file tree, function ownership,
+dependency rules, compatibility imports and commit-by-commit explanation.
+
+- `api/ai.py` handles the existing AI HTTP routes.
+- `agent/service.py` coordinates routing, current observations and the model.
+- `agent/reasoning.py` formats model messages and validates proposals.
+- `context/` selects which activity/exam observations are needed.
+- `observations/` builds compact factual data using the existing backend logic.
+- `memory/` owns recent turns, archive processing and durable-memory storage.
+- `infrastructure/` holds shared file, locking and privacy utilities.
+- `activity_service.py` validates existing manual add/edit operations independently
+  of HTTP; it is **not** an agent action executor.
+- `actions/contracts.py` defines allowed action proposals only.
+
+The old module names remain compatibility entry points for existing scripts and
+tests. New code should import the dedicated modules. The API still starts with
+`backend.fastapi_test:app`, and the existing memory-debug CLI still works.
+Database schemas, real data files, frontend files, prompts and routing behavior
+were not changed by this refactor.
+
 ## AI study-planning workflow: implemented
 
 ```text
@@ -68,7 +91,7 @@ proposal as a proposal, not as a completed calendar change.
 
 ### Archive compaction threshold (Stage 1)
 
-`backend/app/ai_memory.py` defines `ARCHIVE_TURN_THRESHOLD = 100` and
+`backend/app/memory/settings.py` defines `ARCHIVE_TURN_THRESHOLD = 100` and
 `ARCHIVE_COMPACT_BATCH = 50`. After each turn is appended to the existing
 JSONL archive, the backend counts valid archived turn records
 across all sessions. `archive_needs_compaction()` returns `True` only when the
@@ -88,7 +111,8 @@ The tests cover archives of 0, 50, 99, 100, 101, and 150 turns.
 
 ### Archive candidate selection (Stage 2)
 
-`select_archive_compaction_candidates()` uses the Stage 1 threshold. If the
+`backend/app/memory/selection.py` provides
+`select_archive_compaction_candidates()`, which uses the Stage 1 threshold. If the
 archive exceeds 100 turns, it returns up to 50 oldest archived turns as
 `compaction_candidates`, along with candidate/remaining counts and known
 timestamp bounds. Dated turns are ordered by their stored completion times;
@@ -99,7 +123,7 @@ rewrite the archive.
 
 ### Archive candidate protection labels (Stage 2.5)
 
-`backend/app/ai_archive_protection.py` classifies only the Stage 2 candidate
+`backend/app/memory/protection.py` classifies only the Stage 2 candidate
 list. `classify_archive_candidate()` labels one complete user/assistant turn;
 `classify_compaction_candidates()` groups the batch into `protected`,
 `compactable`, and `uncertain`, preserving order and the original archived
@@ -125,7 +149,7 @@ backend/.venv/bin/python -B -m unittest backend.test_ai_archive_compaction backe
 
 ### Resolve uncertain archive candidates (Stage 3)
 
-`backend/app/ai_archive_llm_classifier.py` sends only Stage 2.5 `uncertain`
+`backend/app/memory/classification.py` sends only Stage 2.5 `uncertain`
 turns to a small OpenAI classification call. Its structured result must label
 each candidate `protected` or `compactable` with a compatible category. A
 missing key, failed call, or invalid response keeps the affected batch
@@ -138,7 +162,7 @@ backend/.venv/bin/python -B -m unittest backend.test_ai_archive_llm_classifier -
 
 ### Summarize compactable turns (Stage 4)
 
-`backend/app/ai_archive_summary.py` summarizes only candidates with final
+`backend/app/memory/summary.py` summarizes only candidates with final
 `compactable` status. It produces short bullets and keywords under the fixed
 categories `activities`, `exams_tests`, `study_topics`, `technical_issues`, and
 `general`, plus the source-turn refs and time range. It can flag meaningful
@@ -147,7 +171,7 @@ The result is still in memory; no raw archive turns are removed.
 
 ### Review a possible new category (Stage 4.5)
 
-`backend/app/ai_archive_category_review.py` runs a second, small model call
+`backend/app/memory/category_review.py` runs a second, small model call
 only when Stage 4 flags unresolved `general` items. The model may propose at
 most one broad new category. Python checks the name, duplicates/synonyms,
 protected-memory categories, and evidence from at least two matching summary
@@ -161,7 +185,7 @@ backend/.venv/bin/python -B -m unittest backend.test_ai_archive_summary backend.
 
 ### Persist a compacted summary (Stage 5)
 
-`backend/app/ai_archive_persistence.py` exposes
+`backend/app/memory/compaction.py` exposes
 `persist_compacted_archive(final_result, classified_candidates)`. It accepts
 the final Stage 4/4.5 result and the same final classified-candidate list used
 to make it. Stage 5 makes **no** model call and does not decide anew which
@@ -209,12 +233,12 @@ backend/.venv/bin/python -B -m unittest backend.test_ai_archive_persistence -v
 
 ### Extract structured durable memory (Stage 6)
 
-`backend/app/ai_durable_memory.py` exposes
+`backend/app/memory/durable.py` exposes
 `extract_durable_memories(protected_turns)`. Pass only the final protected
 entries from Stage 2.5 and Stage 3:
 
 ```python
-from backend.app.ai_durable_memory import extract_durable_memories
+from backend.app.memory.durable import extract_durable_memories
 
 result = extract_durable_memories(
     stage_2_5_result["protected"] + stage_3_result["protected"]
@@ -416,7 +440,7 @@ protected-turn deletion, lifecycle management or new endpoint is implemented.
 
 ### Developer trace: fake archive-memory pipeline
 
-The standalone `backend/app/memory_debug.py` command traces Stages 1-6 using
+The standalone `backend/app/dev/memory_debug.py` command traces Stages 1-6 using
 16 fake, timestamped turns with stable UUIDs. It calls the existing production
 functions; it does not implement a second memory pipeline. Run it in its own
 terminal process, not inside the API server, because its temporary module

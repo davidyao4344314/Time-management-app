@@ -414,6 +414,81 @@ Stage 6 is an explicit backend helper, not an automatic compaction step or a
 normal agent-request feature. No durable-memory retrieval, frontend UI,
 protected-turn deletion, lifecycle management or new endpoint is implemented.
 
+### Developer trace: fake archive-memory pipeline
+
+The standalone `backend/app/memory_debug.py` command traces Stages 1-6 using
+16 fake, timestamped turns with stable UUIDs. It calls the existing production
+functions; it does not implement a second memory pipeline. Run it in its own
+terminal process, not inside the API server, because its temporary module
+patches are scoped to this standalone debug process.
+
+From the project root, the default run makes **no LLM calls**:
+
+```bash
+backend/.venv/bin/python -B -m backend.app.memory_debug --stage all --skip-llm
+```
+
+It prints the fake archive, real Stage 1/2/2.5 results and clearly marks
+model-dependent stages as skipped. It does not fabricate model results.
+To inspect the full pipeline with **paid OpenAI calls**, opt in explicitly:
+
+```bash
+backend/.venv/bin/python -B -m backend.app.memory_debug --stage all --llm
+```
+
+Stage 5 defaults to dry-run: it uses the production summary/source validators,
+matching and retained-record checks to show the summary and exact raw turns
+that would be removed. Stage 6 runs production extraction/validation but
+merges into an in-memory fake store. Neither stage writes persisted memory in
+default dry-run mode. To exercise actual persistence in disposable fake files:
+
+```bash
+backend/.venv/bin/python -B -m backend.app.memory_debug --stage all --llm --write-fake
+```
+
+All modes redirect archive and durable-memory paths to a fresh temporary
+directory before calling memory functions. The fixture is initialized there;
+dry-run verifies it was not subsequently changed. Optional fake writes and
+their backups/locks remain inside that directory and are discarded on exit.
+The real archive/durable files are never read or written. Recent memory,
+SQLite, frontend code and production thresholds are unchanged. Debug-only
+threshold/batch values are 10/14 so the 16-turn fixture exercises the pipeline
+and leaves two newer turns unselected; production values stay 100/50.
+
+Individual stages are supported with `--stage 1`, `2`, `2.5`, `3`, `4`, `4.5`,
+`5` or `6`. Necessary earlier dependencies run first. Stage 6 omits the
+unrelated summary/persistence stages. For example:
+
+```bash
+backend/.venv/bin/python -B -m backend.app.memory_debug --stage 2.5 --skip-llm
+backend/.venv/bin/python -B -m backend.app.memory_debug --stage 6 --llm
+```
+
+The fixture includes activity and exam queries, recursive-list explanations,
+FastAPI debugging, an approval memory request, an app-completion goal, a
+commit preference, a Python recurrence decision, tentative memory work,
+internship/CV topics, thanks/resolved discussion, an approval constraint and
+a repeated recursion topic. Each turn is printed before classification.
+The career examples may justify a dynamic category; acceptance depends on
+the actual model output and existing Python checks, not a hardcoded outcome.
+
+Stages 3, 4, 4.5 and 6 can make paid calls under `--llm`; Stage 4.5 calls only
+when enough unresolved general items require review. Each uses its existing
+dedicated prompt and smallest relevant input: uncertain turns, compactable
+turns, flagged summary bullets or protected turns respectively. No app
+observations or recent history are included. Failures remain visible in the
+trace and retain the existing production safeguards.
+
+Inspect the selected/unselected IDs, protection rules, Stage 3 reasons, Stage 4
+source refs/categories, Stage 4.5 proposal/validation, Stage 5 would-remove IDs,
+Stage 6 records/counts, and final overview. No key or environment contents are
+printed. Three small offline safety checks cover path isolation, restoration
+of production settings and mocked full-flow execution:
+
+```bash
+backend/.venv/bin/python -B -m unittest backend.test_memory_debug -v
+```
+
 ### Context routing
 
 Routing chooses *which data to include*; the router does not answer the user or

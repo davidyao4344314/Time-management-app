@@ -1,190 +1,38 @@
-"""Recent completed AI turns, with older turns archived locally."""
+"""Compatibility facade for the separated recent/archive memory modules."""
 
-import fcntl
-import json
-import logging
-import os
-import uuid
-from collections import deque
-from contextlib import contextmanager
-from copy import deepcopy
-from datetime import datetime, timezone
-from threading import Lock
+from backend.app.infrastructure.module_compat import forward_module
+from backend.app.memory import archive_store, recent, selection, settings
 
-from backend.app.ai_config import get_max_recent_turns
-from backend.app.infrastructure.atomic_files import exclusive_file_lock
-# Keep legacy utility names and path overrides available to existing callers.
-from backend.app.infrastructure.privacy import _API_KEY_PATTERN, redact_secrets as _redact_secrets
-from backend.app.memory.paths import ARCHIVE_FILE
-from backend.app.memory.records import archive_timestamp as _archive_timestamp
-
-
-ARCHIVE_TURN_THRESHOLD = 100
-ARCHIVE_COMPACT_BATCH = 50
-_sessions = {}
-_lock = Lock()
-_logger = logging.getLogger(__name__)
-
-
-@contextmanager
-def _archive_write_lock():
-    """Use the shared sidecar lock with the current archive-path override."""
-    with exclusive_file_lock(ARCHIVE_FILE):
-        yield
-
-
-def _iter_archived_turns():
-    """Read valid JSONL archive records with their file positions."""
-    try:
-        descriptor = os.open(
-            ARCHIVE_FILE, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-        )
-    except FileNotFoundError:
-        return
-
-    with os.fdopen(descriptor, "r", encoding="utf-8") as archive:
-        fcntl.flock(archive.fileno(), fcntl.LOCK_SH)
-        try:
-            for position, line in enumerate(archive):
-                try:
-                    record = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if isinstance(record, dict) and isinstance(record.get("turn"), dict):
-                    yield position, record
-        finally:
-            fcntl.flock(archive.fileno(), fcntl.LOCK_UN)
-
-
-def get_archive_turn_count():
-    """Count valid archived turns across all sessions without changing the file."""
-    return sum(1 for _ in _iter_archived_turns())
-
-
-def archive_needs_compaction(archive_turn_count):
-    """Report whether the archived-turn count exceeds the configured threshold."""
-    return archive_turn_count > ARCHIVE_TURN_THRESHOLD
-
-
-def select_archive_compaction_candidates(*, batch_size=None):
-    """Select the oldest archived turns; do not change archive or recent memory."""
-    if batch_size is None:
-        batch_size = ARCHIVE_COMPACT_BATCH
-    if isinstance(batch_size, bool) or not isinstance(batch_size, int) or batch_size < 0:
-        raise ValueError("batch_size must be a non-negative integer.")
-
-    entries = [
-        (position, record, _archive_timestamp(record))
-        for position, record in _iter_archived_turns()
-    ]
-    archive_turn_count = len(entries)
-    needs_compaction = archive_needs_compaction(archive_turn_count)
-    candidates = []
-    if needs_compaction and batch_size:
-        # Undated legacy turns have no reliable completion time. Keep their
-        # original file order after the timestamped records rather than
-        # inventing dates or treating append order as a timestamp.
-        ordered = sorted(
-            entries,
-            key=lambda entry: (
-                entry[2] is None,
-                entry[2] or datetime.max.replace(tzinfo=timezone.utc),
-                entry[0],
-            ),
-        )
-        candidates = ordered[:batch_size]
-
-    known_times = [timestamp for _, _, timestamp in candidates if timestamp is not None]
-    return {
-        "needs_compaction": needs_compaction,
-        "archive_turn_count": archive_turn_count,
-        "candidate_count": len(candidates),
-        "remaining_turn_count": archive_turn_count - len(candidates),
-        "compaction_candidates": [record for _, record, _ in candidates],
-        "oldest_candidate_timestamp": min(known_times).isoformat() if known_times else None,
-        "newest_candidate_timestamp": max(known_times).isoformat() if known_times else None,
-    }
-
-
-def _archive_turn(session_id, turn):
-    """Append one JSON record, leaving all earlier archive records intact."""
-    archived_turn = {key: value for key, value in turn.items() if key != "timestamp"}
-    record = {
-        "turn_id": str(uuid.uuid4()),
-        "session_id": session_id,
-        "turn": _redact_secrets(archived_turn),
-    }
-    if turn.get("timestamp") is not None:
-        record["timestamp"] = turn["timestamp"]
-    data = (json.dumps(record, ensure_ascii=False) + "\n").encode("utf-8")
-    flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
-    with _archive_write_lock():
-        descriptor = os.open(ARCHIVE_FILE, flags, 0o600)
-        try:
-            fcntl.flock(descriptor, fcntl.LOCK_EX)
-            os.fchmod(descriptor, 0o600)
-            remaining = data
-            while remaining:
-                written = os.write(descriptor, remaining)
-                if written == 0:
-                    raise OSError("Could not append the archived conversation turn.")
-                remaining = remaining[written:]
-            os.fsync(descriptor)
-        finally:
-            try:
-                fcntl.flock(descriptor, fcntl.LOCK_UN)
-            finally:
-                os.close(descriptor)
-
-    # This diagnostic must not fail a completed archive append: callers remove
-    # the recent turn only after _archive_turn returns.
-    try:
-        archive_turn_count = get_archive_turn_count()
-    except (OSError, UnicodeError):
-        _logger.warning("Could not check the archive compaction threshold.")
-    else:
-        if archive_needs_compaction(archive_turn_count):
-            _logger.warning(
-                "Archive compaction required: %d archived turns.",
-                archive_turn_count,
-            )
-
-
-def has_session(session_id):
-    with _lock:
-        return session_id in _sessions
-
-
-def _archive_excess_turns(session_id, recent, limit):
-    """Archive oldest turns before shrinking a session's recent window."""
-    while len(recent) > limit:
-        _archive_turn(session_id, recent[0])
-        recent.popleft()
-
-
-def get_recent_turns(session_id):
-    """Return a copy so callers cannot alter stored conversation history."""
-    limit = get_max_recent_turns()
-    with _lock:
-        recent = _sessions.get(session_id)
-        if recent is None:
-            return []
-        _archive_excess_turns(session_id, recent, limit)
-        return deepcopy(list(recent))
-
-
-def add_completed_turn(session_id, user_message, proposal):
-    """Keep the configured recent turns and archive older ones safely."""
-    limit = get_max_recent_turns()
-    turn = {
-        "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "user": user_message,
-        "assistant": deepcopy(proposal),
-    }
-    with _lock:
-        recent = _sessions.setdefault(session_id, deque())
-        _archive_excess_turns(session_id, recent, limit)
-        if len(recent) == limit:
-            _archive_turn(session_id, recent[0])
-            recent.popleft()
-        recent.append(turn)
+forward_module(__name__, {
+    "has_session": (recent, "has_session"),
+    "get_recent_turns": (recent, "get_recent_turns"),
+    "add_completed_turn": (recent, "add_completed_turn"),
+    "_archive_excess_turns": (recent, "_archive_excess_turns"),
+    "_archive_turn": (recent, "_archive_turn"),
+    "_sessions": (recent, "_sessions"),
+    "_lock": (recent, "_lock"),
+    "get_max_recent_turns": (recent, "get_max_recent_turns"),
+    "datetime": (recent, "datetime"),
+    "timezone": (recent, "timezone"),
+    "deque": (recent, "deque"),
+    "deepcopy": (recent, "deepcopy"),
+    "Lock": (recent, "Lock"),
+    "ARCHIVE_FILE": (archive_store, "ARCHIVE_FILE"),
+    "exclusive_file_lock": (archive_store, "exclusive_file_lock"),
+    "_redact_secrets": (archive_store, "_redact_secrets"),
+    "_API_KEY_PATTERN": (archive_store, "_API_KEY_PATTERN"),
+    "get_archive_turn_count": (archive_store, "get_archive_turn_count"),
+    "fcntl": (archive_store, "fcntl"),
+    "os": (archive_store, "os"),
+    "json": (archive_store, "json"),
+    "uuid": (archive_store, "uuid"),
+    "contextmanager": (archive_store, "contextmanager"),
+    "archive_needs_compaction": (selection, "archive_needs_compaction"),
+    "select_archive_compaction_candidates": (selection, "select_archive_compaction_candidates"),
+    "_archive_timestamp": (selection, "_archive_timestamp"),
+    "_logger": (selection, "_logger"),
+    "ARCHIVE_TURN_THRESHOLD": (settings, "ARCHIVE_TURN_THRESHOLD"),
+    "ARCHIVE_COMPACT_BATCH": (settings, "ARCHIVE_COMPACT_BATCH"),
+    "_archive_write_lock": (archive_store, "archive_write_lock"),
+    "_iter_archived_turns": (archive_store, "iter_archived_turns"),
+})

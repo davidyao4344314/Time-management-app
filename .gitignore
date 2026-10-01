@@ -5,5 +5,8 @@ backend/ai_memory_archive.jsonl
 backend/ai_memory_archive.jsonl.lock
 backend/ai_memory_archive.backup.jsonl
 backend/.archive-stage5-*
+backend/ai_durable_memories.json
+backend/ai_durable_memories.json.lock
+backend/ai_durable_memories.backup.json
 __pycache__/
 *.pyc

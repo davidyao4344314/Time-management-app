@@ -207,6 +207,213 @@ temporary files, run:
 backend/.venv/bin/python -B -m unittest backend.test_ai_archive_persistence -v
 ```
 
+### Extract structured durable memory (Stage 6)
+
+`backend/app/ai_durable_memory.py` exposes
+`extract_durable_memories(protected_turns)`. Pass only the final protected
+entries from Stage 2.5 and Stage 3:
+
+```python
+from backend.app.ai_durable_memory import extract_durable_memories
+
+result = extract_durable_memories(
+    stage_2_5_result["protected"] + stage_3_result["protected"]
+)
+```
+
+The result variables above are earlier-stage outputs, not global variables
+created by this module. Stage 6 does not automatically run those stages or
+load the archive. It rejects compactable/uncertain entries, summaries, raw
+unclassified records, recent turns and invalid or duplicated source refs.
+
+The flow is:
+
+```text
+Final protected candidate entries
+  -> dedicated durable-memory extraction prompt
+  -> strict structured output validation
+  -> deterministic duplicate comparison
+  -> separate atomic durable-memory storage
+
+Original protected raw turns remain unchanged.
+```
+
+#### Extraction prompt and allowed types
+
+The dedicated `DURABLE_MEMORY_INSTRUCTIONS` prompt extracts concise,
+explicitly established facts or rules likely to matter in future conversations.
+It is separate from the study-agent prompt. It prohibits invented goals or
+preferences, advice, SQL, tool execution and interpreting an assistant's
+proposal as a completed action or agreed decision. A protected turn can
+produce several memories, or none. Temporary plans and ordinary debugging
+questions do not become permanent preferences just because an earlier stage
+conservatively protected them.
+
+The fixed types are `goal`, `preference`, `decision`, `requirement`,
+`constraint`, `long_term_plan`, `project_architecture`, `explicit_memory`,
+`unfinished_task`, and `other_durable`. Only `status = "active"` is supported;
+lifecycle changes are not implemented.
+
+Stage 6 uses the existing OpenAI SDK `responses.parse()` approach with
+`DURABLE_MEMORY_MODEL = DEFAULT_AGENT_MODEL`, reasoning effort `none`,
+`store=False`, a 60-second timeout and no automatic retries. It reads
+`OPENAI_API_KEY` through the existing backend configuration. Requests contain
+only protected user/assistant text, source refs and timestamps: no recent
+conversation, activity/exam observations, compressed summaries or action
+arguments. Different sessions are processed separately in batches of at most
+10 turns. Nothing is persisted until every batch succeeds.
+
+The model response has this shape (identifiers below are placeholders):
+
+```json
+{
+  "memories": [
+    {
+      "type": "constraint",
+      "content": "Agent actions require user approval before execution.",
+      "status": "active",
+      "source_turn_refs": ["existing-turn-UUID"],
+      "source_timestamp": null
+    }
+  ]
+}
+```
+
+`{"memories": []}` is valid. Python rejects unknown fields/types, invalid
+status, non-list memories, empty content, multiline/code-block content, text
+over 320 characters, API keys, duplicate or unsupported refs, and timestamps
+that do not match the cited sources. Each response is limited to 50 memories.
+These checks validate structure/provenance; they do not independently prove
+the model's interpretation is factually correct. Review live extraction
+results before adding any later cleanup or retrieval stage.
+
+#### Durable storage and source references
+
+The first successful extraction creates the separate Git-ignored file
+`backend/ai_durable_memories.json`. It does not mix durable facts with raw
+archive turns or compressed summaries. Its structure is:
+
+```json
+{
+  "durable_memories": [
+    {
+      "memory_id": "generated-UUID",
+      "type": "constraint",
+      "content": "Agent actions require user approval before execution.",
+      "status": "active",
+      "created_at": "ISO timestamp with timezone",
+      "source_timestamp": null,
+      "source_turn_refs": [
+        {
+          "turn_id": "existing-turn-UUID",
+          "record_sha256": "original-record-SHA256",
+          "session_id": "original-session",
+          "timestamp": null
+        }
+      ]
+    }
+  ]
+}
+```
+
+Python creates the memory UUID and creation timestamp and resolves each model
+ref to the original source metadata. Existing turn UUIDs are reused. Legacy
+turns without IDs are referenced as `legacy:<record_sha256>` in the model
+input/output and stored with `turn_id = null` plus the original record's
+fingerprint. No permanent list-position IDs or old timestamps are invented.
+Each source retains its original timestamp or `null`; `source_timestamp` is
+the first non-null timestamp in that memory's source-ref order.
+
+#### Duplicate comparison and safe persistence
+
+Duplicate comparison requires the same memory type and session. It normalizes
+Unicode, case, whitespace and terminal punctuation while retaining word order,
+negations, numbers and internal punctuation. It also recognizes the specific
+equivalent pair "Agent actions require user approval before execution" and
+"User approval is required before executing agent actions". This is a
+conservative comparison, not general semantic matching or embeddings.
+
+A duplicate keeps its existing ID, content and creation time, and gains any
+new source references. Retrying identical extraction does not add another
+memory or rewrite an unchanged store. Different browser sessions are not
+merged.
+
+Persistence reuses Stage 5's verified temporary-file and atomic replacement
+helpers on the separate durable file. A private sidecar lock serializes
+writers, and a most-recent backup preserves the previous state before
+replacement. Files use private permissions (`0600`); symlink targets and
+invalid existing stores are not overwritten. API or validation failures save
+nothing. Post-replacement failures attempt restoration and report when
+recovery needs attention. Protected raw turns are never read or modified by
+Stage 6 itself.
+
+Git ignores the durable store, `backend/ai_durable_memories.json.lock`,
+`backend/ai_durable_memories.backup.json`, and the reused temporary-file pattern
+`backend/.archive-stage5-*`.
+
+Success returns counts:
+
+```json
+{
+  "status": "success",
+  "input_protected_turns": 12,
+  "memories_extracted": 8,
+  "memories_created": 6,
+  "duplicates_reused": 2
+}
+```
+
+Empty input or no durable facts returns `nothing_to_extract`, the input count
+and `memories_extracted = 0`. Failure returns `failed`, a safe error message,
+the input count and `memories_created = 0`.
+
+#### Test Stage 6 safely
+
+From the project root, run the 19 offline tests:
+
+```bash
+backend/.venv/bin/python -B -m unittest backend.test_ai_durable_memory -v
+```
+
+Print the A-I examples and their stored structure without an API charge:
+
+```bash
+backend/.venv/bin/python -B -m backend.test_ai_durable_memory --examples
+```
+
+These use mocked model responses and temporary files. They verify validation
+and persistence, not live model classification accuracy. The cases cover:
+
+| Case | Expected result |
+| --- | --- |
+| A: Remember to ask before changing activities | Approval rule retained as explicit memory or constraint. |
+| B: Finish the app before semester ends | Goal. |
+| C: One meaningful Git commit per feature | Preference. |
+| D: Search archived memory only when needed | Decision. |
+| E: LLM must never execute SQL directly | Constraint. |
+| F: Maybe study Python tonight | No durable memory. |
+| G: Why is this loop broken? | No durable memory. |
+| H: Long-term goal plus persistent preference | Two extracted memories; the demo reuses the earlier B/C records. |
+| I: Approval rule phrased differently | Existing memory reused, with another source ref. |
+
+For an optional **paid live OpenAI test**, configure the existing backend key
+and run:
+
+```bash
+backend/.venv/bin/python -B -m backend.test_ai_durable_memory --live
+```
+
+The live demo tests the same A-I requests, including a seed for the duplicate
+case. Inspect the printed types/content and counts; model wording can vary,
+and the deterministic duplicate comparison is intentionally limited. Both
+demos use disposable storage and leave the real archive and durable store
+unchanged. Development verification passed all 173 backend tests without
+making a live Stage 6 API call.
+
+Stage 6 is an explicit backend helper, not an automatic compaction step or a
+normal agent-request feature. No durable-memory retrieval, frontend UI,
+protected-turn deletion, lifecycle management or new endpoint is implemented.
+
 ### Context routing
 
 Routing chooses *which data to include*; the router does not answer the user or
@@ -298,8 +505,9 @@ approval/execution endpoint, and no automatic call to `add_activity` for an
 AI-proposed action. A normal activity can still be added through the existing
 manual app workflow.
 
-Automatic archive-compaction runs and automatic retrieval of archived turns or
-compressed summaries, Screen Time context routing, goals and study-history
+Automatic archive-compaction runs, automatic durable-memory extraction and
+retrieval of archived turns, compressed summaries or durable memories, Screen
+Time context routing, goals and study-history
 observations, and observation hash/change caching are not part of the normal
 AI request flow. They should not be assumed to affect a current AI response.
 
@@ -319,3 +527,9 @@ These tests use mock model responses and temporary test data. They check
 routing, observation selection, recent-turn limits, structured validation and
 the proposal endpoint without making a live OpenAI request or inserting a
 proposed activity into the project database.
+
+To run the full backend regression suite, including Stage 6:
+
+```bash
+backend/.venv/bin/python -B -m unittest discover -s backend -p 'test_*.py'
+```

@@ -6,15 +6,14 @@ import re
 from copy import deepcopy
 
 from openai import OpenAI
-from pydantic import BaseModel, ConfigDict, model_validator
 
 from backend.app.ai_config import DEFAULT_AGENT_MODEL, is_openai_api_key_configured
 from backend.app.ai_archive_protection import STRONG_PROTECTION_RULES
-from backend.app.ai_archive_summary import (
-    ArchiveCategorizedSummary,
-    ArchiveCategorySummary,
-    BASE_ARCHIVE_CATEGORIES,
-    summarize_compactable_archive_turns,
+from backend.app.ai_archive_summary import summarize_compactable_archive_turns
+# Import shared schemas directly, while preserving their old module exports.
+from backend.app.memory.contracts import (
+    ArchiveCategorizedSummary, ArchiveCategoryProposal,
+    ArchiveCategorySummary, BASE_ARCHIVE_CATEGORIES,
 )
 
 
@@ -64,37 +63,6 @@ _PROTECTED_TEXT_PHRASES = tuple(phrase for phrase, _ in STRONG_PROTECTION_RULES)
     "user prefers", "user decided", "we decided", "project architecture",
     "project requirement", "explicit memory", "remember this",
 )
-
-
-class ArchiveCategoryProposal(BaseModel):
-    """Strict model proposal; Python still decides whether to accept it."""
-
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    needs_new_category: bool
-    proposed_category: str | None
-    reason: str
-    example_topics: list[str]
-    item_refs: list[int]
-
-    @model_validator(mode="after")
-    def validate_shape(self):
-        self.reason = self.reason.strip()
-        if not self.reason or len(self.reason) > 300:
-            raise ValueError("A short reason is required.")
-        if len(self.example_topics) > 5 or any(
-            not topic.strip() or len(topic) > 60 for topic in self.example_topics
-        ):
-            raise ValueError("Example topics must be short.")
-        self.example_topics = [topic.strip() for topic in self.example_topics]
-        if len(self.item_refs) > 5 or len(set(self.item_refs)) != len(self.item_refs):
-            raise ValueError("Item refs must be unique and limited.")
-        if self.needs_new_category:
-            if not self.proposed_category or not self.example_topics or not self.item_refs:
-                raise ValueError("A category proposal needs a name, topics and refs.")
-        elif self.proposed_category is not None or self.example_topics or self.item_refs:
-            raise ValueError("No-category proposals must leave all proposal fields empty.")
-        return self
 
 
 def _contains_protected_content(text):

@@ -11,11 +11,8 @@ from datetime import datetime, timezone
 
 from backend.app import ai_memory
 from backend.app.ai_archive_category_review import _category_rejection
-from backend.app.ai_archive_summary import (
-    ArchiveCategorySummary,
-    BASE_ARCHIVE_CATEGORIES,
-    _source_timestamp,
-)
+from backend.app.ai_archive_summary import _source_timestamp
+from backend.app.memory.contracts import ArchiveCategorySummary, BASE_ARCHIVE_CATEGORIES
 
 
 SUMMARY_RECORD_TYPE = "compressed_summary"

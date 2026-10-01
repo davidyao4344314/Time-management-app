@@ -7,7 +7,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from backend.app import ai_memory
-from backend.app.ai_proposal import MemoryRequest
+from backend.app.memory.contracts import MemoryRequest
 
 
 LOCAL_TIMEZONE = ZoneInfo("Pacific/Auckland")

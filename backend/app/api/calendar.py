@@ -8,6 +8,7 @@ from backend.app.planner.activities import move_activity
 from backend.app.planner.calendar import (
     check_activity_current, get_current_and_next_activities, get_current_time,
     get_todays_activities, get_week_activities, get_current_week,
+    get_calendar_week,
 )
 from backend.app.planner.exams import get_all_exams
 
@@ -73,28 +74,7 @@ def weekly_activities(week_start: date | None = None, include_exams: bool = Fals
         raise HTTPException(status_code=400, detail="The requested week is outside the supported date range.")
     connection = common.create_connection()
     try:
-        items = [
-            {**activity, "event_type": "activity"}
-            for activity in get_week_activities(connection, week_start)
-        ]
-        # Only the Calendar opts in; other activity-only consumers stay unchanged.
-        if include_exams:
-            first_day = week_start if week_start is not None else get_current_week()[0]
-            last_day = first_day + timedelta(days=6)
-            for exam in get_all_exams(connection):
-                item = common.exam_to_dict(exam)
-                try:
-                    exam_date = date.fromisoformat(item["date"].strip())
-                except (AttributeError, TypeError, ValueError):
-                    continue
-                if first_day <= exam_date <= last_day:
-                    items.append({
-                        **item,
-                        "event_type": "exam",
-                        "activity_type": "one_time",
-                        "calendar_date": exam_date.isoformat(),
-                    })
-        return items
+        return get_calendar_week(connection, week_start, include_exams=include_exams)
     finally:
         connection.close()
 

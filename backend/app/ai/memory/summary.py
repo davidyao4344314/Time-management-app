@@ -79,6 +79,10 @@ def summarize_compactable_archive_turns(classified_candidates):
             "uncategorized_item_refs": [],
         }
 
+    sessions = [entry["archived_turn"].get("session_id") for _, entry in compactable]
+    if not all(isinstance(value, str) and value for value in sessions) or len(set(sessions)) != 1:
+        return {"success": False, "error": "Summarize one identified session at a time."}
+
     timestamps = [
         timestamp for _, entry in compactable
         if (timestamp := _archive_timestamp(entry["archived_turn"])) is not None

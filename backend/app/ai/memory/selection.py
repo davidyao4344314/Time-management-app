@@ -40,7 +40,14 @@ def select_archive_compaction_candidates(*, batch_size=None):
                 entry[0],
             ),
         )
-        candidates = ordered[:batch_size]
+        # Process the oldest identified session as one batch. Other sessions
+        # remain untouched for subsequent passes; never blend their summaries.
+        identified = [entry for entry in ordered
+                      if isinstance(entry[1].get("session_id"), str) and entry[1]["session_id"]]
+        if identified:
+            session_id = identified[0][1]["session_id"]
+            candidates = [entry for entry in identified
+                          if entry[1]["session_id"] == session_id][:batch_size]
 
     known_times = [timestamp for _, _, timestamp in candidates if timestamp is not None]
     return {

@@ -6,6 +6,7 @@ from backend.app.ai.memory import archive_store, recent, selection, settings
 forward_module(__name__, {
     "has_session": (recent, "has_session"),
     "get_recent_turns": (recent, "get_recent_turns"),
+    "enforce_recent_limit": (recent, "enforce_recent_limit"),
     "add_completed_turn": (recent, "add_completed_turn"),
     "_archive_excess_turns": (recent, "_archive_excess_turns"),
     "_archive_turn": (recent, "_archive_turn"),

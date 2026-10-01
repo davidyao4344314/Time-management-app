@@ -1,5 +1,25 @@
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from backend.app.planner.activities import get_activity_schedule, get_activity_name_by_id, get_all_activities
+from backend.app.planner.exams import get_all_exams, exam_to_dict
+
+
+def get_calendar_week(connection, week_start=None, *, include_exams=False):
+    """Compose existing activity occurrences and optional dated exams, read-only."""
+    items = [{**activity, "event_type": "activity"}
+             for activity in get_week_activities(connection, week_start)]
+    if include_exams:
+        first_day = week_start if week_start is not None else get_current_week()[0]
+        last_day = first_day + timedelta(days=6)
+        for exam in get_all_exams(connection):
+            item = exam_to_dict(exam)
+            try:
+                exam_date = date.fromisoformat(item["date"].strip())
+            except (AttributeError, TypeError, ValueError):
+                continue
+            if first_day <= exam_date <= last_day:
+                items.append({**item, "event_type": "exam", "activity_type": "one_time",
+                              "calendar_date": exam_date.isoformat()})
+    return items
 
 
 def get_current_date():

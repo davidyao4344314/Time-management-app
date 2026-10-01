@@ -18,8 +18,14 @@ def archive_write_lock():
         yield
 
 
-def iter_archived_turns():
-    """Read valid JSONL archive records with their file positions."""
+def iter_archive_records(*, session_id=None):
+    """Read a locked snapshot of records without changing archive contents.
+
+    Session-scoped reads exclude legacy summaries with ambiguous ownership.
+    Unscoped maintenance reads retain them; no historical data is discarded.
+    """
+    if session_id is not None and (not isinstance(session_id, str) or not session_id):
+        raise ValueError("A nonempty session ID is required for a scoped read.")
     try:
         descriptor = os.open(
             ARCHIVE_FILE, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
@@ -35,10 +41,28 @@ def iter_archived_turns():
                     record = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                if isinstance(record, dict) and isinstance(record.get("turn"), dict):
-                    yield position, record
+                if not isinstance(record, dict):
+                    continue
+                if session_id is not None:
+                    if record.get("record_type") == "compressed_summary":
+                        refs = record.get("source_turn_refs")
+                        if not isinstance(refs, list) or not refs or not all(
+                            isinstance(ref, dict) and ref.get("session_id") == session_id
+                            for ref in refs
+                        ):
+                            continue
+                    elif record.get("session_id") != session_id:
+                        continue
+                yield position, record
         finally:
             fcntl.flock(archive.fileno(), fcntl.LOCK_UN)
+
+
+def iter_archived_turns(*, session_id=None):
+    """Read raw turns through the shared storage reader."""
+    for position, record in iter_archive_records(session_id=session_id):
+        if isinstance(record.get("turn"), dict):
+            yield position, record
 
 
 def get_archive_turn_count():

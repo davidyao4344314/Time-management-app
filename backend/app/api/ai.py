@@ -21,7 +21,8 @@ from backend.app.ai.config import (
     save_max_recent_turns,
     save_openai_api_key,
 )
-from backend.app.ai.memory.recent import add_completed_turn, get_recent_turns, has_session
+from backend.app.ai.memory.recent import add_completed_turn, enforce_recent_limit, get_recent_turns, has_session
+from backend.app.ai.memory.session_identity import sign_session, valid_session
 from backend.app.dev.observation_smoke import send_observation_to_llm
 from backend.app.ai.agent.contracts import InvalidProposalError
 from backend.app.ai.agent.service import get_agent_proposal
@@ -147,30 +148,37 @@ def propose_ai(proposal_request: AIProposalRequest, request: Request, response: 
     if not is_openai_api_key_configured():
         raise HTTPException(status_code=400, detail="Configure OPENAI_API_KEY first.")
 
-    session_id = request.cookies.get("ai_agent_session")
-    new_session = not has_session(session_id)
-    if new_session:
-        session_id = uuid4().hex
-    recent_turns = get_recent_turns(session_id)
-
     try:
+        session_id = request.cookies.get("ai_agent_session")
+        new_session = not valid_session(session_id, request.cookies.get("ai_agent_session_signature"))
+        if new_session:
+            session_id = uuid4().hex
+        signature = sign_session(session_id)
+        enforce_recent_limit(session_id)
+        recent_turns = get_recent_turns(session_id)
         # Read-only: the proposed add_activity action is never executed here.
         connection = sqlite3.connect(f"{db_file.resolve().as_uri()}?mode=ro", uri=True)
         try:
             proposal = get_agent_proposal(connection, user_message, recent_turns)
         finally:
             connection.close()
+        add_completed_turn(session_id, user_message, proposal)
     except SQLiteError:
         raise HTTPException(status_code=500, detail="Could not read the observation data.") from None
     except OpenAIError:
         raise HTTPException(status_code=502, detail="OpenAI request failed. Check the key, model access, and network.") from None
     except (InvalidProposalError, ValidationError):
         raise HTTPException(status_code=502, detail="OpenAI did not return a valid proposal.") from None
+    except (OSError, UnicodeError):
+        raise HTTPException(status_code=500, detail="Could not access conversation memory. Please retry.") from None
 
-    add_completed_turn(session_id, user_message, proposal)
     if new_session:
         response.set_cookie(
             key="ai_agent_session", value=session_id, httponly=True,
+            samesite="lax", path="/", secure=request.url.scheme == "https",
+        )
+        response.set_cookie(
+            key="ai_agent_session_signature", value=signature, httponly=True,
             samesite="lax", path="/", secure=request.url.scheme == "https",
         )
     return proposal

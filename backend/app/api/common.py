@@ -3,6 +3,7 @@ from fastapi import HTTPException
 
 from backend.app.database import create_connection
 from backend.app.planner import activity_service
+from backend.app.planner.exams import exam_to_dict
 
 
 def activity_to_dict(activity):
@@ -20,20 +21,6 @@ def activity_to_dict(activity):
         "active_end_date": activity[10],
         "source": activity[11],
         "external_id": activity[12],
-    }
-
-
-def exam_to_dict(exam):
-    return {
-        "id": exam[0],
-        "name": exam[1],
-        "category": exam[2],
-        "subject": exam[3],
-        "date": exam[4],
-        "start_time": exam[5],
-        "end_time": exam[6],
-        "source": exam[7],
-        "external_id": exam[8],
     }
 
 

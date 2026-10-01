@@ -1,8 +1,6 @@
 """Read a few relevant turns from the existing per-session JSONL archive."""
 
 import heapq
-import json
-import os
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -97,54 +95,40 @@ def search_archived_memory(memory_request, *, session_id, limit=5, now=None):
     terms = [term.casefold() for term in request.search_terms]
     best = []
 
-    try:
-        descriptor = os.open(
-            ai_memory.ARCHIVE_FILE, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-        )
-    except FileNotFoundError:
-        return {"retrieved_archive": []}
+    for position, record in ai_memory.iter_archived_turns(session_id=session_id):
+        turn = record.get("turn")
+        if not isinstance(turn, dict):
+            continue
+        user = turn.get("user")
+        assistant = turn.get("assistant")
+        if isinstance(assistant, dict):
+            assistant = assistant.get("message")
+        if not isinstance(user, str) or not isinstance(assistant, str):
+            continue
 
-    with os.fdopen(descriptor, "r", encoding="utf-8") as archive:
-        for position, line in enumerate(archive):
-            try:
-                record = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(record, dict) or record.get("session_id") != session_id:
-                continue
-            turn = record.get("turn")
-            if not isinstance(turn, dict):
-                continue
-            user = turn.get("user")
-            assistant = turn.get("assistant")
-            if isinstance(assistant, dict):
-                assistant = assistant.get("message")
-            if not isinstance(user, str) or not isinstance(assistant, str):
-                continue
+        timestamp = _parse_timestamp(record.get("timestamp") or turn.get("timestamp"))
+        if start is not None and (timestamp is None or not start <= timestamp < end):
+            continue
 
-            timestamp = _parse_timestamp(record.get("timestamp") or turn.get("timestamp"))
-            if start is not None and (timestamp is None or not start <= timestamp < end):
-                continue
+        user = redact_secrets(user)
+        assistant = redact_secrets(assistant)
+        user_text, assistant_text = user.casefold(), assistant.casefold()
+        score = sum(2 * user_text.count(term) + assistant_text.count(term) for term in terms)
+        if terms and score == 0:
+            continue
 
-            user = redact_secrets(user)
-            assistant = redact_secrets(assistant)
-            user_text, assistant_text = user.casefold(), assistant.casefold()
-            score = sum(2 * user_text.count(term) + assistant_text.count(term) for term in terms)
-            if terms and score == 0:
-                continue
-
-            result = {
-                "timestamp": timestamp.isoformat() if timestamp is not None else None,
-                "user": _excerpt(user, terms),
-                "assistant": _excerpt(assistant, terms),
-            }
-            recency = timestamp.astimezone(timezone.utc) if timestamp is not None \
-                else datetime.min.replace(tzinfo=timezone.utc)
-            ranked = (score, recency, position, result)
-            if len(best) < count:
-                heapq.heappush(best, ranked)
-            elif ranked[:3] > best[0][:3]:
-                heapq.heapreplace(best, ranked)
+        result = {
+            "timestamp": timestamp.isoformat() if timestamp is not None else None,
+            "user": _excerpt(user, terms),
+            "assistant": _excerpt(assistant, terms),
+        }
+        recency = timestamp.astimezone(timezone.utc) if timestamp is not None \
+            else datetime.min.replace(tzinfo=timezone.utc)
+        ranked = (score, recency, position, result)
+        if len(best) < count:
+            heapq.heappush(best, ranked)
+        elif ranked[:3] > best[0][:3]:
+            heapq.heapreplace(best, ranked)
 
     best.sort(key=lambda item: item[:3], reverse=True)
     return {"retrieved_archive": [item[3] for item in best]}

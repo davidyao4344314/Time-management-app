@@ -1,6 +1,7 @@
 # Backend architecture
 
-This is a behavior-preserving refactor, not a new memory or planning feature.
+The package organization is a behavior-preserving refactor. The boundary fixes
+documented below add targeted safety/correctness changes, not Stage 7 retrieval.
 The canonical API entry point is `backend.app.server:app`;
 `backend.fastapi_test:app` remains a compatibility entry point to the same app.
 Activities and exams still use the same SQLite database and CRUD functions.
@@ -68,6 +69,7 @@ backend/
     │   │   ├── settings.py     # Threshold and candidate batch size
     │   │   ├── records.py      # Serialization, hashes, IDs/timestamps
     │   │   ├── recent.py       # In-process per-session recent turns
+    │   │   ├── session_identity.py # Restart-safe signed conversation cookies
     │   │   ├── archive_store.py # Raw append/read/count and shared lock
     │   │   ├── selection.py    # Threshold and oldest candidate selection
     │   │   ├── protection.py   # Deterministic candidate protection
@@ -85,6 +87,7 @@ backend/
     │   ├── activities.py       # Existing activity SQL/CRUD
     │   ├── activity_service.py # Existing add/edit validation/use cases
     │   ├── exams.py            # Existing exam SQL/CRUD
+    │   ├── exam_service.py     # Exam preparation/edit validation and updates
     │   └── calendar.py         # Existing recurrence/calendar logic
     ├── screen_time/
     │   └── storage.py          # Existing daily summary CRUD
@@ -246,8 +249,9 @@ Steps 2–3 were already committed before this batch.
 | 12 | Documentation, compatibility and dependency checks | Make ownership visible and prevent regressions |
 
 No new action executor was created: the agent still only proposes
-`add_activity`. Existing activity edits still call `edit_activity` in the same
-sequence, with its existing commit behavior. Create returns the ID from the
+`add_activity`. Activity edits still call `edit_activity` in the same sequence,
+now within one savepoint so a failed logical edit rolls back all its fields.
+Standalone `edit_activity` callers still commit by default. Create returns the ID from the
 existing `add_activity` and reads the row through `get_activity_by_id` rather than
 repeating SELECT logic in the HTTP layer.
 
@@ -295,6 +299,33 @@ backend/.venv/bin/python -B -m unittest backend.tests.ai.test_ai_proposal -v
 
 The full OpenAPI schema was checked again after grouping the feature routers.
 All 23 API paths, request schemas and response contracts are unchanged.
+
+## Review boundary fixes
+
+- Compaction selects up to the configured batch size from the oldest identified
+  session. Other sessions remain for subsequent passes. Stage 4 and persistence
+  reject mixed-session or unidentified summaries. Protected-turn rules are unchanged.
+- `iter_archive_records(session_id=...)` is the shared read-only archive interface.
+  It excludes ambiguous/mixed-session legacy summaries from scoped reads without
+  deleting them. Raw search reuses this reader; summary retrieval is not activated.
+- `get_recent_turns` returns a bounded snapshot without writes. The request handler
+  explicitly calls `enforce_recent_limit` first. Archival succeeds before eviction;
+  memory I/O errors return a generic HTTP error without exposing file contents.
+- Conversation ownership is authenticated with a second HttpOnly signature cookie,
+  independently of the in-memory deque. `backend/.ai_session_key` is generated
+  locally on first use with private permissions, persists across server restarts,
+  and is Git-ignored together with its lock file. Never publish or delete that key
+  casually: deleting it invalidates existing cookie signatures. Existing unsigned
+  cookies receive a new identity once; old archive records are retained, not claimed
+  by the new identity. Recent turns remain in RAM and are not restored on restart.
+- Exam-only questions about today select today's exams; study planning can still
+  include upcoming exams. Stage 1 now agrees with the semantic adapter for this case.
+- Exam validation/updates live in `planner/exam_service.py`. Optional exam inclusion
+  in a calendar week lives in `planner/calendar.py:get_calendar_week`; HTTP routes
+  retain request/response handling. Endpoint formats and recurrence are unchanged.
+
+Regression tests use temporary files/in-memory databases and mocked models. No
+production archive migration or automatic action execution is performed.
 
 ## Future extensions (not implemented)
 

@@ -1,6 +1,8 @@
 .DS_Store
 .env
 .env.*
+backend/.ai_session_key
+backend/.ai_session_key.lock
 backend/ai_memory_archive.jsonl
 backend/ai_memory_archive.jsonl.lock
 backend/ai_memory_archive.backup.jsonl

@@ -160,7 +160,7 @@ def validate_activity_edit(activity_id, fields):
 
 
 def update_activity_record(connection, activity_id, fields):
-    """Reuse per-field edits, preserving IDs, metadata and existing commit order."""
+    """Apply a logical edit atomically, preserving IDs and imported metadata."""
     column_name = validate_activity_edit(activity_id, fields)
     activity = get_activity_by_id(connection, activity_id)
 
@@ -262,25 +262,33 @@ def update_activity_record(connection, activity_id, fields):
 
         validate_optional_time_range(start_time_value, end_time_value)
 
-    edit_activity(connection, activity_id, column_name, new_value)
+    connection.execute("SAVEPOINT activity_edit")
+    try:
+        edit_activity(connection, activity_id, column_name, new_value, commit=False)
 
-    if column_name == "activity_type":
-        if new_value == "one_time":
-            edit_activity(connection, activity_id, "date", selected_date)
-        elif new_value == "weekly":
-            edit_activity(connection, activity_id, "weekday", selected_weekday)
+        if column_name == "activity_type":
+            if new_value == "one_time":
+                edit_activity(connection, activity_id, "date", selected_date, commit=False)
+            elif new_value == "weekly":
+                edit_activity(connection, activity_id, "weekday", selected_weekday, commit=False)
 
-    resulting_activity_type = (
-        new_value if column_name == "activity_type" else current_activity_type
-    )
+        resulting_activity_type = (
+            new_value if column_name == "activity_type" else current_activity_type
+        )
 
-    if resulting_activity_type == "one_time":
-        edit_activity(connection, activity_id, "weekday", None)
-    elif resulting_activity_type == "daily":
-        edit_activity(connection, activity_id, "date", None)
-        edit_activity(connection, activity_id, "weekday", None)
-    elif resulting_activity_type == "weekly":
-        edit_activity(connection, activity_id, "date", None)
+        if resulting_activity_type == "one_time":
+            edit_activity(connection, activity_id, "weekday", None, commit=False)
+        elif resulting_activity_type == "daily":
+            edit_activity(connection, activity_id, "date", None, commit=False)
+            edit_activity(connection, activity_id, "weekday", None, commit=False)
+        elif resulting_activity_type == "weekly":
+            edit_activity(connection, activity_id, "date", None, commit=False)
 
-    updated_activity = get_activity_by_id(connection, activity_id)
-    return updated_activity
+        updated_activity = get_activity_by_id(connection, activity_id)
+        connection.execute("RELEASE SAVEPOINT activity_edit")
+        return updated_activity
+
+    except BaseException:
+        connection.execute("ROLLBACK TO SAVEPOINT activity_edit")
+        connection.execute("RELEASE SAVEPOINT activity_edit")
+        raise

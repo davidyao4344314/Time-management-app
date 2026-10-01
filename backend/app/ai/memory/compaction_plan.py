@@ -113,6 +113,9 @@ def _validate_final_summary(final_result, classified_candidates):
         timestamp = _archive_timestamp(record)
         if timestamp is not None:
             timestamps.append(timestamp)
+    sessions = [ref["session_id"] for ref in resolved_refs]
+    if not all(isinstance(value, str) and value for value in sessions) or len(set(sessions)) != 1:
+        raise _PersistenceError("A compressed summary must belong to exactly one session.")
     source_records = [classified_candidates[ref["source_index"]]["archived_turn"]
                       for ref in resolved_refs]
     source_ids = {record["turn_id"] for record in source_records if record.get("turn_id")}

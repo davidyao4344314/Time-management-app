@@ -172,7 +172,7 @@ def backfill_activity_date_range(connection, activity_id, start_date, end_date):
     return cursor.rowcount
 
 
-def edit_activity(connection, activity_id, column_name, new_value):
+def edit_activity(connection, activity_id, column_name, new_value, *, commit=True):
     sql = f"""
         UPDATE activities
         SET {column_name} = ?
@@ -180,7 +180,8 @@ def edit_activity(connection, activity_id, column_name, new_value):
     """
 
     connection.execute(sql, (new_value, activity_id))
-    connection.commit()
+    if commit:
+        connection.commit()
 
 def get_end_time(connection, activity_id):
     cursor = connection.execute(

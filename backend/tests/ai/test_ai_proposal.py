@@ -35,6 +35,11 @@ def activity_action(**changes):
 
 class AIProposalTests(unittest.TestCase):
     def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        archive_patch = patch.object(ai_memory, "ARCHIVE_FILE", Path(directory.name) / "archive.jsonl")
+        archive_patch.start()
+        self.addCleanup(archive_patch.stop)
         # Existing tests describe the default five-turn behavior regardless of
         # the developer's local, ignored .env setting.
         for target in (ai_memory, ai_proposal):
@@ -664,6 +669,7 @@ class AIProposalTests(unittest.TestCase):
             self.assertFalse(ai_memory.ARCHIVE_FILE.exists())
 
             selected_limit[0] = 5
+            ai_memory.enforce_recent_limit("session-one")
             recent = ai_memory.get_recent_turns("session-one")
             self.assertEqual([turn["user"] for turn in recent], [f"Turn {n}" for n in range(6, 11)])
             ai_memory.add_completed_turn(

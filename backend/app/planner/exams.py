@@ -1,3 +1,17 @@
+def exam_to_dict(exam):
+    return {
+        "id": exam[0],
+        "name": exam[1],
+        "category": exam[2],
+        "subject": exam[3],
+        "date": exam[4],
+        "start_time": exam[5],
+        "end_time": exam[6],
+        "source": exam[7],
+        "external_id": exam[8],
+    }
+
+
 def exam_exists(connection, columns, values):
     """Match all exam data fields, not the unique row ID."""
     exam = dict(zip(columns, values))

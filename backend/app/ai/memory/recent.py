@@ -29,15 +29,20 @@ def _archive_excess_turns(session_id, recent, limit):
         recent.popleft()
 
 
-def get_recent_turns(session_id):
-    """Return a copy so callers cannot alter stored conversation history."""
+def enforce_recent_limit(session_id):
+    """Explicit maintenance: archive successfully before shrinking the window."""
     limit = get_max_recent_turns()
     with _lock:
         recent = _sessions.get(session_id)
-        if recent is None:
-            return []
-        _archive_excess_turns(session_id, recent, limit)
-        return deepcopy(list(recent))
+        if recent is not None:
+            _archive_excess_turns(session_id, recent, limit)
+
+
+def get_recent_turns(session_id):
+    """Return a read-only snapshot; never archive or evict as a read side effect."""
+    limit = get_max_recent_turns()
+    with _lock:
+        return deepcopy(list(_sessions.get(session_id, ()))[-limit:])
 
 
 def add_completed_turn(session_id, user_message, proposal):

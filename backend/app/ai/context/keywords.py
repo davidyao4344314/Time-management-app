@@ -39,6 +39,9 @@ def choose_agent_context(user_message):
     """
     message = user_message.casefold().replace("’", "'")
     asks_exams = _has_phrase(message, EXAM_WORDS)
+    asks_study = _has_phrase(message, STUDY_WORDS) or (
+        asks_exams and _has_phrase(message, ("what should i do",))
+    )
     asks_all_activities = _has_phrase(message, ALL_ACTIVITY_PHRASES)
     asks_everything = _has_phrase(message, ALL_CONTEXT_PHRASES)
 
@@ -62,7 +65,7 @@ def choose_agent_context(user_message):
 
     if asks_exams and time_scope is None:
         activities_scope = None
-    elif asks_exams and time_scope in {"week", "month"} and not _has_phrase(message, STUDY_WORDS):
+    elif asks_exams and time_scope in {"today", "week", "month"} and not asks_study:
         activities_scope = None
     else:
         activities_scope = time_scope or "today"
@@ -70,6 +73,7 @@ def choose_agent_context(user_message):
     include_exams = asks_exams or time_scope is None or _has_phrase(message, STUDY_WORDS)
     exam_scope = (
         time_scope if asks_exams and time_scope in {"week", "month"}
+        or (asks_exams and time_scope == "today" and activities_scope is None)
         else "upcoming"
     ) if include_exams else None
 

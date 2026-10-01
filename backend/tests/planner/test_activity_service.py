@@ -74,9 +74,9 @@ class ActivityServiceTests(unittest.TestCase):
                 "new_value": "weekly", "weekday": "wednesday",
             })
         self.assertEqual(edit.call_args_list, [
-            call(self.connection, row[0], "activity_type", "weekly"),
-            call(self.connection, row[0], "weekday", "Wednesday"),
-            call(self.connection, row[0], "date", None),
+            call(self.connection, row[0], "activity_type", "weekly", commit=False),
+            call(self.connection, row[0], "weekday", "Wednesday", commit=False),
+            call(self.connection, row[0], "date", None, commit=False),
         ])
         self.assertEqual(updated[4:7], ("weekly", None, "Wednesday"))
         updated = service.update_activity_record(self.connection, row[0], {

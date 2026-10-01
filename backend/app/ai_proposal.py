@@ -11,14 +11,15 @@ from backend.app.agent.contracts import (
     AgentProposal, InvalidProposalError, validate_agent_proposal,
 )
 from backend.app.memory.contracts import MemoryRequest
-from backend.app.activity_observation import build_activity_observation
+from backend.app.observations.collect import collect_agent_observations
+from backend.app.observations.activities import build_activity_observation
 from backend.app.ai_config import (
     get_agent_model_settings,
     get_max_recent_turns,
     is_openai_api_key_configured,
 )
-from backend.app.ai_routing_pipeline import select_agent_context
-from backend.app.exam_observation import build_exam_observation
+from backend.app.context.selection import select_agent_context
+from backend.app.observations.exams import build_exam_observation
 
 
 PROPOSAL_MODEL = "gpt-6-luna"
@@ -56,15 +57,11 @@ def get_agent_proposal(connection, user_request, recent_turns=None):
         selection = select_agent_context(
             client, user_request.strip(), recent_turns, PROPOSAL_MODEL,
         )
-        context = {}
-        if selection["activities_scope"] is not None:
-            context["activities"] = build_activity_observation(
-                connection, scope=selection["activities_scope"],
-            )
-        if selection["include_exams"]:
-            context["exams"] = build_exam_observation(
-                connection, scope=selection["exam_scope"],
-            )
+        context = collect_agent_observations(
+            connection, selection,
+            activity_builder=build_activity_observation,
+            exam_builder=build_exam_observation,
+        )
         model_input = {"request": user_request.strip(), "observations": context}
         input_messages = []
         for turn in list(recent_turns or [])[-get_max_recent_turns():]:

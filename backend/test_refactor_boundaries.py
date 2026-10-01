@@ -11,6 +11,22 @@ from backend.app.memory import archive_store, recent, settings
 
 
 class RefactorBoundaryTests(unittest.TestCase):
+    def test_durable_storage_imports_without_extraction_or_openai(self):
+        code = """
+import sys
+sys.modules['openai'] = None
+sys.modules['backend.app.memory.durable'] = None
+from backend.app.memory import durable_store
+from backend.app.memory.contracts import DurableMemoryStore
+assert durable_store.DurableMemoryStore is DurableMemoryStore
+assert not hasattr(durable_store, 'OpenAI')
+assert not hasattr(durable_store, 'extract_durable_memories')
+"""
+        result = subprocess.run([sys.executable, "-B", "-c", code],
+                                cwd=Path(__file__).resolve().parents[1],
+                                capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_category_policy_imports_without_summary_or_llm_review(self):
         code = """
 import sys

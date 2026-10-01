@@ -1,7 +1,12 @@
 """Memory request and archive-output formats, independent of agent/storage code."""
 
 import re
+import uuid
+from datetime import datetime
 from typing import Literal
+
+from backend.app.infrastructure.privacy import redact_secrets as _redact_secrets
+from backend.app.memory.records import first_source_timestamp as _first_timestamp
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
@@ -159,4 +164,106 @@ class ArchiveCategoryProposal(BaseModel):
                 raise ValueError("A category proposal needs a name, topics and refs.")
         elif self.proposed_category is not None or self.example_topics or self.item_refs:
             raise ValueError("No-category proposals must leave all proposal fields empty.")
+        return self
+
+
+MAX_MEMORY_CONTENT_LENGTH = 320
+MemoryType = Literal[
+    "goal", "preference", "decision", "requirement", "constraint",
+    "long_term_plan", "project_architecture", "explicit_memory",
+    "unfinished_task", "other_durable",
+]
+
+
+class MemoryFields(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    type: MemoryType
+    content: str
+    status: Literal["active"]
+
+    @model_validator(mode="after")
+    def validate_content(self):
+        self.content = self.content.strip()
+        if not self.content or len(self.content) > MAX_MEMORY_CONTENT_LENGTH \
+                or "\n" in self.content or "```" in self.content:
+            raise ValueError("Memory content must be concise plain text.")
+        if _redact_secrets(self.content) != self.content:
+            raise ValueError("Memory content cannot contain an API key.")
+        return self
+
+
+class ExtractedMemory(MemoryFields):
+    source_turn_refs: list[str]
+    source_timestamp: str | None
+
+    @model_validator(mode="after")
+    def validate_refs(self):
+        if not self.source_turn_refs or len(set(self.source_turn_refs)) != len(self.source_turn_refs):
+            raise ValueError("Each memory needs unique supporting source references.")
+        return self
+
+
+class DurableMemoryExtraction(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    memories: list[ExtractedMemory]
+
+    @model_validator(mode="after")
+    def validate_size(self):
+        if len(self.memories) > 50:
+            raise ValueError("The extraction batch contains too many memories.")
+        return self
+
+
+class SourceTurnReference(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    turn_id: str | None
+    record_sha256: str
+    session_id: str | None
+    timestamp: str | None
+
+    @model_validator(mode="after")
+    def validate_identity(self):
+        if self.turn_id is not None:
+            uuid.UUID(self.turn_id)
+        if not re.fullmatch(r"[0-9a-f]{64}", self.record_sha256):
+            raise ValueError("A source fingerprint is invalid.")
+        return self
+
+
+class StoredDurableMemory(MemoryFields):
+    memory_id: str
+    created_at: str
+    source_turn_refs: list[SourceTurnReference]
+    source_timestamp: str | None
+
+    @model_validator(mode="after")
+    def validate_metadata(self):
+        uuid.UUID(self.memory_id)
+        created = datetime.fromisoformat(self.created_at.replace("Z", "+00:00"))
+        if created.tzinfo is None or created.utcoffset() is None:
+            raise ValueError("Memory creation time must have a timezone.")
+        refs = [ref.model_dump() for ref in self.source_turn_refs]
+        identities = [(ref["turn_id"], ref["record_sha256"]) for ref in refs]
+        if not refs or len(set(identities)) != len(identities):
+            raise ValueError("Stored source references must be nonempty and unique.")
+        if len({ref["session_id"] for ref in refs}) != 1:
+            raise ValueError("A memory cannot combine different browser sessions.")
+        if self.source_timestamp != _first_timestamp(refs):
+            raise ValueError("Memory timestamp must come from its sources.")
+        return self
+
+
+class DurableMemoryStore(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    durable_memories: list[StoredDurableMemory]
+
+    @model_validator(mode="after")
+    def validate_ids(self):
+        ids = [memory.memory_id for memory in self.durable_memories]
+        if len(set(ids)) != len(ids):
+            raise ValueError("Memory IDs must be unique.")
         return self

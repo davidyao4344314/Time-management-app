@@ -38,6 +38,10 @@ def choose_agent_context(user_message):
     The default is deliberately small: today's activities and upcoming exams.
     """
     message = user_message.casefold().replace("’", "'")
+    memory = _memory_selection(message)
+    if memory is not None and not _mixed_memory_request(message):
+        return {"activities_scope": None, "include_exams": False,
+                "exam_scope": None, "memory": memory}
     asks_exams = _has_phrase(message, EXAM_WORDS)
     asks_study = _has_phrase(message, STUDY_WORDS) or (
         asks_exams and _has_phrase(message, ("what should i do",))
@@ -92,7 +96,14 @@ def assess_stage_one(user_message, recent_turns=None):
         TODAY_PHRASES, WEEK_PHRASES, MONTH_PHRASES, EXAM_WORDS,
         ALL_ACTIVITY_PHRASES, ALL_CONTEXT_PHRASES, STUDY_WORDS,
     )
-    if not any(_has_phrase(message, phrases) for phrases in phrase_groups):
+    if _memory_selection(message) is not None and _mixed_memory_request(message):
+        reason = "mixed_memory_and_current_request"
+    elif selection.get("memory") is not None:
+        reason = None
+    elif any(_has_phrase(message, phrases) for phrases in
+             (("remember", "previously", "earlier", "last time", "we discussed", "we decided"),)):
+        reason = "ambiguous_conversation_reference"
+    elif not any(_has_phrase(message, phrases) for phrases in phrase_groups):
         reason = "no_meaningful_keyword_match"
     elif re.search(
         r"\b(?:don't|do not|not|without|exclude|skip)\b[^.!?]{0,80}"
@@ -113,3 +124,35 @@ def assess_stage_one(user_message, recent_turns=None):
         "confident": reason is None,
         "reason": reason,
     }
+
+
+def _mixed_memory_request(message):
+    return bool(re.search(r"\b(help me|based on|use .+ to|and (?:what|help|plan|show))\b", message))
+
+
+def _memory_selection(message):
+    """Recognize explicit recollection, not ordinary 'before dinner' scheduling."""
+    if re.search(r"\b(don't|do not|without|ignore)\b.*\b(memory|memories|history|archive)\b", message):
+        return None
+    historical = re.search(
+        r"\b(what did (?:we|i) (?:say|discuss|talk|decide|agree|mention)|what (?:was|were) .*(?:discussed|decided|said)|"
+        r"(?:we|i) (?:discussed|decided|said|talked)|remember what|"
+        r"(?:my|our) (?:preferences|previous decisions))\b", message)
+    if not historical:
+        return None
+    reference = next((label for phrase, label in (
+        ("last week", "last_week"), ("this week", "this_week"),
+        ("last month", "last_month"), ("this month", "this_month"),
+        ("yesterday", "yesterday"), ("today", "today"),
+    ) if _has_phrase(message, (phrase,))), None)
+    topics = message
+    for phrase in ("last week", "this week", "last month", "this month", "last time"):
+        topics = topics.replace(phrase, " ")
+    stop = set("what did do we i you me my our the a an was were is are have had about on of for to and that this it before earlier previously yesterday today remember discussed discuss decided decide said say talked talk tell please when with".split())
+    terms = list(dict.fromkeys(word for word in re.findall(r"[\w]+", topics)
+                               if word not in stop))[:5]
+    sources = ["raw_archive"] if _has_phrase(message, ("exact words", "verbatim", "quote")) else (
+        ["durable", "raw_archive"] if _has_phrase(message, ("prefer", "preferences", "goal", "goals", "decided", "constraints"))
+        else ["compressed_archive", "raw_archive"])
+    terms = [term for term in terms if term not in {"exact", "words", "verbatim", "quote"}]
+    return {"sources": sources, "query": {"time_reference": reference, "search_terms": terms}}

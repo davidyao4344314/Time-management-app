@@ -26,6 +26,19 @@ class _StorageError(RuntimeError):
     """Fixed safe messages only; underlying exceptions never reach the caller."""
 
 
+def read_durable_memories(*, session_id):
+    """Read one session's validated durable records; never initialize a store."""
+    if not isinstance(session_id, str) or not session_id:
+        raise ValueError("A session ID is required.")
+    try:
+        data = _read_archive_bytes(DURABLE_MEMORY_FILE)
+    except FileNotFoundError:
+        return []
+    store = DurableMemoryStore.model_validate(json.loads(data))
+    return [memory.model_dump() for memory in store.durable_memories
+            if all(ref.session_id == session_id for ref in memory.source_turn_refs)]
+
+
 def _normalized_content(content):
     """Conservative comparison: preserve word order, negations and numbers."""
     text = unicodedata.normalize("NFKC", content).casefold()

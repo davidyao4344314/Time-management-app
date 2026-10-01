@@ -18,7 +18,7 @@ def archive_write_lock():
         yield
 
 
-def iter_archive_records(*, session_id=None):
+def iter_archive_records(*, session_id=None, strict=False):
     """Read a locked snapshot of records without changing archive contents.
 
     Session-scoped reads exclude legacy summaries with ambiguous ownership.
@@ -40,6 +40,8 @@ def iter_archive_records(*, session_id=None):
                 try:
                     record = json.loads(line)
                 except json.JSONDecodeError:
+                    if strict:
+                        raise ValueError("Archive contains an invalid record.") from None
                     continue
                 if not isinstance(record, dict):
                     continue

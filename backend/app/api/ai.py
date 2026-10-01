@@ -159,7 +159,7 @@ def propose_ai(proposal_request: AIProposalRequest, request: Request, response: 
         # Read-only: the proposed add_activity action is never executed here.
         connection = sqlite3.connect(f"{db_file.resolve().as_uri()}?mode=ro", uri=True)
         try:
-            proposal = get_agent_proposal(connection, user_message, recent_turns)
+            proposal = get_agent_proposal(connection, user_message, recent_turns, session_id=session_id)
         finally:
             connection.close()
         add_completed_turn(session_id, user_message, proposal)

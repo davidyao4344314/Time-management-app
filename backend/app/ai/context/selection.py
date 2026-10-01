@@ -3,6 +3,7 @@
 from backend.app.ai.context.keywords import assess_stage_one
 from backend.app.ai.context.intent import classify_agent_intent, context_from_classification
 from backend.app.ai.context.fallback import classify_stage_three
+from backend.app.ai.context.contracts import ContextSelection
 
 
 SAFE_MINIMAL_CONTEXT = {
@@ -14,14 +15,11 @@ SAFE_MINIMAL_CONTEXT = {
 
 def _valid_context_selection(selection):
     """Do not short-circuit on a malformed Stage 1 result."""
-    return (
-        isinstance(selection, dict)
-        and set(selection) == {"activities_scope", "include_exams", "exam_scope"}
-        and selection["activities_scope"] in {None, "today", "week", "month", "all"}
-        and type(selection["include_exams"]) is bool
-        and selection["exam_scope"] in {None, "today", "week", "month", "upcoming"}
-        and (selection["exam_scope"] is not None) == selection["include_exams"]
-    )
+    try:
+        ContextSelection.model_validate(selection)
+        return True
+    except ValueError:
+        return False
 
 
 def select_agent_context(client, user_message, recent_turns, stage_two_model):

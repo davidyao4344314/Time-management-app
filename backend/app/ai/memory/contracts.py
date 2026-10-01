@@ -27,7 +27,7 @@ BASE_ARCHIVE_CATEGORIES = (
 
 
 class MemoryRequest(BaseModel):
-    """A request to retrieve older conversation later, not retrieved content."""
+    """A bounded symbolic query, not retrieved content or a write action."""
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -50,6 +50,22 @@ class MemoryRequest(BaseModel):
                 raise ValueError("Memory search terms must name a meaningful topic.")
             cleaned_terms.append(cleaned)
         self.search_terms = cleaned_terms
+        return self
+
+
+class MemorySelection(BaseModel):
+    """Allowlisted read-only sources; identity and budgets are backend-owned."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    sources: list[Literal["raw_archive", "compressed_archive", "durable"]]
+    query: MemoryRequest
+
+    @model_validator(mode="after")
+    def validate_sources(self):
+        if not self.sources or len(self.sources) > 3 or len(set(self.sources)) != len(self.sources):
+            raise ValueError("Choose one to three unique memory sources.")
+        if any(len(term) > 80 for term in self.query.search_terms):
+            raise ValueError("Memory search terms must stay short.")
         return self
 
 

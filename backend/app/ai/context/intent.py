@@ -1,9 +1,6 @@
 """Small structured intent classifier with the keyword router as fallback."""
 
 import json
-from typing import Literal
-
-from pydantic import BaseModel, ConfigDict
 
 CLASSIFIER_INSTRUCTIONS = """Classify what context a study assistant needs. Never answer, advise, plan, or request actions.
 
@@ -12,34 +9,13 @@ study_planning: what to focus on or how to use free time; usually needs activiti
 Read the whole current message, respect exclusions such as 'don't show exams', and use brief conversation only to resolve follow-ups. Tonight or after dinner means today when no other date is given. Use all only when explicitly requested; otherwise use unspecified if no time is implied. Exam-only queries need no activities. Set confidence to low only when you cannot reliably decide what information is needed; an ordinary general question can still be high confidence. Return only intent, time_scope, include_activities, include_exams, and confidence."""
 
 
-class AgentRoutingDecision(BaseModel):
-    """The four routing fields shared by Stage 2 and Stage 3."""
+MEMORY_ROUTING_INSTRUCTIONS = """ Also return memory: null unless older conversation is needed. Recent follow-ups already answered by recent context need no archive lookup. For recollection, return memory={sources:[...], query:{time_reference:..., search_terms:[...]}}. Allowed sources: raw_archive for exact prior wording, compressed_archive for past discussion summaries, durable for stated preferences/goals/decisions. Choose only relevant sources. Use symbolic time_reference today, yesterday, last_week, this_week, last_month, this_month, unspecified, or null; never calculate dates. Use at most five short topic terms. 'What did we discuss last week?' needs memory; 'What exams are next week?' and 'study before dinner' do not. Memory-only questions need no schedule observations; mixed planning requests may need both. Respect requests not to use history. Never return session IDs, paths, or retrieved content."""
+CLASSIFIER_INSTRUCTIONS += MEMORY_ROUTING_INSTRUCTIONS
 
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    intent: Literal[
-        "study_planning", "schedule_query", "exam_query",
-        "activity_query", "general_question",
-    ]
-    time_scope: Literal["today", "week", "month", "all", "unspecified"]
-    include_activities: bool
-    include_exams: bool
-
-
-class AgentIntentClassification(AgentRoutingDecision):
-    """Stage 2 adds only a confidence signal to the shared routing decision."""
-
-    confidence: Literal["high", "low"]
-
-
-def validate_intent_classification(value):
-    """Reject unknown labels, non-booleans, and extra response fields."""
-    return AgentIntentClassification.model_validate(value)
-
-
-def validate_routing_decision(value):
-    """Validate the four shared routing fields, including Stage 3 output."""
-    return AgentRoutingDecision.model_validate(value)
+from backend.app.ai.context.contracts import (
+    AgentRoutingDecision, AgentIntentClassification,
+    validate_intent_classification, validate_routing_decision,
+)
 
 
 def brief_recent_conversation(recent_turns):
@@ -65,7 +41,7 @@ def classify_agent_intent(client, user_message, recent_turns, model):
         input=[{"role": "user", "content": json.dumps(classifier_input, ensure_ascii=False)}],
         text_format=AgentIntentClassification,
         reasoning={"effort": "none"},
-        max_output_tokens=160,
+        max_output_tokens=400,
         store=False,
     )
     if response.status != "completed" or response.output_parsed is None:
@@ -97,4 +73,5 @@ def context_from_classification(value):
         "activities_scope": activities_scope,
         "include_exams": classification.include_exams,
         "exam_scope": exam_scope,
+        **({"memory": classification.memory.model_dump()} if classification.memory is not None else {}),
     }

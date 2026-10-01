@@ -171,7 +171,7 @@ class AIProposalTests(unittest.TestCase):
             "include_activities": True, "include_exams": False,
             "confidence": "high",
         }
-        self.assertEqual(ai_intent_classifier.validate_intent_classification(valid).model_dump(), valid)
+        self.assertEqual(ai_intent_classifier.validate_intent_classification(valid).model_dump(), {**valid, "memory": None})
         invalid = (
             {**valid, "intent": "career_advice"},
             {**valid, "time_scope": "year"},
@@ -348,6 +348,7 @@ class AIProposalTests(unittest.TestCase):
         self.assertEqual(decision.model_dump(), {
             "intent": "activity_query", "time_scope": "week",
             "include_activities": True, "include_exams": False,
+            "memory": None,
         })
 
     def test_stage_three_schema_rejects_invalid_or_action_fields(self):
@@ -1006,7 +1007,7 @@ class AIProposalTests(unittest.TestCase):
         client = TestClient(api.app)
         histories = []
 
-        def mock_proposal(_connection, message, recent_turns):
+        def mock_proposal(_connection, message, recent_turns, *, session_id=None):
             histories.append(list(recent_turns))
             return {"message": f"Reply to {message}", "actions": []}
 
@@ -1055,7 +1056,7 @@ class AIProposalTests(unittest.TestCase):
     def test_separate_browser_sessions_do_not_share_history(self):
         histories = []
 
-        def mock_proposal(_connection, _message, recent_turns):
+        def mock_proposal(_connection, _message, recent_turns, *, session_id=None):
             histories.append(recent_turns)
             return {"message": "Reply", "actions": []}
 

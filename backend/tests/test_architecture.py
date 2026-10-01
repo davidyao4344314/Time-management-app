@@ -51,10 +51,15 @@ class ArchitectureTests(unittest.TestCase):
     def test_routing_observations_and_infrastructure_do_not_import_higher_layers(self):
         graph = local_import_graph()
         for module, dependencies in graph.items():
+            allowed = set()
             if module.startswith("backend.app.ai.context."):
+                if module == "backend.app.ai.context.contracts":
+                    allowed = {"backend.app.ai.memory.contracts"}
                 forbidden = ("backend.app.ai.observations", "backend.app.ai.agent", "backend.app.api",
                              "backend.app.ai.memory", "backend.app.planner.activities", "backend.app.planner.exams")
             elif module.startswith("backend.app.ai.observations."):
+                if module == "backend.app.ai.observations.memory":
+                    allowed = {"backend.app.ai.memory.search"}
                 forbidden = ("backend.app.ai.agent", "backend.app.api", "backend.app.ai.memory",
                              "backend.app.ai.context", "backend.app.ai.compat")
             elif module.startswith("backend.app.infrastructure."):
@@ -67,7 +72,7 @@ class ArchitectureTests(unittest.TestCase):
                 continue
             with self.subTest(module=module):
                 self.assertFalse({dependency for dependency in dependencies
-                                  if dependency.startswith(forbidden)})
+                                  if dependency.startswith(forbidden) and dependency not in allowed})
 
     def test_storage_and_planning_have_no_reverse_dependency(self):
         graph = local_import_graph()

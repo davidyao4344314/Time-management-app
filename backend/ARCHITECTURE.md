@@ -1,7 +1,8 @@
 # Backend architecture
 
 The package organization is a behavior-preserving refactor. The boundary fixes
-documented below add targeted safety/correctness changes, not Stage 7 retrieval.
+documented below add targeted safety/correctness changes. Stage 7 now extends
+the existing routing/observation pipeline with bounded read-only memory retrieval.
 The canonical API entry point is `backend.app.server:app`;
 `backend.fastapi_test:app` remains a compatibility entry point to the same app.
 Activities and exams still use the same SQLite database and CRUD functions.
@@ -18,8 +19,9 @@ api/ai.py -> ai/memory/recent.py -> ai/memory/archive_store.py when the recent l
 ```
 
 Observations are current factual application data. Recent memory is conversation
-context. They stay separate. Archived and durable memory are not automatically
-retrieved or included in the normal prompt. Proposed actions are not executed.
+context. They stay separate. Archived and durable memory are retrieved only when
+selected by routing or a bounded missing-context request, never sent wholesale.
+Proposed actions are not executed.
 
 ## File tree and responsibilities
 
@@ -307,7 +309,7 @@ All 23 API paths, request schemas and response contracts are unchanged.
   reject mixed-session or unidentified summaries. Protected-turn rules are unchanged.
 - `iter_archive_records(session_id=...)` is the shared read-only archive interface.
   It excludes ambiguous/mixed-session legacy summaries from scoped reads without
-  deleting them. Raw search reuses this reader; summary retrieval is not activated.
+  deleting them. Raw and summary search reuse this reader.
 - `get_recent_turns` returns a bounded snapshot without writes. The request handler
   explicitly calls `enforce_recent_limit` first. Archival succeeds before eviction;
   memory I/O errors return a generic HTTP error without exposing file contents.
@@ -327,10 +329,52 @@ All 23 API paths, request schemas and response contracts are unchanged.
 Regression tests use temporary files/in-memory databases and mocked models. No
 production archive migration or automatic action execution is performed.
 
+## Stage 7: routed memory observation
+
+`context/contracts.py` shares validated selection contracts across the existing
+Stage 1/2/3 cascade. The existing activity/exam fields are preserved; optional
+`memory` contains allowlisted `sources` and a `query` with `time_reference` and
+up to five short `search_terms`. Memory is omitted/null for ordinary requests.
+No router reads storage. Clear recollection phrases take Stage 1; ambiguous or
+mixed requests use the existing semantic/fallback stages.
+
+The HTTP adapter passes its trusted session ID separately to `get_agent_proposal`.
+`observations/collect.py` calls `observations/memory.py` only when selected.
+`memory/search.py` reuses raw search matching and the shared archive reader, plus
+a public read-only durable-store reader. It returns at most five items across
+all sources within an 8,000-character observation budget, with bounded excerpts,
+provenance and distinct ok/empty/partial/unavailable statuses. Missing files are
+not created. Mixed-session summaries and unowned records are excluded.
+
+Python resolves symbolic dates in Pacific/Auckland time. Raw records use turn
+timestamps; durable records use supporting source dates, not extraction dates.
+Summaries use period overlap and explicitly report `overlap_only`: a month-long
+summary does not prove every sentence happened during the requested week.
+Undated records can match topics, not date ranges. Current app observations
+override old schedule claims; history is data, never action approval.
+
+The same reasoner receives the separate recent turns and selected observations.
+If its validated `memory_request` needs missing context, the service permits one
+additional lookup and at most one additional main-model response. Repeated,
+empty, failed or still-unresolved requests stop with clarification. Intermediate
+responses are not stored as completed turns. No state-changing tools are run.
+
+Offline checks (temporary fixtures and mocked model calls):
+
+```bash
+backend/.venv/bin/python -B -m unittest backend.tests.ai.test_memory_observation -v
+backend/.venv/bin/python -B -m unittest discover -s backend/tests -t . -p 'test_*.py'
+```
+
+Optional live checks in the same signed browser conversation: ask what was
+discussed last week about a known archived topic, then ask what exams are next
+week. Only the first should select historical memory. Live proposal requests
+use the configured OpenAI account and may incur charges. Use mocked tests first.
+
 ## Future extensions (not implemented)
 
-- **Stage 7 retrieval:** a separate coordinator can combine bounded search and
-  durable/summary retrieval without changing recent-memory storage.
+- **Approved actions/re-evaluation:** add explicit approval, execution receipts,
+  and bounded verification separately. Stage 7 performs no action execution.
 - **Screen Time:** add a selected collector section and routing rule using the
   existing formatter, without rewriting main-agent history formatting.
 - **Additional tools:** extend action contracts, then add a distinct approval and

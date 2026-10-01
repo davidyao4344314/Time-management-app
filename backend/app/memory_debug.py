@@ -22,6 +22,9 @@ from backend.app import (
 )
 
 
+from backend.app.memory.compaction_plan import preview_compacted_archive
+
+
 DEBUG_ARCHIVE_THRESHOLD = 10
 DEBUG_COMPACT_BATCH = 14
 FAKE_TURNS = (
@@ -64,25 +67,12 @@ def show(value):
 
 
 def _stage5_preview(final, entries, records):
-    """Use production validators/matching/verification, with no persistence."""
-    try:
-        validated = persistence._validate_final_summary(final, entries)
-        if validated is None:
-            return {"status": "nothing_to_persist", "would_remove": []}
-        indexed = list(enumerate(records))
-        selected, _ = persistence._match_raw_sources(indexed, entries, validated["source_turn_refs"])
-        stored = {"record_type": persistence.SUMMARY_RECORD_TYPE,
-                  "summary_id": str(uuid.uuid5(uuid.NAMESPACE_URL, "memory-debug/summary")),
-                  "created_at": datetime.now(timezone.utc).isoformat(), **validated}
-        retained = [record for index, record in indexed if index not in selected]
-        simulated = list(enumerate(retained + [stored]))
-        persistence._verify_final_state(indexed, selected, simulated, stored)
-        return {"status": "dry_run", "summary_would_store": stored,
-                "would_remove": [records[index]["turn_id"] for index in sorted(selected)],
-                "raw_remaining": [record["turn_id"] for record in retained]}
-    except Exception:
-        return {"status": "failed", "reason": "Production Stage 5 validation rejected this result.",
-                "would_remove": []}
+    """Reuse the pure production preview without persistence."""
+    return preview_compacted_archive(
+        final, entries, records,
+        summary_id=str(uuid.uuid5(uuid.NAMESPACE_URL, "memory-debug/summary")),
+        created_at=datetime.now(timezone.utc).isoformat(),
+    )
 
 
 def run_debug(*, stage="all", llm=False, write_fake=False):

@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timezone
 
 from backend.app import ai_memory
-from backend.app.ai_archive_category_review import _category_rejection
+from backend.app.memory.category_policy import _category_rejection
 from backend.app.infrastructure.atomic_files import (
     fsync_directory as _fsync_directory,
     read_regular_bytes as _read_archive_bytes,

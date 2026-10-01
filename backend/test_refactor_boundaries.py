@@ -11,6 +11,21 @@ from backend.app.memory import archive_store, recent, settings
 
 
 class RefactorBoundaryTests(unittest.TestCase):
+    def test_category_policy_imports_without_summary_or_llm_review(self):
+        code = """
+import sys
+sys.modules['openai'] = None
+sys.modules['backend.app.memory.summary'] = None
+sys.modules['backend.app.memory.category_review'] = None
+from backend.app.memory.category_policy import _category_rejection
+assert _category_rejection('career', {'general'}) is None
+assert _category_rejection('canvas_errors', {'general'}) is not None
+"""
+        result = subprocess.run([sys.executable, "-B", "-c", code],
+                                cwd=Path(__file__).resolve().parents[1],
+                                capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_legacy_memory_facade_forwards_state_and_configuration(self):
         original = recent._sessions
         replacement = {}

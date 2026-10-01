@@ -7,6 +7,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from backend.app import ai_memory
+from backend.app.infrastructure.privacy import redact_secrets
 from backend.app.memory.contracts import MemoryRequest
 
 
@@ -125,8 +126,8 @@ def search_archived_memory(memory_request, *, session_id, limit=5, now=None):
             if start is not None and (timestamp is None or not start <= timestamp < end):
                 continue
 
-            user = ai_memory._redact_secrets(user)
-            assistant = ai_memory._redact_secrets(assistant)
+            user = redact_secrets(user)
+            assistant = redact_secrets(assistant)
             user_text, assistant_text = user.casefold(), assistant.casefold()
             score = sum(2 * user_text.count(term) + assistant_text.count(term) for term in terms)
             if terms and score == 0:

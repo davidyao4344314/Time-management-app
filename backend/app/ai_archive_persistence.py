@@ -1,17 +1,28 @@
 """Stage 5: atomically replace summarized archive turns with one summary record."""
 
 import hashlib
-import json
 import logging
 import os
-import stat
-import tempfile
 import uuid
 from datetime import datetime, timezone
 
 from backend.app import ai_memory
 from backend.app.ai_archive_category_review import _category_rejection
-from backend.app.ai_archive_summary import _source_timestamp
+from backend.app.infrastructure.atomic_files import (
+    fsync_directory as _fsync_directory,
+    read_regular_bytes as _read_archive_bytes,
+    write_verified_temp,
+)
+from backend.app.infrastructure.errors import MemoryUtilityError as _PersistenceError
+from backend.app.memory.records import (
+    append_archive_record as _append_record,
+    archive_timestamp as _archive_timestamp,
+    canonical_bytes as _canonical_bytes,
+    parse_archive_lines as _parse_lines,
+    record_hash as _record_hash,
+    source_identity as _source_identity,
+    source_timestamp as _source_timestamp,
+)
 from backend.app.memory.contracts import ArchiveCategorySummary, BASE_ARCHIVE_CATEGORIES
 
 
@@ -19,34 +30,8 @@ SUMMARY_RECORD_TYPE = "compressed_summary"
 _logger = logging.getLogger(__name__)
 
 
-class _PersistenceError(Exception):
-    pass
-
-
 def _failed(reason):
     return {"status": "failed", "reason": reason, "source_turns_removed": 0}
-
-
-def _canonical_bytes(value):
-    return json.dumps(value, sort_keys=True, separators=(",", ":"),
-                      ensure_ascii=False).encode("utf-8")
-
-
-def _record_hash(record):
-    return hashlib.sha256(_canonical_bytes(record)).hexdigest()
-
-
-def _source_identity(record):
-    turn_id = record.get("turn_id")
-    if turn_id is not None:
-        if not isinstance(turn_id, str):
-            raise _PersistenceError("A source turn ID is invalid.")
-        try:
-            uuid.UUID(turn_id)
-        except ValueError as exc:
-            raise _PersistenceError("A source turn ID is invalid.") from exc
-        return {"turn_id": turn_id, "record_sha256": _record_hash(record)}
-    return {"turn_id": None, "record_sha256": _record_hash(record)}
 
 
 def _validate_final_summary(final_result, classified_candidates):
@@ -145,7 +130,7 @@ def _validate_final_summary(final_result, classified_candidates):
             raise _PersistenceError("A source ref does not match its classified turn.")
         identity = _source_identity(record)
         resolved_refs.append({**expected, **identity})
-        timestamp = ai_memory._archive_timestamp(record)
+        timestamp = _archive_timestamp(record)
         if timestamp is not None:
             timestamps.append(timestamp)
     source_records = [classified_candidates[ref["source_index"]]["archived_turn"]
@@ -181,34 +166,6 @@ def _validate_final_summary(final_result, classified_candidates):
     }
 
 
-def _read_archive_bytes(path):
-    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-    try:
-        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
-            raise _PersistenceError("The archive is not a regular file.")
-        with os.fdopen(descriptor, "rb", closefd=False) as archive:
-            return archive.read()
-    finally:
-        os.close(descriptor)
-
-
-def _parse_lines(data):
-    """Preserve original lines and reject malformed data before replacing anything."""
-    lines = data.splitlines(keepends=True)
-    records = []
-    for line_index, line in enumerate(lines):
-        if not line.strip():
-            continue
-        try:
-            record = json.loads(line)
-        except (UnicodeError, json.JSONDecodeError) as exc:
-            raise _PersistenceError("The archive contains an invalid JSONL record.") from exc
-        if not isinstance(record, dict) or ("turn" in record and not isinstance(record["turn"], dict)):
-            raise _PersistenceError("The archive contains an invalid record.")
-        records.append((line_index, record))
-    return lines, records
-
-
 def _match_raw_sources(records, classified_candidates, source_refs):
     raw = [(line_index, record) for line_index, record in records
            if isinstance(record.get("turn"), dict)]
@@ -226,11 +183,6 @@ def _match_raw_sources(records, classified_candidates, source_refs):
             raise _PersistenceError("A source turn is missing or does not match uniquely.")
         selected.add(matches[0][0])
     return selected, len(raw)
-
-
-def _append_record(data, record):
-    separator = b"" if not data or data.endswith(b"\n") else b"\n"
-    return data + separator + _canonical_bytes(record) + b"\n"
 
 
 def _verify_final_state(original_records, selected_lines, final_records, summary_record):
@@ -252,29 +204,8 @@ def _verify_final_state(original_records, selected_lines, final_records, summary
 
 
 def _write_verified_temp(directory, data):
-    descriptor, path = tempfile.mkstemp(prefix=".archive-stage5-", dir=directory)
-    try:
-        os.fchmod(descriptor, 0o600)
-        with os.fdopen(descriptor, "wb", closefd=False) as output:
-            output.write(data)
-            output.flush()
-            os.fsync(descriptor)
-        if _read_archive_bytes(path) != data:
-            raise _PersistenceError("A temporary archive write could not be verified.")
-        return path
-    except Exception:
-        os.unlink(path)
-        raise
-    finally:
-        os.close(descriptor)
-
-
-def _fsync_directory(directory):
-    descriptor = os.open(directory, os.O_RDONLY)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
+    """Delegate while retaining the existing read-back failure-test hook."""
+    return write_verified_temp(directory, data, read_bytes=_read_archive_bytes)
 
 
 def _persist_locked(validated, classified_candidates):

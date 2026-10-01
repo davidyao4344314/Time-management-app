@@ -4,32 +4,36 @@ This module consumes earlier-stage results explicitly. It never loads, removes,
 or retrieves raw archive turns and is not called by the normal agent request.
 """
 
-import fcntl
 import json
 import os
 import re
-import stat
 import unicodedata
 import uuid
 from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Literal
 
 from openai import OpenAI
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from backend.app.ai_archive_persistence import (
-    _canonical_bytes, _fsync_directory, _read_archive_bytes,
-    _source_identity, _write_verified_temp,
+from backend.app.infrastructure.atomic_files import (
+    exclusive_file_lock,
+    fsync_directory as _fsync_directory,
+    read_regular_bytes as _read_archive_bytes,
+    write_verified_temp as _write_verified_temp,
 )
-from backend.app.ai_archive_summary import _source_timestamp
+from backend.app.infrastructure.privacy import redact_secrets as _redact_secrets
+from backend.app.memory.paths import DURABLE_MEMORY_FILE
+from backend.app.memory.records import (
+    canonical_bytes as _canonical_bytes,
+    first_source_timestamp as _first_timestamp,
+    source_identity as _source_identity,
+    source_timestamp as _source_timestamp,
+)
 from backend.app.ai_config import DEFAULT_AGENT_MODEL, is_openai_api_key_configured
-from backend.app.ai_memory import _redact_secrets
 
 
-DURABLE_MEMORY_FILE = Path(__file__).resolve().parents[1] / "ai_durable_memories.json"
 DURABLE_MEMORY_MODEL = DEFAULT_AGENT_MODEL
 DURABLE_MEMORY_BATCH_SIZE = 10
 MAX_MEMORY_CONTENT_LENGTH = 320
@@ -122,10 +126,6 @@ class SourceTurnReference(BaseModel):
         if not re.fullmatch(r"[0-9a-f]{64}", self.record_sha256):
             raise ValueError("A source fingerprint is invalid.")
         return self
-
-
-def _first_timestamp(refs):
-    return next((ref["timestamp"] for ref in refs if ref["timestamp"] is not None), None)
 
 
 class StoredDurableMemory(MemoryFields):
@@ -271,23 +271,16 @@ def _merge_memories(store, extracted):
 
 @contextmanager
 def _durable_write_lock():
-    lock_path = DURABLE_MEMORY_FILE.with_name(DURABLE_MEMORY_FILE.name + ".lock")
-    descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
-    try:
-        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
-            raise ValueError("The durable-memory lock must be a regular file.")
-        os.fchmod(descriptor, 0o600)
-        fcntl.flock(descriptor, fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(descriptor, fcntl.LOCK_UN)
-    finally:
-        os.close(descriptor)
+    """Use the shared lock, preserving the durable store's regular-file check."""
+    with exclusive_file_lock(
+        DURABLE_MEMORY_FILE, require_regular_file=True,
+        regular_file_error="The durable-memory lock must be a regular file.",
+    ):
+        yield
 
 
 def _persist_memories(extracted):
-    """Use the Stage 5 verified-temp/atomic-replace pattern on a separate file."""
+    """Use shared verified-file utilities on the separate durable-memory file."""
     path = DURABLE_MEMORY_FILE
     backup = path.with_name(path.stem + ".backup" + path.suffix)
     temporary_paths = []

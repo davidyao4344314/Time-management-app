@@ -7,7 +7,10 @@ import os
 from openai import OpenAI
 
 from backend.app.ai_config import DEFAULT_AGENT_MODEL, is_openai_api_key_configured
-from backend.app.ai_memory import _archive_timestamp
+from backend.app.memory.records import (
+    archive_timestamp as _archive_timestamp,
+    source_timestamp as _source_timestamp,
+)
 # Keep the original import locations available for existing callers.
 from backend.app.memory.contracts import (
     ArchiveCategorizedSummary, ArchiveCategorySummary, BASE_ARCHIVE_CATEGORIES,
@@ -30,12 +33,6 @@ def _minimal_turn(record, source_index):
         "user": turn.get("user") if isinstance(turn.get("user"), str) else "",
         "assistant": assistant if isinstance(assistant, str) else "",
     }
-
-
-def _source_timestamp(record):
-    """Preserve an existing timestamp string, including legacy turn-level ones."""
-    value = record.get("timestamp") or record["turn"].get("timestamp")
-    return value if isinstance(value, str) else None
 
 
 def _source_ref(entry, source_index):

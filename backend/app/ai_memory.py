@@ -4,22 +4,23 @@ import fcntl
 import json
 import logging
 import os
-import re
 import uuid
 from collections import deque
 from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime, timezone
-from pathlib import Path
 from threading import Lock
 
 from backend.app.ai_config import get_max_recent_turns
+from backend.app.infrastructure.atomic_files import exclusive_file_lock
+# Keep legacy utility names and path overrides available to existing callers.
+from backend.app.infrastructure.privacy import _API_KEY_PATTERN, redact_secrets as _redact_secrets
+from backend.app.memory.paths import ARCHIVE_FILE
+from backend.app.memory.records import archive_timestamp as _archive_timestamp
 
 
-ARCHIVE_FILE = Path(__file__).resolve().parents[1] / "ai_memory_archive.jsonl"
 ARCHIVE_TURN_THRESHOLD = 100
 ARCHIVE_COMPACT_BATCH = 50
-_API_KEY_PATTERN = re.compile(r"sk-[A-Za-z0-9_-]{16,}")
 _sessions = {}
 _lock = Lock()
 _logger = logging.getLogger(__name__)
@@ -27,19 +28,9 @@ _logger = logging.getLogger(__name__)
 
 @contextmanager
 def _archive_write_lock():
-    """Lock a stable sidecar inode across appends and archive replacements."""
-    lock_path = ARCHIVE_FILE.with_name(ARCHIVE_FILE.name + ".lock")
-    flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
-    descriptor = os.open(lock_path, flags, 0o600)
-    try:
-        os.fchmod(descriptor, 0o600)
-        fcntl.flock(descriptor, fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(descriptor, fcntl.LOCK_UN)
-    finally:
-        os.close(descriptor)
+    """Use the shared sidecar lock with the current archive-path override."""
+    with exclusive_file_lock(ARCHIVE_FILE):
+        yield
 
 
 def _iter_archived_turns():
@@ -73,20 +64,6 @@ def get_archive_turn_count():
 def archive_needs_compaction(archive_turn_count):
     """Report whether the archived-turn count exceeds the configured threshold."""
     return archive_turn_count > ARCHIVE_TURN_THRESHOLD
-
-
-def _archive_timestamp(record):
-    """Return a comparable completion time, or None for an undated record."""
-    value = record.get("timestamp") or record["turn"].get("timestamp")
-    if not isinstance(value, str):
-        return None
-    try:
-        timestamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if timestamp.tzinfo is None or timestamp.utcoffset() is None:
-        return None
-    return timestamp.astimezone(timezone.utc)
 
 
 def select_archive_compaction_candidates(*, batch_size=None):
@@ -127,21 +104,6 @@ def select_archive_compaction_candidates(*, batch_size=None):
         "oldest_candidate_timestamp": min(known_times).isoformat() if known_times else None,
         "newest_candidate_timestamp": max(known_times).isoformat() if known_times else None,
     }
-
-
-def _redact_secrets(value):
-    """Avoid persisting an API key if one was pasted into a conversation."""
-    if isinstance(value, str):
-        value = _API_KEY_PATTERN.sub("[redacted API key]", value)
-        configured_key = os.getenv("OPENAI_API_KEY", "").strip()
-        if len(configured_key) >= 16:
-            value = value.replace(configured_key, "[redacted API key]")
-        return value
-    if isinstance(value, list):
-        return [_redact_secrets(item) for item in value]
-    if isinstance(value, dict):
-        return {key: _redact_secrets(item) for key, item in value.items()}
-    return value
 
 
 def _archive_turn(session_id, turn):

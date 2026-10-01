@@ -28,7 +28,7 @@ def _records(count=50, *, with_ids=True):
     return rows
 
 
-def _classified_and_summary(rows, *, protected_indices=()):
+def _classified_and_summary(rows, *, protected_indices=(), summarized_indices=None):
     protected = set(protected_indices)
     entries = [
         {"status": "protected" if index in protected else "compactable",
@@ -36,6 +36,8 @@ def _classified_and_summary(rows, *, protected_indices=()):
         for index, record in enumerate(rows)
     ]
     compactable = [index for index in range(len(rows)) if index not in protected]
+    if summarized_indices is not None:
+        compactable = sorted(summarized_indices)
     categories = {
         name: {"summary": [], "keywords": []} for name in BASE_ARCHIVE_CATEGORIES
     }
@@ -228,6 +230,178 @@ class ArchivePersistenceTests(unittest.TestCase):
         self.assertEqual(result, {"status": "nothing_to_persist"})
         self.assertEqual(self.archive.read_bytes(), before)
         self.assertFalse(self.archive.with_name("archive.backup.jsonl").exists())
+
+    def test_h_mixed_batch_removes_only_summary_sources(self):
+        rows = _records(6)
+        entries, summary = _classified_and_summary(
+            rows, protected_indices={0, 4}, summarized_indices={1, 5},
+        )
+        entries[3]["status"] = "uncertain"  # Not included in Stage 4.
+        original_entries, original_summary = deepcopy(entries), deepcopy(summary)
+        self.save_rows(rows)
+        result = persistence.persist_compacted_archive(summary, entries)
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["source_turns_removed"], 2)
+        self.assertEqual(result["raw_turns_remaining"], 4)
+        self.assertEqual(self.read_rows()[:-1], [rows[index] for index in (0, 2, 3, 4)])
+        self.assertEqual(entries, original_entries)
+        self.assertEqual(summary, original_summary)
+
+    def test_unknown_classification_on_a_source_aborts(self):
+        rows = _records(2)
+        entries, summary = _classified_and_summary(rows)
+        entries[1]["status"] = "uncertain"
+        self.save_rows(rows)
+        before = self.archive.read_bytes()
+        result = persistence.persist_compacted_archive(summary, entries)
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("classification", result["reason"])
+        self.assertEqual(self.archive.read_bytes(), before)
+
+    def test_conflicting_classifications_of_the_same_source_abort(self):
+        rows = _records(2)
+        entries, summary = _classified_and_summary(rows)
+        entries.append({"status": "protected", "archived_turn": deepcopy(rows[0])})
+        self.save_rows(rows)
+        before = self.archive.read_bytes()
+        result = persistence.persist_compacted_archive(summary, entries)
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("conflicting protection", result["reason"])
+        self.assertEqual(self.archive.read_bytes(), before)
+
+    def test_missing_summary_or_zero_sources_does_not_touch_archive(self):
+        rows = _records(2)
+        entries, empty_summary = _classified_and_summary(rows, summarized_indices=set())
+        self.save_rows(rows)
+        before = self.archive.read_bytes()
+        for result_input in (None, empty_summary):
+            with self.subTest(result_input=result_input):
+                result = persistence.persist_compacted_archive(result_input, entries)
+                self.assertEqual(result, {"status": "nothing_to_persist"})
+                self.assertEqual(self.archive.read_bytes(), before)
+        self.assertFalse(self.archive.with_name("archive.jsonl.lock").exists())
+
+    def test_final_replace_failure_keeps_archive_and_backup(self):
+        rows = _records(2)
+        entries, summary = _classified_and_summary(rows)
+        self.save_rows(rows)
+        before = self.archive.read_bytes()
+        real_replace = persistence.os.replace
+
+        def fail_final_replace(source, destination):
+            if Path(destination) == self.archive:
+                raise OSError("simulated replace failure")
+            return real_replace(source, destination)
+
+        with patch.object(persistence.os, "replace", side_effect=fail_final_replace):
+            result = persistence.persist_compacted_archive(summary, entries)
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("replacing the archive", result["reason"])
+        self.assertEqual(self.archive.read_bytes(), before)
+        self.assertEqual(self.archive.with_name("archive.backup.jsonl").read_bytes(), before)
+
+    def test_final_temp_or_backup_write_failure_preserves_original(self):
+        rows = _records(2)
+        entries, summary = _classified_and_summary(rows)
+        real_write = persistence._write_verified_temp
+        for failing_write in (2, 3):
+            with self.subTest(failing_write=failing_write):
+                self.save_rows(rows)
+                before = self.archive.read_bytes()
+                writes = 0
+
+                def fail_write(directory, data):
+                    nonlocal writes
+                    writes += 1
+                    if writes == failing_write:
+                        raise OSError("simulated write failure")
+                    return real_write(directory, data)
+
+                with patch.object(persistence, "_write_verified_temp", side_effect=fail_write):
+                    result = persistence.persist_compacted_archive(summary, entries)
+                self.assertEqual(result["status"], "failed")
+                self.assertEqual(self.archive.read_bytes(), before)
+
+    def test_summary_read_back_failure_preserves_original(self):
+        rows = _records(2)
+        entries, summary = _classified_and_summary(rows)
+        self.save_rows(rows)
+        before = self.archive.read_bytes()
+        real_read = persistence._read_archive_bytes
+
+        def incorrect_temp_read(path):
+            if Path(path).name.startswith(".archive-stage5-"):
+                return b"incorrect bytes"
+            return real_read(path)
+
+        with patch.object(persistence, "_read_archive_bytes", side_effect=incorrect_temp_read):
+            result = persistence.persist_compacted_archive(summary, entries)
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("temporary archive write", result["reason"])
+        self.assertEqual(self.archive.read_bytes(), before)
+
+    def test_failed_automatic_recovery_keeps_original_in_backup(self):
+        rows = _records(2)
+        entries, summary = _classified_and_summary(rows)
+        self.save_rows(rows)
+        before = self.archive.read_bytes()
+        real_write = persistence._write_verified_temp
+        real_fsync = persistence._fsync_directory
+        writes = 0
+        syncs = 0
+
+        def fail_recovery_write(directory, data):
+            nonlocal writes
+            writes += 1
+            if writes == 4:
+                raise OSError("simulated recovery failure")
+            return real_write(directory, data)
+
+        def fail_post_replace_sync(directory):
+            nonlocal syncs
+            syncs += 1
+            if syncs == 2:
+                raise OSError("simulated verification failure")
+            return real_fsync(directory)
+
+        with patch.object(persistence, "_write_verified_temp", side_effect=fail_recovery_write), \
+                patch.object(persistence, "_fsync_directory", side_effect=fail_post_replace_sync):
+            result = persistence.persist_compacted_archive(summary, entries)
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("recover the original from the backup", result["reason"])
+        self.assertEqual(self.archive.with_name("archive.backup.jsonl").read_bytes(), before)
+
+    def test_retained_record_corruption_or_reordering_aborts_before_replace(self):
+        rows = _records(4)
+        entries, summary = _classified_and_summary(rows, summarized_indices={1, 3})
+        real_write = persistence._write_verified_temp
+        for damage in ("change", "reorder"):
+            with self.subTest(damage=damage):
+                self.save_rows(rows)
+                before = self.archive.read_bytes()
+                writes = 0
+
+                def corrupt_second_temp(directory, data):
+                    nonlocal writes
+                    writes += 1
+                    path = real_write(directory, data)
+                    if writes == 2:
+                        output = [json.loads(line) for line in data.splitlines()]
+                        if damage == "change":
+                            output[0]["turn"]["user"] = "corrupted"
+                        else:
+                            output[0], output[1] = output[1], output[0]
+                        Path(path).write_text(
+                            "".join(json.dumps(record) + "\n" for record in output),
+                            encoding="utf-8",
+                        )
+                    return path
+
+                with patch.object(persistence, "_write_verified_temp", side_effect=corrupt_second_temp):
+                    result = persistence.persist_compacted_archive(summary, entries)
+                self.assertEqual(result["status"], "failed")
+                self.assertIn("Non-source archive records", result["reason"])
+                self.assertEqual(self.archive.read_bytes(), before)
 
     def test_legacy_turns_need_an_exact_unique_match(self):
         rows = _records(2, with_ids=False)

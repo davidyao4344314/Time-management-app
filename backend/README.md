@@ -168,7 +168,10 @@ to make it. Stage 5 makes **no** model call and does not decide anew which
 turns are compactable. It validates the summary, source count and refs, time
 range, and each source's final `compactable` status before touching the
 archive. Missing, duplicate, ambiguous, or protected source matches abort
-without removing raw turns.
+without removing raw turns. Only `source_turn_refs` determine what is removed:
+unreferenced candidates stay raw, including compactable candidates that were
+not included in the summary. Conflicting classifications of the same source
+turn also abort the operation.
 
 The existing Git-ignored `backend/ai_memory_archive.jsonl` now supports two
 record kinds: raw turns (with `turn` and, for new turns, a UUID `turn_id`) and
@@ -190,10 +193,14 @@ place; if post-replacement verification fails, Stage 5 attempts to restore
 it. If restoration itself fails, the backup remains for recovery. Archive,
 backup, lock, and temporary files are ignored by Git. Retrying the same
 source set returns `already_persisted` instead of adding a second summary.
+Before replacement and after read-back, Stage 5 checks every retained record
+against the original to preserve its content and order, and verifies the new
+summary appears exactly once. Failures report which validation or write step
+failed; an absent summary or an empty source list returns `nothing_to_persist`.
 
 Stage 5 is implemented but is **not automatically run** when the Stage 1
 threshold is crossed, and it has not been run on the live archive as part of
-development. To exercise normal success and failure cases A–G safely using
+development. To exercise normal success and failure cases A–H safely using
 temporary files, run:
 
 ```bash

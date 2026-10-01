@@ -54,11 +54,10 @@ def _source_identity(record):
 
 def _validate_final_summary(final_result, classified_candidates):
     """Validate earlier-stage output and bind every ref to a compactable turn."""
+    if final_result is None:
+        return None
     if not isinstance(classified_candidates, list):
         raise _PersistenceError("Final classified candidates must be a list.")
-    if any(not isinstance(entry, dict) or entry.get("status") not in
-           {"protected", "compactable"} for entry in classified_candidates):
-        raise _PersistenceError("Every candidate needs a final protection status.")
 
     review_status = None
     added_category = None
@@ -70,6 +69,8 @@ def _validate_final_summary(final_result, classified_candidates):
         summary = final_result["summary"]
     else:
         summary = final_result
+    if summary is None:
+        return None
     if not isinstance(summary, dict) or summary.get("success") is not True:
         raise _PersistenceError("A successful Stage 4 summary is required.")
 
@@ -78,13 +79,7 @@ def _validate_final_summary(final_result, classified_candidates):
     if isinstance(count, bool) or not isinstance(count, int) or count < 0 \
             or not isinstance(refs, list) or len(refs) != count:
         raise _PersistenceError("Source count and source refs do not agree.")
-    compactable_indices = {
-        index for index, entry in enumerate(classified_candidates)
-        if entry["status"] == "compactable"
-    }
     if count == 0:
-        if compactable_indices:
-            raise _PersistenceError("Compactable turns were omitted from the summary.")
         return None
 
     categories = summary.get("categories")
@@ -136,8 +131,10 @@ def _validate_final_summary(final_result, classified_candidates):
             raise _PersistenceError("Source refs must identify unique candidates.")
         seen_indices.add(index)
         entry = classified_candidates[index]
-        if entry["status"] != "compactable":
-            raise _PersistenceError("A protected turn cannot be removed.")
+        if not isinstance(entry, dict) or entry.get("status") != "compactable":
+            if isinstance(entry, dict) and entry.get("status") == "protected":
+                raise _PersistenceError("A protected turn cannot be removed.")
+            raise _PersistenceError("A source turn has no final compactable classification.")
         record = entry.get("archived_turn")
         if not isinstance(record, dict) or not isinstance(record.get("turn"), dict):
             raise _PersistenceError("A compactable source record is invalid.")
@@ -154,9 +151,19 @@ def _validate_final_summary(final_result, classified_candidates):
         timestamp = ai_memory._archive_timestamp(record)
         if timestamp is not None:
             timestamps.append(timestamp)
-    if seen_indices != compactable_indices:
-        raise _PersistenceError("The summary does not cover every compactable candidate.")
-
+    source_records = [classified_candidates[ref["source_index"]]["archived_turn"]
+                      for ref in resolved_refs]
+    source_ids = {record["turn_id"] for record in source_records if record.get("turn_id")}
+    for entry in classified_candidates:
+        if not isinstance(entry, dict) or not isinstance(entry.get("archived_turn"), dict):
+            continue
+        record = entry["archived_turn"]
+        turn_id = record.get("turn_id")
+        same_source = (isinstance(turn_id, str) and turn_id in source_ids) or any(
+            record == source for source in source_records
+        )
+        if same_source and entry.get("status") != "compactable":
+            raise _PersistenceError("A source turn has conflicting protection classifications.")
     period_start = min(timestamps).isoformat() if timestamps else None
     period_end = max(timestamps).isoformat() if timestamps else None
     if summary.get("period_start") != period_start or summary.get("period_end") != period_end:
@@ -229,6 +236,24 @@ def _append_record(data, record):
     return data + separator + _canonical_bytes(record) + b"\n"
 
 
+def _verify_final_state(original_records, selected_lines, final_records, summary_record):
+    """Check every retained record and its order, not just aggregate counts."""
+    if len(selected_lines) != summary_record["source_turn_count"]:
+        raise _PersistenceError("Removed count does not match the summary source count.")
+    expected = [record for index, record in original_records if index not in selected_lines]
+    expected.append(summary_record)
+    actual = [record for _, record in final_records]
+    if actual != expected:
+        raise _PersistenceError("Non-source archive records or their order changed.")
+    matching_summaries = sum(
+        record.get("record_type") == SUMMARY_RECORD_TYPE
+        and record.get("summary_id") == summary_record["summary_id"]
+        for record in actual
+    )
+    if matching_summaries != 1:
+        raise _PersistenceError("The new summary must appear exactly once.")
+
+
 def _write_verified_temp(directory, data):
     descriptor, path = tempfile.mkstemp(prefix=".archive-stage5-", dir=directory)
     try:
@@ -261,6 +286,7 @@ def _persist_locked(validated, classified_candidates):
     directory = archive_path.parent
     temporary_paths = []
     replaced = False
+    phase = "reading the archive"
     try:
         original_bytes = _read_archive_bytes(archive_path)
         lines, records = _parse_lines(original_bytes)
@@ -283,6 +309,7 @@ def _persist_locked(validated, classified_candidates):
                     "compressed_summary_count": len(existing_summaries),
                 }
 
+        phase = "matching source turns"
         selected_lines, raw_count = _match_raw_sources(
             records, classified_candidates, validated["source_turn_refs"]
         )
@@ -292,26 +319,30 @@ def _persist_locked(validated, classified_candidates):
             "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             **validated,
         }
-        # First fsync and read back a summary-bearing copy with ALL raw turns.
+        # Prepare and validate the complete desired state before writing it.
         prepared_bytes = _append_record(original_bytes, summary_record)
-        prepared_path = _write_verified_temp(directory, prepared_bytes)
-        temporary_paths.append(prepared_path)
-        _, prepared_records = _parse_lines(_read_archive_bytes(prepared_path))
-        if prepared_records[-1][1] != summary_record:
-            raise _PersistenceError("The prepared summary could not be verified.")
-
-        # Only after the summary is verified do we construct a deletion set.
         retained_bytes = b"".join(
             line for line_index, line in enumerate(lines) if line_index not in selected_lines
         )
         final_bytes = _append_record(retained_bytes, summary_record)
+        _, final_records = _parse_lines(final_bytes)
+        _verify_final_state(records, selected_lines, final_records, summary_record)
+
+        # First fsync and read back the summary copy with ALL raw turns retained.
+        phase = "writing and verifying the summary"
+        prepared_path = _write_verified_temp(directory, prepared_bytes)
+        temporary_paths.append(prepared_path)
+        _, prepared_records = _parse_lines(_read_archive_bytes(prepared_path))
+        if [record for _, record in prepared_records] != [record for _, record in records] + [summary_record]:
+            raise _PersistenceError("The prepared summary could not be verified.")
+
+        phase = "writing and verifying the final temporary archive"
         final_path = _write_verified_temp(directory, final_bytes)
         temporary_paths.append(final_path)
         _, final_records = _parse_lines(_read_archive_bytes(final_path))
-        if sum("turn" in record for _, record in final_records) != raw_count - len(selected_lines) \
-                or final_records[-1][1] != summary_record:
-            raise _PersistenceError("The final archive state could not be verified.")
+        _verify_final_state(records, selected_lines, final_records, summary_record)
 
+        phase = "writing and verifying the backup"
         backup_temp = _write_verified_temp(directory, original_bytes)
         temporary_paths.append(backup_temp)
         os.replace(backup_temp, backup_path)
@@ -319,11 +350,16 @@ def _persist_locked(validated, classified_candidates):
         if _read_archive_bytes(backup_path) != original_bytes:
             raise _PersistenceError("The archive backup could not be verified.")
 
+        phase = "replacing the archive"
         os.replace(final_path, archive_path)
         replaced = True
+        phase = "verifying the replaced archive"
         _fsync_directory(directory)
-        if _read_archive_bytes(archive_path) != final_bytes:
+        saved_bytes = _read_archive_bytes(archive_path)
+        if saved_bytes != final_bytes:
             raise _PersistenceError("The final archive write could not be verified.")
+        _, saved_records = _parse_lines(saved_bytes)
+        _verify_final_state(records, selected_lines, saved_records, summary_record)
         result = {
             "status": "success",
             "summary_id": summary_record["summary_id"],
@@ -337,7 +373,7 @@ def _persist_locked(validated, classified_candidates):
             result["raw_turns_remaining"],
         )
         return result
-    except Exception:
+    except Exception as error:
         if replaced:
             try:
                 recovery_temp = _write_verified_temp(directory, original_bytes)
@@ -348,7 +384,8 @@ def _persist_locked(validated, classified_candidates):
                     raise _PersistenceError("Restored archive verification failed.")
             except Exception:
                 return _failed("Archive verification failed; recover the original from the backup file.")
-        return _failed("Archive persistence failed; original raw turns were preserved.")
+        detail = str(error) if isinstance(error, _PersistenceError) else f"Failed while {phase}."
+        return _failed(f"{detail} Original raw turns were preserved.")
     finally:
         for path in temporary_paths:
             if os.path.exists(path):
@@ -360,10 +397,12 @@ def _persist_locked(validated, classified_candidates):
 
 
 def persist_compacted_archive(final_result, classified_candidates):
-    """Persist a verified Stage 4/4.5 summary without reclassifying any turn."""
+    """Persist only a verified summary's sources; leave other candidates raw."""
     try:
         validated = _validate_final_summary(final_result, classified_candidates)
-    except (ValueError, TypeError, _PersistenceError):
+    except _PersistenceError as error:
+        return _failed(f"{error} Archive unchanged.")
+    except (ValueError, TypeError):
         return _failed("The summary or source-turn validation failed; archive unchanged.")
     if validated is None:
         return {"status": "nothing_to_persist"}

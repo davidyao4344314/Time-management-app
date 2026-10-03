@@ -48,15 +48,14 @@ def local_history(connection, conversation_id, owner_id, selection, *, recent_tu
 def retrieve_for_chat(connection, owner_id, conversation_id, selection, *, recent_turns=()):
     storage.require_conversation(connection, conversation_id, owner_id)
     selected = MemorySelection.model_validate(selection)
+    excluded = {str(uuid5(UUID(conversation_id), turn['request_id']))
+                for turn in recent_turns if turn.get('request_id')}
     if selected.scope == 'current_chat':
         result = local_history(connection, conversation_id, owner_id, selection, recent_turns=recent_turns)
     else:
         authorized = storage.shared_conversation_ids(connection, owner_id)
-        result = search_memory(selection, session_id=conversation_id, authorized_sessions=authorized)
-    excluded = set()
-    for turn in recent_turns:
-        if turn.get('request_id'):
-            excluded.add(str(uuid5(UUID(conversation_id), turn['request_id'])))
+        result = search_memory(selection, session_id=conversation_id, authorized_sessions=authorized,
+                               excluded_ref_ids=excluded)
     result['items'] = [item for item in result['items'] if not (
         item.get('source_refs') and set(item['source_refs']) <= excluded
         and item.get('source_ref_count', len(item['source_refs'])) == len(item['source_refs']))]

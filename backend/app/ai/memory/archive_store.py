@@ -18,7 +18,22 @@ def archive_write_lock():
         yield
 
 
-def iter_archive_records(*, session_id=None, strict=False):
+def record_session_id(record):
+    """Reject ambiguous summary ownership even when several chats are authorized."""
+    if record.get('record_type') == 'compressed_summary':
+        refs = record.get('source_turn_refs')
+        if not isinstance(refs, list) or not refs:
+            return None
+        identities = {ref.get('session_id') for ref in refs if isinstance(ref, dict)
+                      and isinstance(ref.get('session_id'), str) and ref['session_id']}
+        if len(identities) != 1 or any(not isinstance(ref, dict) or ref.get('session_id') not in identities for ref in refs):
+            return None
+        return next(iter(identities))
+    identity = record.get('session_id')
+    return identity if isinstance(identity, str) and identity else None
+
+
+def iter_archive_records(*, session_id=None, strict=False, authorized_sessions=None):
     """Read a locked snapshot of records without changing archive contents.
 
     Session-scoped reads exclude legacy summaries with ambiguous ownership.
@@ -26,6 +41,13 @@ def iter_archive_records(*, session_id=None, strict=False):
     """
     if session_id is not None and (not isinstance(session_id, str) or not session_id):
         raise ValueError("A nonempty session ID is required for a scoped read.")
+    if session_id is not None and authorized_sessions is not None:
+        raise ValueError('Supply one authorization scope.')
+    allowed = set(authorized_sessions) if authorized_sessions is not None else ({session_id} if session_id is not None else None)
+    if allowed is not None and not all(isinstance(value, str) and value for value in allowed):
+        raise ValueError('Authorized sessions must be nonempty identifiers.')
+    if allowed == set():
+        return
     try:
         descriptor = os.open(
             ARCHIVE_FILE, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
@@ -45,16 +67,8 @@ def iter_archive_records(*, session_id=None, strict=False):
                     continue
                 if not isinstance(record, dict):
                     continue
-                if session_id is not None:
-                    if record.get("record_type") == "compressed_summary":
-                        refs = record.get("source_turn_refs")
-                        if not isinstance(refs, list) or not refs or not all(
-                            isinstance(ref, dict) and ref.get("session_id") == session_id
-                            for ref in refs
-                        ):
-                            continue
-                    elif record.get("session_id") != session_id:
-                        continue
+                if allowed is not None and record_session_id(record) not in allowed:
+                    continue
                 yield position, record
         finally:
             fcntl.flock(archive.fileno(), fcntl.LOCK_UN)

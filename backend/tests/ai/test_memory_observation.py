@@ -52,6 +52,28 @@ def durable(record):
 
 
 class MemoryObservationTests(unittest.TestCase):
+    def test_cross_chat_search_reads_each_source_once_and_rejects_mixed_summary(self):
+        first, second, outsider = raw(session='one'), raw(session='two'), raw(session='other')
+        mixed = summary(first)
+        mixed['source_turn_refs'].append(ref(second))
+        self.save([first, second, outsider, mixed], [durable(first), durable(second), durable(outsider)])
+        with patch.object(archive_store, 'iter_archive_records', wraps=archive_store.iter_archive_records) as archive_reader, \
+             patch.object(durable_store, '_read_archive_bytes', wraps=durable_store._read_archive_bytes) as durable_reader:
+            result = search_memory(route(), session_id='one', authorized_sessions=['one','two'], now=NOW)
+        self.assertEqual(archive_reader.call_count, 2)  # raw + compressed, regardless of chat count
+        self.assertEqual(durable_reader.call_count, 1)
+        self.assertTrue(all(item['conversation_id'] in {'one','two'} for item in result['items']))
+        self.assertNotIn(mixed['summary_id'], [item['id'] for item in result['items']])
+
+    def test_recent_evidence_is_excluded_before_result_limit(self):
+        records = [raw(f'COMPSCI {number}') for number in range(8)]
+        self.save(records)
+        excluded = {record['turn_id'] for record in records[-5:]}
+        result = search_memory(route(['raw_archive']), session_id='one', authorized_sessions=['one'],
+                               excluded_ref_ids=excluded, now=NOW)
+        self.assertEqual(len(result['items']), 3)
+        self.assertFalse(excluded.intersection(item['id'] for item in result['items']))
+
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)

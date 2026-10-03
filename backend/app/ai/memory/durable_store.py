@@ -30,13 +30,23 @@ def read_durable_memories(*, session_id):
     """Read one session's validated durable records; never initialize a store."""
     if not isinstance(session_id, str) or not session_id:
         raise ValueError("A session ID is required.")
+    return read_authorized_durable_memories([session_id])
+
+
+def read_authorized_durable_memories(session_ids):
+    """Read and validate one snapshot for all authorized chats."""
+    allowed = set(session_ids)
+    if not allowed:
+        return []
+    if not all(isinstance(identity, str) and identity for identity in allowed):
+        raise ValueError('A session ID is required.')
     try:
         data = _read_archive_bytes(DURABLE_MEMORY_FILE)
     except FileNotFoundError:
         return []
     store = DurableMemoryStore.model_validate(json.loads(data))
     return [memory.model_dump() for memory in store.durable_memories
-            if all(ref.session_id == session_id for ref in memory.source_turn_refs)]
+            if memory.source_turn_refs[0].session_id in allowed]
 
 
 def _normalized_content(content):

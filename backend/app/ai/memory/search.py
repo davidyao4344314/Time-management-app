@@ -9,7 +9,7 @@ from backend.app.infrastructure.clock import LOCAL_TIMEZONE
 from backend.app.ai.memory import archive_store as ai_memory
 from backend.app.infrastructure.privacy import redact_secrets
 from backend.app.ai.memory.contracts import MemoryRequest, MemorySelection, ArchiveCategorySummary, SourceTurnReference
-from backend.app.ai.memory.durable_store import read_durable_memories
+from backend.app.ai.memory.durable_store import read_durable_memories, read_authorized_durable_memories
 from backend.app.ai.memory.records import source_identity
 from backend.app.infrastructure.errors import MemoryUtilityError
 from backend.app.ai.memory.search_helpers import (
@@ -94,12 +94,13 @@ def search_archived_memory(memory_request, *, session_id, limit=5, now=None):
     return {"retrieved_archive": [item[3] for item in best]}
 
 
-def _raw_candidates(request, session_id, now, *, strict=False):
+def _raw_candidates(request, session_id, now, *, strict=False, records=None):
     start, end = resolve_time_reference(request.time_reference, now=now)
     terms = [term.casefold() for term in request.search_terms]
 
-    records = (ai_memory.iter_archive_records(session_id=session_id, strict=True) if strict
-               else ai_memory.iter_archived_turns(session_id=session_id))
+    if records is None:
+        records = (ai_memory.iter_archive_records(session_id=session_id, strict=True) if strict
+                   else ai_memory.iter_archived_turns(session_id=session_id))
     for position, record in records:
         turn = record.get("turn")
         if not isinstance(turn, dict):
@@ -132,12 +133,12 @@ def _reference_ids(refs):
     ))
 
 
-def _memory_candidates(source, request, session_id, now):
+def _memory_candidates(source, request, session_id, now, *, records=None, include_conversation=False):
     terms = [term.casefold() for term in request.search_terms]
     start, end = resolve_time_reference(request.time_reference, now=now)
     if source == "raw_archive":
         for _, record, timestamp, user, assistant, score in _raw_candidates(
-            request, session_id, now, strict=True
+            request, session_id, now, strict=True, records=records
         ):
             identity = source_identity(record)
             item_id = identity["turn_id"] or identity["record_sha256"]
@@ -146,15 +147,17 @@ def _memory_candidates(source, request, session_id, now):
                 "text": "User: " + _excerpt(user, terms) + "\nAssistant: " + _excerpt(assistant, terms),
                 "timestamp": timestamp.isoformat() if timestamp else None,
                 "precision": "conversation", "source_refs": [item_id],
+                **({'conversation_id':record['session_id']} if include_conversation else {}),
             }
         return
 
-    if source == "durable":
-        records = read_durable_memories(session_id=session_id)
-    else:
-        records = (record for _, record in ai_memory.iter_archive_records(
-            session_id=session_id, strict=True
-        ) if record.get("record_type") == "compressed_summary")
+    if records is None:
+        if source == "durable":
+            records = read_durable_memories(session_id=session_id)
+        else:
+            records = (record for _, record in ai_memory.iter_archive_records(
+                session_id=session_id, strict=True
+            ) if record.get("record_type") == "compressed_summary")
 
     for record in records:
         refs = record.get("source_turn_refs", [])
@@ -193,10 +196,11 @@ def _memory_candidates(source, request, session_id, now):
         if not text.strip() or (terms and score == 0):
             continue
         yield score, {"source": source, **metadata, "text": _excerpt(text, terms),
-                      "source_refs": ref_ids[:5], "source_ref_count": len(ref_ids)}
+                      "source_refs": ref_ids[:5], "source_ref_count": len(ref_ids),
+                      **({'conversation_id':refs[0]['session_id']} if include_conversation else {})}
 
 
-def search_memory(selection, *, session_id, now=None, authorized_sessions=None):
+def search_memory(selection, *, session_id, now=None, authorized_sessions=None, excluded_ref_ids=()):
     """Read selected stores, rank/deduplicate, and cap the complete observation."""
     selected = MemorySelection.model_validate(selection)
     if not isinstance(session_id, str) or not session_id:
@@ -207,17 +211,27 @@ def search_memory(selection, *, session_id, now=None, authorized_sessions=None):
     truncated = False
     priority = {"raw_archive": 3, "durable": 2, "compressed_archive": 1}
     sessions = list(dict.fromkeys(authorized_sessions)) if authorized_sessions is not None else [session_id]
+    excluded = set(excluded_ref_ids)
     for source in selected.sources:
         try:
             # Retain only a small candidate pool, not the whole raw archive.
             pool = []
             def candidates_for_sessions():
-                for identity in sessions:
-                    for score, item in _memory_candidates(source, selected.query, identity, now):
-                        if authorized_sessions is not None:
-                            item = {**item, 'conversation_id': identity}
-                        yield score, item
+                if authorized_sessions is None:
+                    yield from _memory_candidates(source, selected.query, session_id, now)
+                    return
+                if source == 'durable':
+                    records = read_authorized_durable_memories(sessions)
+                else:
+                    snapshot = ai_memory.iter_archive_records(authorized_sessions=sessions, strict=True)
+                    records = snapshot if source == 'raw_archive' else (
+                        record for _, record in snapshot if record.get('record_type') == 'compressed_summary')
+                yield from _memory_candidates(source, selected.query, session_id, now,
+                                              records=records, include_conversation=True)
             for position, (score, item) in enumerate(candidates_for_sessions()):
+                refs = set(item['source_refs'])
+                if refs and refs <= excluded and item.get('source_ref_count', len(refs)) == len(refs):
+                    continue
                 stamp = _parse_timestamp(item.get("timestamp") or item.get("period_end"))
                 recency = stamp.timestamp() if stamp else float("-inf")
                 ranked = (score, priority[source], recency, position, item)

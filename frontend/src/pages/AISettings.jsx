@@ -19,6 +19,10 @@ const effortLabels = {
 
 function AISettings() {
   const keyInput = useRef(null)
+  const keyRequest = useRef(null)
+  const [configured, setConfigured] = useState(null)
+  const [loadingKeyStatus, setLoadingKeyStatus] = useState(true)
+  const [isSavingKey, setIsSavingKey] = useState(false)
   const [saveError, setSaveError] = useState('')
   const [saveMessage, setSaveMessage] = useState('')
   const [models, setModels] = useState([])
@@ -33,6 +37,30 @@ function AISettings() {
   const [memoryError, setMemoryError] = useState('')
   const [memoryMessage, setMemoryMessage] = useState('')
   const [isSavingMemory, setIsSavingMemory] = useState(false)
+
+  useEffect(() => {
+    const controller = new AbortController()
+    async function loadKeyStatus() {
+      try {
+        const response = await fetch('/api/ai/config/status', {
+          signal: controller.signal, cache: 'no-store',
+        })
+        if (!response.ok) throw new Error()
+        const result = await response.json()
+        if (typeof result.configured !== 'boolean') throw new Error()
+        setConfigured(result.configured)
+      } catch (error) {
+        if (error.name !== 'AbortError') setSaveError('Could not check configuration. Is the backend running?')
+      } finally {
+        if (!controller.signal.aborted) setLoadingKeyStatus(false)
+      }
+    }
+    loadKeyStatus()
+    return () => {
+      controller.abort()
+      keyRequest.current?.abort()
+    }
+  }, [])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -143,8 +171,9 @@ function AISettings() {
     }
   }
 
-  function handleSave(event) {
+  async function handleSave(event) {
     event.preventDefault()
+    if (keyRequest.current) return
     setSaveError('')
     setSaveMessage('')
 
@@ -154,17 +183,46 @@ function AISettings() {
       return
     }
 
-    // Placeholder only: do not send or store the secret.
-    keyInput.current.value = ''
-    setSaveMessage('API key ready to be saved.')
+    const controller = new AbortController()
+    keyRequest.current = controller
+    setIsSavingKey(true)
+    try {
+      const request = fetch('/api/ai/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        cache: 'no-store',
+        signal: controller.signal,
+        body: JSON.stringify({ api_key: keyInput.current.value.trim() }),
+      })
+      // Never persist the secret in browser storage or keep it in React state.
+      keyInput.current.value = ''
+      const response = await request
+      if (!response.ok) {
+        setSaveError(response.status === 400 || response.status === 422
+          ? 'Enter a valid API key without spaces.'
+          : 'Could not save the API key locally. Check the backend and file permissions.')
+        return
+      }
+      const result = await response.json()
+      if (result.configured !== true) throw new Error()
+      setConfigured(true)
+      setSaveMessage('API key saved locally. This does not verify the key with OpenAI.')
+    } catch (error) {
+      if (error.name !== 'AbortError') setSaveError('Could not confirm the save. Check the backend, then reload to check the status.')
+    } finally {
+      if (keyInput.current) keyInput.current.value = ''
+      keyRequest.current = null
+      if (!controller.signal.aborted) setIsSavingKey(false)
+    }
   }
 
   return (
     <main className="page">
       <h2>AI Settings</h2>
       <section className="ai-settings">
-        <p>Not configured</p>
-        <p id="ai-settings-note">Frontend placeholder only. No API key is saved.</p>
+        <p role="status">{loadingKeyStatus ? 'Checking configuration...' : configured === null ? 'Configuration status unavailable' : configured ? 'Configured' : 'Not configured'}</p>
+        <p id="ai-settings-note">Saved only in the backend's local .env file. The stored key is never returned to this page. Leave blank to keep your existing key.</p>
 
         <form className="ai-settings-form" onSubmit={handleSave} noValidate>
           <label htmlFor="openai-api-key">OpenAI API Key</label>
@@ -177,8 +235,11 @@ function AISettings() {
             spellCheck={false}
             aria-describedby="ai-settings-note"
             required
+            disabled={isSavingKey || loadingKeyStatus}
           />
-          <button type="submit">Save API Key</button>
+          <button type="submit" disabled={isSavingKey || loadingKeyStatus}>
+            {isSavingKey ? 'Saving...' : 'Save API Key'}
+          </button>
         </form>
         {saveError && <p role="alert">{saveError}</p>}
         {saveMessage && <p role="status">{saveMessage}</p>}

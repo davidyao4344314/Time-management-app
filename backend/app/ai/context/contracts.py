@@ -5,6 +5,9 @@ from pydantic import BaseModel, ConfigDict, model_validator
 from backend.app.ai.memory.contracts import MemorySelection
 
 
+ExamScope = Literal["today", "tomorrow", "week", "this_week", "next_week", "month", "upcoming"]
+
+
 class AgentRoutingDecision(BaseModel):
     """Scheduling and optional memory selection shared by Stage 2 and Stage 3."""
 
@@ -17,7 +20,16 @@ class AgentRoutingDecision(BaseModel):
     time_scope: Literal["today", "tomorrow", "week", "this_week", "next_week", "month", "all", "unspecified"]
     include_activities: bool
     include_exams: bool
+    # Separate exam deadlines from the requested activity/study window. None
+    # preserves compatibility with older classifier results and callers.
+    exam_scope: ExamScope | None = None
     memory: MemorySelection | None = None
+
+    @model_validator(mode="after")
+    def consistent_exam_selection(self):
+        if not self.include_exams and self.exam_scope is not None:
+            raise ValueError("An excluded exam observation cannot have a scope.")
+        return self
 
 
 class AgentIntentClassification(AgentRoutingDecision):
@@ -41,7 +53,7 @@ class ContextSelection(BaseModel):
 
     activities_scope: Literal["today", "tomorrow", "week", "this_week", "next_week", "month", "all"] | None
     include_exams: bool
-    exam_scope: Literal["today", "tomorrow", "week", "this_week", "next_week", "month", "upcoming"] | None
+    exam_scope: ExamScope | None
     memory: MemorySelection | None = None
 
     @model_validator(mode="after")

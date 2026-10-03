@@ -171,7 +171,9 @@ class AIProposalTests(unittest.TestCase):
             "include_activities": True, "include_exams": False,
             "confidence": "high",
         }
-        self.assertEqual(ai_intent_classifier.validate_intent_classification(valid).model_dump(), {**valid, "memory": None})
+        self.assertEqual(ai_intent_classifier.validate_intent_classification(valid).model_dump(), {
+            **valid, "memory": None, "exam_scope": None,
+        })
         invalid = (
             {**valid, "intent": "career_advice"},
             {**valid, "time_scope": "year"},
@@ -394,6 +396,7 @@ class AIProposalTests(unittest.TestCase):
         self.assertEqual(decision.model_dump(), {
             "intent": "activity_query", "time_scope": "week",
             "include_activities": True, "include_exams": False,
+            "exam_scope": None,
             "memory": None,
         })
 

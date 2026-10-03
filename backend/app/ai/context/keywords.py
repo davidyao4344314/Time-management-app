@@ -94,6 +94,7 @@ def _choose_keyword_context(user_message, excluded_sources):
 
     include_exams = asks_exams or time_scope is None or _has_phrase(message, STUDY_WORDS)
     exam_scope = (
+        "upcoming" if asks_study else
         time_scope if asks_exams and time_scope in {"week", "this_week", "next_week", "tomorrow", "month"}
         or (asks_exams and time_scope == "today" and activities_scope is None)
         else "upcoming"
@@ -138,8 +139,12 @@ def assess_stage_one(user_message, recent_turns=None):
     ):
         reason = "negated_exam_reference"
     elif sum(bool(_has_phrase(message, phrases)) for phrases in
-             (TODAY_PHRASES, WEEK_PHRASES, MONTH_PHRASES)) > 1:
+             (TODAY_PHRASES, WEEK_PHRASES, MONTH_PHRASES, ("tomorrow",))) > 1:
         reason = "conflicting_time_scopes"
+    elif (_has_phrase(message, STUDY_WORDS) and _has_phrase(message, EXAM_WORDS)
+          and _has_phrase(message, ("what exams", "which exams", "show exams", "list exams",
+                                   "what tests", "which tests", "show tests", "list tests"))):
+        reason = "independent_exam_horizon"
     elif recent_turns and re.search(r"\b(?:it|that|those|same|other stuff)\b", message):
         reason = "depends_on_recent_conversation"
     else:

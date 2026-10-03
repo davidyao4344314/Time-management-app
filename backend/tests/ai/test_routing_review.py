@@ -18,7 +18,7 @@ class RoutingReviewTests(unittest.TestCase):
             'Last time we discussed my exam. What is its current date?')['memory'])
 
     def test_exam_only_scopes_agree(self):
-        for scope, phrase in (("today", "today"), ("week", "this week"), ("month", "this month")):
+        for scope, phrase in (("today", "today"), ("this_week", "this week"), ("next_week", "next week"), ("month", "this month")):
             with self.subTest(scope=scope):
                 expected = context_from_classification({
                     "intent": "exam_query", "time_scope": scope,

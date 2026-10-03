@@ -22,17 +22,16 @@ def _exam_date(value):
 def build_exam_observation(connection, scope="upcoming"):
     """Return relevant exams for the requested period, at most 20 detailed."""
     today = get_current_date()
-    end_date = (
-        today + timedelta(days=30) if scope == "upcoming"
-        else observation_date_range(today, scope)[1]
-    )
+    first_date, end_date = ((today, today + timedelta(days=30)) if scope == "upcoming"
+                            else observation_date_range(today, scope))
+    first_date = max(first_date, today)
     current_time = get_current_time()
     relevant = []
     seen = set()
 
     for exam in get_all_exams(connection):
         exam_date = _exam_date(exam[4])
-        if exam_date is None or not today <= exam_date <= end_date:
+        if exam_date is None or not first_date <= exam_date <= end_date:
             continue
 
         # A date-only exam remains relevant all day. A timed exam that has

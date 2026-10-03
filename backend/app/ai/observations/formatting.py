@@ -23,6 +23,13 @@ def observation_date_range(today, scope):
     """Return the remaining dates for a today, rolling-week, or month scope."""
     if scope == "today":
         return today, today
+    if scope == "tomorrow":
+        return today + timedelta(days=1), today + timedelta(days=1)
+    if scope in {"this_week", "next_week"}:
+        monday = today - timedelta(days=today.weekday())
+        if scope == "next_week":
+            monday += timedelta(days=7)
+        return monday, monday + timedelta(days=6)
     if scope == "week":
         return today, today + timedelta(days=6)
     if scope == "month":

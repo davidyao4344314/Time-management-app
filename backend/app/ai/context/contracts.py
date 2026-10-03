@@ -14,7 +14,7 @@ class AgentRoutingDecision(BaseModel):
         "study_planning", "schedule_query", "exam_query",
         "activity_query", "general_question",
     ]
-    time_scope: Literal["today", "week", "month", "all", "unspecified"]
+    time_scope: Literal["today", "tomorrow", "week", "this_week", "next_week", "month", "all", "unspecified"]
     include_activities: bool
     include_exams: bool
     memory: MemorySelection | None = None
@@ -39,9 +39,9 @@ def validate_routing_decision(value):
 class ContextSelection(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    activities_scope: Literal["today", "week", "month", "all"] | None
+    activities_scope: Literal["today", "tomorrow", "week", "this_week", "next_week", "month", "all"] | None
     include_exams: bool
-    exam_scope: Literal["today", "week", "month", "upcoming"] | None
+    exam_scope: Literal["today", "tomorrow", "week", "this_week", "next_week", "month", "upcoming"] | None
     memory: MemorySelection | None = None
 
     @model_validator(mode="after")

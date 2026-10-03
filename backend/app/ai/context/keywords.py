@@ -7,7 +7,7 @@ TODAY_PHRASES = (
     "today", "tonight", "this evening", "this afternoon", "this morning",
     "later today", "today's",
 )
-WEEK_PHRASES = ("this week", "week", "next few days", "upcoming week")
+WEEK_PHRASES = ("this week", "next week", "week", "next few days", "upcoming week")
 MONTH_PHRASES = ("this month", "month", "rest of the month", "later this month")
 EXAM_WORDS = (
     "exam", "exams", "test", "tests", "assessment", "assessments",
@@ -60,7 +60,13 @@ def choose_agent_context(user_message):
             "exam_scope": "upcoming" if include_exams else None,
         }
 
-    if _has_phrase(message, MONTH_PHRASES):
+    if _has_phrase(message, ("next week", "upcoming week")):
+        time_scope = "next_week"
+    elif _has_phrase(message, ("this week",)):
+        time_scope = "this_week"
+    elif _has_phrase(message, ("tomorrow",)):
+        time_scope = "tomorrow"
+    elif _has_phrase(message, MONTH_PHRASES):
         time_scope = "month"
     elif _has_phrase(message, WEEK_PHRASES):
         time_scope = "week"
@@ -71,14 +77,14 @@ def choose_agent_context(user_message):
 
     if asks_exams and time_scope is None:
         activities_scope = None
-    elif asks_exams and time_scope in {"today", "week", "month"} and not asks_study:
+    elif asks_exams and time_scope is not None and not asks_study:
         activities_scope = None
     else:
         activities_scope = time_scope or "today"
 
     include_exams = asks_exams or time_scope is None or _has_phrase(message, STUDY_WORDS)
     exam_scope = (
-        time_scope if asks_exams and time_scope in {"week", "month"}
+        time_scope if asks_exams and time_scope in {"week", "this_week", "next_week", "tomorrow", "month"}
         or (asks_exams and time_scope == "today" and activities_scope is None)
         else "upcoming"
     ) if include_exams else None
@@ -98,7 +104,7 @@ def assess_stage_one(user_message, recent_turns=None):
     if re.fullmatch(r"\s*what did i just say[?.!\s]*", message):
         return {"selection": selection, "confident": True, "reason": None}
     phrase_groups = (
-        TODAY_PHRASES, WEEK_PHRASES, MONTH_PHRASES, EXAM_WORDS,
+        TODAY_PHRASES, WEEK_PHRASES, MONTH_PHRASES, ("tomorrow",), EXAM_WORDS,
         ALL_ACTIVITY_PHRASES, ALL_CONTEXT_PHRASES, STUDY_WORDS,
     )
     if (_memory_selection(message) is not None and _mixed_memory_request(message)

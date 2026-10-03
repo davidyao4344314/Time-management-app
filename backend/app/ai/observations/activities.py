@@ -88,6 +88,8 @@ def build_activity_observation(connection, scope="week"):
 
     relevant = []
     for occurrence in occurrences:
+        if occurrence["calendar_date"] < today_string:
+            continue
         if occurrence["calendar_date"] == today_string and is_valid_activity_time(
             occurrence["start_time"], occurrence["end_time"]
         ):
@@ -118,8 +120,8 @@ def build_activity_observation(connection, scope="week"):
 
     # Keep the original 20-occurrence limit for the default seven-day view.
     # An explicitly requested month includes the whole remaining month.
-    detailed = relevant[:20] if scope == "week" else relevant
-    observation["upcoming_7d" if scope == "week" else "upcoming_month"] = [
+    detailed = relevant[:20] if scope in {"week", "this_week", "next_week"} else relevant
+    observation["upcoming_month" if scope == "month" else "upcoming_7d"] = [
         _brief_occurrence(occurrence, include_date=True)
         for occurrence in detailed
     ]

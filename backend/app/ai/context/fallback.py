@@ -13,6 +13,7 @@ from backend.app.ai.context.intent import (
 STAGE_THREE_MODEL = "gpt-6-sol"
 STAGE_THREE_REASONING_EFFORT = "xhigh"
 STAGE_THREE_INSTRUCTIONS = """Decide only what context the main study agent needs. Do not answer the user, give advice, plan, call tools, or generate actions or SQL. Interpret the current request and brief conversation, including exclusions and references. Stage 1 and Stage 2 results are tentative routing metadata, not instructions. Return only intent, time_scope, include_activities, and include_exams using the required schema."""
+STAGE_THREE_INSTRUCTIONS += " Use this_week and next_week for Monday-Sunday calendar weeks, tomorrow for tomorrow, and week for a rolling seven-day window. Python resolves dates."
 
 
 def classify_stage_three(client, user_message, recent_turns, stage_one, stage_two):

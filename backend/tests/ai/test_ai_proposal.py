@@ -439,7 +439,7 @@ class AIProposalTests(unittest.TestCase):
         cases = (
             ("What should I do today?", "today", False, None),
             ("What should I study tonight?", "today", True, "upcoming"),
-            ("What do I have this week?", "week", False, None),
+            ("What do I have this week?", "this_week", False, None),
             ("What am I doing this month?", "month", False, None),
             ("What exams do I have?", None, True, "upcoming"),
             ("What exams do I have this month?", None, True, "month"),
@@ -585,7 +585,7 @@ class AIProposalTests(unittest.TestCase):
 
     def test_request_builds_only_selected_observations(self):
         cases = (
-            ("What do I have this week?", "week", None),
+            ("What do I have this week?", "this_week", None),
             ("What exams do I have this month?", None, "month"),
             ("Look at all my activities and exams.", "all", "upcoming"),
         )

@@ -12,3 +12,8 @@ backend/ai_durable_memories.json.lock
 backend/ai_durable_memories.backup.json
 __pycache__/
 *.pyc
+backend/study_app.db
+backend/app/study_app.db
+*.db-wal
+*.db-shm
+*.db-journal

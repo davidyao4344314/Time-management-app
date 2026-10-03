@@ -68,6 +68,14 @@ class ArchitectureTests(unittest.TestCase):
             elif module.startswith(("backend.app.planner.", "backend.app.integrations.",
                                     "backend.app.screen_time.")):
                 forbidden = ("backend.app.ai", "backend.app.api", "backend.app.server")
+            elif module.startswith('backend.app.conversations.'):
+                forbidden = ('backend.app.api', 'backend.app.server')
+                if module.endswith(('.storage', '.contracts')):
+                    forbidden += ('backend.app.ai', 'backend.app.planner',
+                                  'backend.app.conversations.service', 'backend.app.conversations.summary',
+                                  'backend.app.conversations.memory_export', 'backend.app.conversations.legacy')
+            elif module == 'backend.app.database':
+                forbidden = ('backend.app.conversations', 'backend.app.ai', 'backend.app.api')
             else:
                 continue
             with self.subTest(module=module):
@@ -82,6 +90,15 @@ class ArchitectureTests(unittest.TestCase):
         self.assertNotIn("backend.app.ai.memory.compaction", graph["backend.app.ai.memory.compaction_plan"])
         self.assertFalse(any(dependency.startswith("backend.app.api")
                              for dependency in graph["backend.app.planner.activity_service"]))
+
+    def test_conversation_orchestrators_do_not_embed_sql(self):
+        for name in ('service', 'summary', 'memory_export', 'legacy', 'memory_context', 'context'):
+            tree = ast.parse((APP_DIRECTORY / 'conversations' / f'{name}.py').read_text())
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in {'execute', 'executemany', 'executescript'}:
+                    # Connection setup is allowed; all business SQL belongs to storage.
+                    self.assertTrue(node.args and isinstance(node.args[0], ast.Constant)
+                                    and node.args[0].value == 'PRAGMA foreign_keys=ON', name)
 
     def test_legacy_imports_resolve_to_canonical_implementations(self):
         from backend.app import (

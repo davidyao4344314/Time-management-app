@@ -179,8 +179,6 @@ def create_connection():
     add_external_id_storage(connection)
     allow_null_times(connection)
     add_screen_time_storage(connection)
-    from backend.app.conversations.storage import migrate
-    migrate(connection)
     connection.execute("PRAGMA foreign_keys = ON")
 
     return connection
@@ -209,5 +207,3 @@ def create_tables(connection):
 
     # Save the database changes.
     connection.commit()
-    from backend.app.conversations.storage import migrate
-    migrate(connection)

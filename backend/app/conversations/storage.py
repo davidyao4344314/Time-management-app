@@ -301,6 +301,20 @@ def conversation_exists(connection, conversation_id):
     return connection.execute('SELECT 1 FROM conversations WHERE conversation_id=?', (conversation_id,)).fetchone() is not None
 
 
+def shared_conversation_ids(connection, owner_id):
+    return [row[0] for row in connection.execute('''SELECT conversation_id FROM conversations
+        WHERE owner_id=? AND memory_sharing_enabled=1''', (owner_id,))]
+
+
+def history_rows(connection, conversation_id, owner_id):
+    require_conversation(connection, conversation_id, owner_id)
+    return connection.execute('''SELECT u.content,a.content,a.created_at,a.message_id,u.request_id
+        FROM conversation_messages u JOIN conversation_messages a
+        ON u.conversation_id=a.conversation_id AND u.request_id=a.request_id
+        WHERE u.conversation_id=? AND u.role='user' AND a.role='assistant'
+        AND u.status='completed' AND a.status='completed' ''', (conversation_id,))
+
+
 def insert_legacy_conversation(connection, owner_id, legacy_id, turns):
     """Idempotent import of dated legacy messages with stable identifiers."""
     if owner_id != legacy_id:

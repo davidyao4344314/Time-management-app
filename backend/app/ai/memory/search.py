@@ -12,10 +12,12 @@ from backend.app.ai.memory.contracts import MemoryRequest, MemorySelection, Arch
 from backend.app.ai.memory.durable_store import read_durable_memories
 from backend.app.ai.memory.records import source_identity
 from backend.app.infrastructure.errors import MemoryUtilityError
+from backend.app.ai.memory.search_helpers import (
+    parse_timestamp as _parse_timestamp, excerpt as _excerpt, keyword_score, MAX_TEXT_CHARS,
+)
 
 
 MAX_RESULTS = 5
-MAX_TEXT_CHARS = 600
 MAX_CONTEXT_CHARS = 8000
 
 
@@ -54,31 +56,6 @@ def resolve_time_reference(time_reference, *, now=None):
         datetime.combine(start, time.min, tzinfo=LOCAL_TIMEZONE),
         datetime.combine(end, time.min, tzinfo=LOCAL_TIMEZONE),
     )
-
-
-def _parse_timestamp(value):
-    if not isinstance(value, str):
-        return None
-    try:
-        timestamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if timestamp.tzinfo is None or timestamp.utcoffset() is None:
-        return None
-    return timestamp
-
-
-def _excerpt(text, terms):
-    """Keep the matched topic in a short, literal excerpt when text is long."""
-    if len(text) <= MAX_TEXT_CHARS:
-        return text
-    folded = text.casefold()
-    positions = [folded.find(term.casefold()) for term in terms]
-    matches = [position for position in positions if position >= 0]
-    start = max(0, min(matches) - 100) if matches else 0
-    start = min(start, len(text) - MAX_TEXT_CHARS)
-    end = start + MAX_TEXT_CHARS
-    return ("…" if start else "") + text[start:end] + ("…" if end < len(text) else "")
 
 
 def search_archived_memory(memory_request, *, session_id, limit=5, now=None):
@@ -140,8 +117,7 @@ def _raw_candidates(request, session_id, now, *, strict=False):
 
         user = redact_secrets(user)
         assistant = redact_secrets(assistant)
-        user_text, assistant_text = user.casefold(), assistant.casefold()
-        score = sum(2 * user_text.count(term) + assistant_text.count(term) for term in terms)
+        score = keyword_score((user, assistant), terms, weights=(2, 1))
         if terms and score == 0:
             continue
 
@@ -213,8 +189,7 @@ def _memory_candidates(source, request, session_id, now):
                         "period_end": last.isoformat() if last else None, "precision": "summary",
                         "time_match": "overlap_only" if start is not None else "not_filtered"}
         text = redact_secrets(text)
-        searchable = (text + " " + keywords).casefold()
-        score = sum(searchable.count(term) for term in terms)
+        score = keyword_score((text + " " + keywords,), terms)
         if not text.strip() or (terms and score == 0):
             continue
         yield score, {"source": source, **metadata, "text": _excerpt(text, terms),

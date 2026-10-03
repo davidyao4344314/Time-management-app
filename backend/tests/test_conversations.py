@@ -83,3 +83,39 @@ class ConversationAPITests(unittest.TestCase):
             self.assertEqual(len(first.get('/conversations').json()['conversations']), 1)
             second.cookies.set('ai_owner', first.cookies.get('ai_owner'))
             self.assertEqual(second.get(f'/conversations/{chat}/messages').status_code, 404)
+
+    def test_send_loads_local_history_and_retries_without_another_model_call(self):
+        from backend.app import database
+        from backend.app.conversations import service
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(database, 'db_file', Path(directory)/'db.sqlite'), \
+                patch.object(service, 'is_openai_api_key_configured', return_value=True), \
+                patch.object(service, 'get_agent_proposal', return_value={'message':'Try COMPSCI.','actions':[]}) as model:
+            chat = service.create_chat('owner')['conversation_id']
+            request = str(uuid4())
+            first = service.send_message('owner',chat,request,'Study tonight')
+            second = service.send_message('owner',chat,request,'Study tonight')
+            self.assertEqual(first, second)
+            self.assertEqual(model.call_count, 1)
+            service.send_message('owner',chat,str(uuid4()),'Make it later')
+            self.assertEqual(model.call_args.args[2][0]['user'], 'Study tonight')
+            other = service.create_chat('owner')['conversation_id']
+            service.send_message('owner',other,str(uuid4()),'New topic')
+            self.assertEqual(model.call_args.args[2], [])
+            self.assertEqual(model.call_args.kwargs['session_id'], other)
+
+    def test_failure_retains_user_and_excludes_failed_turn(self):
+        from backend.app import database
+        from backend.app.conversations import service
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(database, 'db_file', Path(directory)/'db.sqlite'), \
+                patch.object(service, 'is_openai_api_key_configured', return_value=True), \
+                patch.object(service, 'get_agent_proposal', side_effect=RuntimeError('offline failure')) as model:
+            chat = service.create_chat('owner')['conversation_id']
+            request = str(uuid4())
+            with self.assertRaises(RuntimeError):
+                service.send_message('owner',chat,request,'Question')
+            retry = service.send_message('owner',chat,request,'Question')
+            self.assertEqual(retry['status'], 'failed')
+            self.assertEqual(model.call_count,1)
+            self.assertEqual(service.read_chat('owner',chat)['messages'][0]['status'],'failed')

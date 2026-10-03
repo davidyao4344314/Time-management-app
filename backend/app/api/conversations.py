@@ -5,7 +5,10 @@ from sqlite3 import Error as SQLiteError
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 
 from backend.app.conversations import service
-from backend.app.conversations.contracts import CreateConversation, ConversationNotFound, ConversationConflict
+from backend.app.conversations.contracts import CreateConversation, SendMessage, ConversationNotFound, ConversationConflict
+from backend.app.ai.agent.contracts import InvalidProposalError
+from openai import OpenAIError
+from pydantic import ValidationError
 from backend.app.infrastructure.identity import sign_owner, valid_owner
 
 router = APIRouter(prefix='/conversations')
@@ -32,6 +35,10 @@ def call_service(function, *args, **kwargs):
         raise HTTPException(409, str(error)) from None
     except (SQLiteError, OSError):
         raise HTTPException(500, 'Could not access local conversation storage.') from None
+    except OpenAIError:
+        raise HTTPException(502, 'The AI request failed. Check model access, key and network.') from None
+    except (InvalidProposalError, ValidationError):
+        raise HTTPException(502, 'The AI response was incomplete or invalid.') from None
 
 
 @router.post('')
@@ -48,3 +55,8 @@ def list_conversations(request: Request, response: Response):
 def read_conversation(conversation_id: str, request: Request, response: Response,
                       before: int | None = Query(default=None, ge=1), limit: int = Query(default=50, ge=1, le=100)):
     return call_service(service.read_chat, resolve_owner(request, response), conversation_id, before=before, limit=limit)
+
+
+@router.post('/{conversation_id}/messages')
+def send_message(conversation_id: str, body: SendMessage, request: Request, response: Response):
+    return call_service(service.send_message, resolve_owner(request, response), conversation_id, body.request_id, body.message)

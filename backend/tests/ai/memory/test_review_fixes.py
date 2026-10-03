@@ -18,6 +18,29 @@ from backend.tests.ai.memory.test_ai_archive_persistence import _records, _class
 
 
 class MemoryBoundaryTests(unittest.TestCase):
+    def test_protected_oldest_session_does_not_starve_later_work(self):
+        rows = _records(102)
+        rows[0]['session_id'] = 'oldest'
+        rows[0]['turn']['user'] = 'Remember this: I prefer mornings.'
+        for row in rows[1:]:
+            row['session_id'] = 'later'
+            row['turn']['user'] = 'What is recursion?'
+        self.save(rows)
+        before = self.path.read_bytes()
+        result = selection.select_archive_compaction_candidates()
+        self.assertEqual(result['selected_session_id'], 'later')
+        self.assertEqual(result['candidate_count'], 50)
+        self.assertEqual(self.path.read_bytes(), before)
+
+    def test_many_protected_rows_do_not_hide_later_work_in_same_session(self):
+        rows = _records(102)
+        for row in rows[:70]:
+            row['turn']['user'] = 'Remember this: I prefer mornings.'
+        rows[70]['turn']['user'] = 'What is recursion?'
+        self.save(rows)
+        result = selection.select_archive_compaction_candidates()
+        self.assertIn(rows[70], result['compaction_candidates'])
+
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)

@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from backend.app.ai.memory import archive_store, settings
 from backend.app.ai.memory.records import archive_timestamp as _archive_timestamp
+from backend.app.ai.memory.protection import classify_archive_candidate
 
 _logger = logging.getLogger("backend.app.ai_memory")
 
@@ -14,7 +15,7 @@ def archive_needs_compaction(archive_turn_count):
     return archive_turn_count > settings.ARCHIVE_TURN_THRESHOLD
 
 
-def select_archive_compaction_candidates(*, batch_size=None):
+def select_archive_compaction_candidates(*, batch_size=None, after_session_id=None):
     """Select the oldest archived turns; do not change archive or recent memory."""
     if batch_size is None:
         batch_size = settings.ARCHIVE_COMPACT_BATCH
@@ -45,9 +46,23 @@ def select_archive_compaction_candidates(*, batch_size=None):
         identified = [entry for entry in ordered
                       if isinstance(entry[1].get("session_id"), str) and entry[1]["session_id"]]
         if identified:
-            session_id = identified[0][1]["session_id"]
-            candidates = [entry for entry in identified
-                          if entry[1]["session_id"] == session_id][:batch_size]
+            sessions = list(dict.fromkeys(entry[1]['session_id'] for entry in identified))
+            if after_session_id in sessions:
+                pivot = sessions.index(after_session_id) + 1
+                sessions = sessions[pivot:] + sessions[:pivot]
+            # A permanently protected oldest chat must not starve later chats.
+            # Only select within one session, retaining protected rows in storage.
+            for session_id in sessions:
+                rows = [entry for entry in identified if entry[1]['session_id'] == session_id]
+                eligible = next((index for index, entry in enumerate(rows)
+                                 if classify_archive_candidate(entry[1])['status'] != 'protected'), None)
+                if eligible is not None:
+                    start = (eligible // batch_size) * batch_size
+                    candidates = rows[start:start + batch_size]
+                    break
+            if not candidates:
+                # Protected-only archives remain available for durable extraction.
+                candidates = [entry for entry in identified if entry[1]['session_id'] == sessions[0]][:batch_size]
 
     known_times = [timestamp for _, _, timestamp in candidates if timestamp is not None]
     return {
@@ -56,6 +71,7 @@ def select_archive_compaction_candidates(*, batch_size=None):
         "candidate_count": len(candidates),
         "remaining_turn_count": archive_turn_count - len(candidates),
         "compaction_candidates": [record for _, record, _ in candidates],
+        "selected_session_id": candidates[0][1]['session_id'] if candidates else None,
         "oldest_candidate_timestamp": min(known_times).isoformat() if known_times else None,
         "newest_candidate_timestamp": max(known_times).isoformat() if known_times else None,
     }

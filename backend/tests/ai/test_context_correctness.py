@@ -7,9 +7,19 @@ from backend.app.ai.context.keywords import assess_stage_one
 from backend.app.ai.context.intent import context_from_classification
 from backend.app.ai.observations.formatting import observation_date_range
 from backend.app.ai.observations.exams import build_exam_observation
+from backend.app.ai.agent.reasoning import build_agent_messages
+import json
 
 
 class ContextCorrectnessTests(unittest.TestCase):
+    def test_empty_schedule_still_has_authoritative_clock(self):
+        clock = {'date':'2026-10-04', 'time':'12:00', 'timezone':'Pacific/Auckland',
+                 'as_of':'2026-10-04T12:00:00+13:00'}
+        with patch('backend.app.ai.agent.reasoning.observation_clock', return_value=clock):
+            payload = json.loads(build_agent_messages('Plan study tonight', {})[-1]['content'])
+        self.assertEqual(payload['clock'], clock)
+        self.assertEqual(payload['observations'], {})
+
     def test_requested_calendar_weeks(self):
         today = date(2026, 10, 3)
         for phrase, scope, start, end in (

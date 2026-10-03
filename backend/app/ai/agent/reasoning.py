@@ -1,6 +1,7 @@
 """Main-agent prompt, request formatting and proposal validation; no data access."""
 
 import json
+from backend.app.infrastructure.clock import observation_clock
 
 from backend.app.ai.config import get_max_recent_turns
 from backend.app.ai.agent.contracts import (
@@ -41,7 +42,8 @@ def proposal_request_limits(effort):
 
 def build_agent_messages(user_request, observations, recent_turns=None, *, chat_summary=None):
     """Keep conversation context and fresh factual observations separate."""
-    model_input = {"request": user_request.strip(), "observations": observations}
+    model_input = {"request": user_request.strip(), "clock": observation_clock(),
+                   "observations": observations}
     input_messages = []
     if chat_summary:
         input_messages.append({'role':'user','content':json.dumps({'current_chat_summary':chat_summary,

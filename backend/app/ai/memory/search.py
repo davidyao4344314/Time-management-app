@@ -4,7 +4,7 @@ import heapq
 import json
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
-from zoneinfo import ZoneInfo
+from backend.app.infrastructure.clock import LOCAL_TIMEZONE
 
 from backend.app.ai.memory import archive_store as ai_memory
 from backend.app.infrastructure.privacy import redact_secrets
@@ -14,7 +14,6 @@ from backend.app.ai.memory.records import source_identity
 from backend.app.infrastructure.errors import MemoryUtilityError
 
 
-LOCAL_TIMEZONE = ZoneInfo("Pacific/Auckland")
 MAX_RESULTS = 5
 MAX_TEXT_CHARS = 600
 MAX_CONTEXT_CHARS = 8000

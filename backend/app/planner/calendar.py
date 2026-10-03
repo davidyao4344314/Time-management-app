@@ -1,6 +1,7 @@
 from datetime import date, datetime, timedelta
 from backend.app.planner.activities import get_activity_schedule, get_activity_name_by_id, get_all_activities
 from backend.app.planner.exams import get_all_exams, exam_to_dict
+from backend.app.infrastructure.clock import local_now
 
 
 def get_calendar_week(connection, week_start=None, *, include_exams=False):
@@ -23,17 +24,17 @@ def get_calendar_week(connection, week_start=None, *, include_exams=False):
 
 
 def get_current_date():
-    now = datetime.now()
+    now = local_now()
     current_date = now.date()
     return current_date
 
 def get_current_time():
-    now = datetime.now()
+    now = local_now()
     current_time = now.time().strftime("%H:%M")
     return current_time
 
 def get_current_day():
-    return datetime.now().strftime("%A")
+    return local_now().strftime("%A")
 
 def print_all_dailies(connection, activit_list):
     for activity in activit_list:

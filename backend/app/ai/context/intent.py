@@ -2,11 +2,23 @@
 
 import json
 
-CLASSIFIER_INSTRUCTIONS = """Classify what context a study assistant needs. Never answer, advise, plan, or request actions.
+CLASSIFIER_INSTRUCTIONS = """Select the minimum information the main study assistant needs. Never answer, advise, plan, calculate recommendations, or request actions.
 
-study_planning: what to focus on or how to use free time; usually needs activities and exams. schedule_query: schedule or availability. exam_query: assessments or deadlines. activity_query: activity details. general_question: none of these.
+Make two independent decisions: what the user wants (intent), and what application information is required to answer accurately (observation flags). An intent label never determines the flags by itself. general_question may need activities, exams, or memory.
 
-Read the whole current message, respect exclusions such as 'don't show exams', and use brief conversation only to resolve follow-ups. Tonight or after dinner means today when no other date is given. Use all only when explicitly requested; otherwise use unspecified if no time is implied. Exam-only queries need no activities. Set confidence to low only when you cannot reliably decide what information is needed; an ordinary general question can still be high confidence. Return only intent, time_scope, include_activities, include_exams, and confidence."""
+Intents: study_planning = choosing study priorities or allocating study time; schedule_query = schedule or availability; exam_query = assessments or deadlines; activity_query = activity details; general_question = other requests.
+
+Determine information dependencies from the whole message and brief recent conversation:
+- Activities provide current scheduled commitments and availability. Personal recommendations about when to wake, set an alarm, or leave home for tomorrow may depend on tomorrow's first commitment even if classes are not explicitly mentioned. Explanations, jokes, and explicitly generic advice need no personal schedule.
+- Exams provide assessments, deadlines, and study urgency. Select them when the answer needs that information; exam-only listings need no activities. Study decisions often need available time plus upcoming exams, but select each source only when necessary.
+- Current app observations are authoritative for current schedules. Historical discussion cannot replace a fresh schedule. Use recent conversation only to resolve follow-ups; older recollection uses the memory selection below.
+- Explicit exclusions override inferred usefulness. 'Don't show exams; tell me my schedule tomorrow' selects activities only. 'Don't use my calendar; give general wake-up tips' selects neither activities nor exams. Topic mentions inside an exclusion are not requests for that source.
+
+Examples: personal alarm/wake-up tomorrow or departure based on tomorrow's commitments => general_question, tomorrow, activities=true, exams=false. Alarm-clock joke or explanation => general_question, unspecified, both=false. Study tonight => study_planning, today, both=true. Exams this week => exam_query, this_week, activities=false, exams=true. What we decided last month about a study plan => historical memory, no current activities/exams unless also requested.
+
+Do not invent commute/preparation time or facts. Missing facts are for the main agent to clarify; routing can still be confident when the needed sources are clear. Use low confidence when necessary sources, a follow-up reference, or time scope cannot be reliably resolved. An ordinary general question may be high confidence with no observations.
+
+Tonight or after dinner means today unless another date is given. Use all only when explicitly requested and unspecified when no time is implied. Return only the required structured classification fields."""
 
 
 MEMORY_ROUTING_INSTRUCTIONS = """ Also return memory: null unless older conversation is needed. Recent follow-ups already answered by recent context need no archive lookup. For recollection, return memory={sources:[...], query:{time_reference:..., search_terms:[...]}}. Allowed sources: raw_archive for exact prior wording, compressed_archive for past discussion summaries, durable for stated preferences/goals/decisions. Choose only relevant sources. Use symbolic time_reference today, yesterday, last_week, this_week, last_month, this_month, unspecified, or null; never calculate dates. Use at most five short topic terms. 'What did we discuss last week?' needs memory; 'What exams are next week?' and 'study before dinner' do not. Memory-only questions need no schedule observations; mixed planning requests may need both. Respect requests not to use history. Never return session IDs, paths, or retrieved content."""

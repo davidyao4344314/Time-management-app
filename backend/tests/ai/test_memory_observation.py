@@ -263,6 +263,18 @@ class MemoryWorkflowTests(unittest.TestCase):
         self.assertEqual(reader.call_count, 2)
         self.assertTrue(all(call.args[0]["scope"] == "current_chat" for call in reader.call_args_list))
 
+    def test_same_query_can_expand_sources_once(self):
+        request = {'time_reference':None, 'search_terms':['COMPSCI']}
+        selected = {'activities_scope':None, 'include_exams':False, 'exam_scope':None,
+                    'memory':{'sources':['raw_archive'], 'query':request}}
+        reader = Mock(side_effect=[{'status':'empty', 'items':[]},
+                                   {'status':'ok', 'items':[{'text':'A saved summary'}]}])
+        with patch.object(service, 'select_agent_context', return_value=selected), \
+             patch.object(reasoning, 'request_agent_response', side_effect=[self.response(request),self.response()]):
+            service.get_agent_proposal(Mock(), 'Question', [], session_id='one', memory_reader=reader)
+        self.assertEqual(reader.call_count, 2)
+        self.assertIn('compressed_archive', reader.call_args.args[0]['sources'])
+
     def test_selected_memory_is_separate_from_recent_and_current_facts(self):
         recent = [{"user": "Old plan", "assistant": {"message": "An exam tomorrow", "actions": []}}]
         observation = {"activities": {"today": []}, "exams": {"upcoming": []},

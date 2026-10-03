@@ -79,7 +79,8 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
                    if (selection.get("memory") or {}).get("scope") else {}),
             }).model_dump()
             old_query = (selection.get("memory") or {}).get("query")
-            if old_query == request:
+            old_sources = (selection.get('memory') or {}).get('sources', [])
+            if old_query == request and set(memory_selection['sources']) <= set(old_sources):
                 return finish(_memory_clarification())
             memory = (memory_reader(memory_selection) if memory_reader is not None
                       else build_memory_observation(memory_selection, session_id=session_id))

@@ -86,7 +86,7 @@ class ConversationAPITests(unittest.TestCase):
 
     def test_send_loads_local_history_and_retries_without_another_model_call(self):
         from backend.app import database
-        from backend.app.conversations import service, legacy as legacy_adapter
+        from backend.app.conversations import service
         with tempfile.TemporaryDirectory() as directory, \
                 patch.object(database, 'db_file', Path(directory)/'db.sqlite'), \
                 patch.object(service, 'is_openai_api_key_configured', return_value=True), \

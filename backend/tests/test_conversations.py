@@ -4,6 +4,9 @@ import tempfile
 import unittest
 from pathlib import Path
 from uuid import uuid4
+from unittest.mock import patch
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from backend.app.conversations import storage
 from backend.app.conversations.contracts import ConversationConflict, ConversationNotFound
@@ -58,3 +61,25 @@ class ConversationStorageTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ConversationAPITests(unittest.TestCase):
+    def test_verified_owner_isolation_and_restart(self):
+        from backend.app import database
+        from backend.app.infrastructure import identity
+        from backend.app.api.conversations import router
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(database, 'db_file', Path(directory)/'db.sqlite'), \
+                patch.object(identity, 'IDENTITY_KEY_FILE', Path(directory)/'key'):
+            app = FastAPI()
+            app.include_router(router)
+            first, second = TestClient(app), TestClient(app)
+            created = first.post('/conversations', json={})
+            self.assertEqual(created.status_code, 200)
+            chat = created.json()['conversation_id']
+            self.assertFalse(created.json()['memory_sharing_enabled'])
+            self.assertEqual(second.get(f'/conversations/{chat}/messages').status_code, 404)
+            self.assertEqual(first.get(f'/conversations/{chat}/messages').status_code, 200)
+            self.assertEqual(len(first.get('/conversations').json()['conversations']), 1)
+            second.cookies.set('ai_owner', first.cookies.get('ai_owner'))
+            self.assertEqual(second.get(f'/conversations/{chat}/messages').status_code, 404)

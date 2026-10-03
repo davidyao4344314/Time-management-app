@@ -38,7 +38,7 @@ def choose_agent_context(user_message):
     The default is deliberately small: today's activities and upcoming exams.
     """
     message = user_message.casefold().replace("’", "'")
-    if re.search(r"\bwhat did i just say\b", message):
+    if re.fullmatch(r"\s*what did i just say[?.!\s]*", message):
         return {"activities_scope": None, "include_exams": False, "exam_scope": None}
     memory = _memory_selection(message)
     if memory is not None and not _mixed_memory_request(message):
@@ -87,6 +87,7 @@ def choose_agent_context(user_message):
         "activities_scope": activities_scope,
         "include_exams": include_exams,
         "exam_scope": exam_scope,
+        **({"memory": memory} if memory is not None else {}),
     }
 
 
@@ -94,13 +95,14 @@ def assess_stage_one(user_message, recent_turns=None):
     """Keep the keyword router, but distinguish a clear match from its default."""
     message = user_message.casefold().replace("’", "'")
     selection = choose_agent_context(user_message)
-    if re.search(r"\bwhat did i just say\b", message):
+    if re.fullmatch(r"\s*what did i just say[?.!\s]*", message):
         return {"selection": selection, "confident": True, "reason": None}
     phrase_groups = (
         TODAY_PHRASES, WEEK_PHRASES, MONTH_PHRASES, EXAM_WORDS,
         ALL_ACTIVITY_PHRASES, ALL_CONTEXT_PHRASES, STUDY_WORDS,
     )
-    if _memory_selection(message) is not None and _mixed_memory_request(message):
+    if (_memory_selection(message) is not None and _mixed_memory_request(message)
+            and not _explicit_current_request(message)):
         reason = "mixed_memory_and_current_request"
     elif selection.get("memory") is not None:
         reason = None
@@ -131,7 +133,16 @@ def assess_stage_one(user_message, recent_turns=None):
 
 
 def _mixed_memory_request(message):
-    return bool(re.search(r"\b(help me|based on|use .+ to|and (?:what|help|plan|show))\b", message))
+    return _explicit_current_request(message) or bool(re.search(
+        r"\b(help me|based on|use .+ to|and (?:what|help|plan|show))\b", message))
+
+
+def _explicit_current_request(message):
+    """A historical reference must not hide a separate request for live facts."""
+    return bool(re.search(
+        r"\b(?:current (?:date|time|schedule|exam|activity)|"
+        r"what (?:exams|tests|activities) do i have|what am i doing|"
+        r"what (?:is|are) (?:its|their|the) current)\b", message))
 
 
 def _memory_selection(message):

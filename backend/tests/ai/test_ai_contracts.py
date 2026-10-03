@@ -41,7 +41,7 @@ class SharedContractTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertIs(getattr(original, name), getattr(shared, name))
 
-    def test_proposal_composes_action_and_memory_contracts_without_changing_shape(self):
+    def test_proposal_composes_action_memory_and_optional_context_contracts(self):
         proposal = {
             "message": "This is only a proposed study session.",
             "actions": [{
@@ -61,10 +61,10 @@ class SharedContractTests(unittest.TestCase):
         self.assertIsInstance(parsed.actions[0], actions.AddActivityAction)
         self.assertIsInstance(parsed.actions[0].arguments, actions.AddActivityArguments)
         self.assertIsInstance(parsed.memory_request, memory.MemoryRequest)
-        self.assertEqual(parsed.model_dump(), proposal)
+        self.assertEqual(parsed.model_dump(), {**proposal, "missing_context": []})
         self.assertEqual(
             agent.validate_agent_proposal({"message": "No changes needed.", "actions": []}).model_dump(),
-            {"message": "No changes needed.", "actions": [], "memory_request": None},
+            {"message": "No changes needed.", "actions": [], "memory_request": None, "missing_context": []},
         )
 
     def test_invalid_tools_and_memory_requests_still_fail_validation(self):

@@ -29,6 +29,36 @@ function AgentContextInspector({ context, actions = [] }) {
             </ul>
           </section>
 
+          {context.context_status && (
+            <section aria-label="Context recovery">
+              <h3>Context Recovery</h3>
+              <dl className="agent-context-fields">
+                {Object.entries(context.context_status).map(([source, status]) => (
+                  <div className="agent-context-field" key={source}>
+                    <dt>{source.replaceAll('_', ' ')}</dt>
+                    <dd>{context.initial_context_status?.[source] === status
+                      ? status
+                      : `${context.initial_context_status?.[source] || 'Unknown'} → ${status}`}</dd>
+                  </div>
+                ))}
+              </dl>
+              {context.context_recovery && (
+                <>
+                  <p>
+                    Main-agent calls: {context.context_recovery.main_agent_attempts}
+                    {' · '}Recovery attempts: {context.context_recovery.attempts}/{context.context_recovery.max_retries}
+                    {' · '}Status: {context.context_recovery.status}
+                  </p>
+                  {context.context_recovery.requests.map((request) => (
+                    <p key={request.source}>
+                      {request.source} / {request.time_scope}: {request.status_before} → {request.status_after}
+                    </p>
+                  ))}
+                </>
+              )}
+            </section>
+          )}
+
           <section aria-label="Retrieved memory">
             <h3>Retrieved Memory</h3>
             <p>{context.memory_message}</p>

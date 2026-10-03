@@ -465,7 +465,7 @@ class AIProposalTests(unittest.TestCase):
             calls = client.responses.parse.call_args_list
 
         self.assertEqual(result, {
-            "message": "Your schedule", "actions": [], "memory_request": None,
+            "message": "Your schedule", "actions": [], "memory_request": None, "missing_context": [],
         })
         self.assertEqual(len(calls), 2)
         classifier_input = json.loads(calls[0].kwargs["input"][0]["content"])
@@ -945,7 +945,7 @@ class AIProposalTests(unittest.TestCase):
             ai_proposal.validate_agent_proposal({"message": "Plan", "actions": [incomplete]})
 
     def test_model_receives_separate_observations_and_returns_proposal(self):
-        expected = {"message": "No change needed.", "actions": [], "memory_request": None}
+        expected = {"message": "No change needed.", "actions": [], "memory_request": None, "missing_context": []}
         with patch.object(ai_proposal, "is_openai_api_key_configured", return_value=True), \
                 patch.dict(ai_proposal.os.environ, {"OPENAI_API_KEY": "test-key"}), \
                 patch.object(ai_proposal, "build_activity_observation", return_value={"today": []}), \

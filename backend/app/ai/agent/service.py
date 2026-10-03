@@ -17,6 +17,10 @@ from backend.app.ai.observations.exams import build_exam_observation
 from backend.app.ai.observations.memory import build_memory_observation
 from backend.app.ai.memory.contracts import MemorySelection
 from backend.app.ai.agent.transparency import build_agent_context
+from backend.app.ai.agent.context_recovery import (
+    MAX_CONTEXT_RECOVERY_RETRIES, build_context_status, read_observation,
+    recovery_selection, observation_status,
+)
 
 
 PROPOSAL_MODEL = "gpt-6-luna"
@@ -35,6 +39,9 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
     )
     routing_trace = {}
     lookups = []
+    recovery_trace = {"max_retries": MAX_CONTEXT_RECOVERY_RETRIES, "attempts": 0,
+                      "main_agent_attempts": 0, "status": "not_requested", "requests": []}
+    followup_count = 0
 
     def finish(proposal):
         if not include_context:
@@ -46,31 +53,71 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
         if chat_summary:
             public['context_sources'].append({'source':'chat_summary','label':'Current-chat summary',
                 'selected':True,'authority':'historical_summary','reason':'Bounded summary of older completed messages in this chat.'})
+        public.update(initial_context_status=initial_status, context_status=context_status,
+                      context_recovery=recovery_trace)
         return {**proposal, 'agent_context':public}
+
+    def collect(selected):
+        return collect_agent_observations(
+            connection, selected,
+            activity_builder=lambda *args, **kwargs: read_observation(build_activity_observation, *args, **kwargs),
+            exam_builder=lambda *args, **kwargs: read_observation(build_exam_observation, *args, **kwargs),
+            session_id=session_id,
+            **({'memory_builder': memory_reader} if memory_reader is not None else {}),
+        )
 
     with OpenAI(api_key=os.environ["OPENAI_API_KEY"].strip(), timeout=timeout, max_retries=0) as client:
         selection = select_agent_context(
             client, user_request.strip(), recent_turns, PROPOSAL_MODEL,
             **({"trace": routing_trace} if include_context else {}),
         )
-        context = collect_agent_observations(
-            connection, selection,
-            activity_builder=build_activity_observation,
-            exam_builder=build_exam_observation,
-            session_id=session_id,
-            **({'memory_builder': memory_reader} if memory_reader is not None else {}),
-        )
+        selection = dict(selection)
+        context = dict(collect(selection))
+        context_status = build_context_status(context, memory_available=session_id is not None)
+        initial_status = dict(context_status)
         if include_context and selection.get("memory") is not None:
             lookups.append({"phase": "initial", "sources": selection["memory"]["sources"],
                             "result": context["memory"], "used_in_model": True})
+        recovery_trace["main_agent_attempts"] = 1
         response = reasoning.request_agent_response(
             client, user_request, context, recent_turns, agent_settings, output_limit,
+            context_status=context_status, context_recovery_remaining=MAX_CONTEXT_RECOVERY_RETRIES,
             **({'chat_summary':chat_summary} if chat_summary is not None else {}),
         )
         proposal = reasoning.parse_agent_response(response)
         request = proposal.get("memory_request")
+        missing = proposal.get("missing_context", [])
+        if not missing and not (request is not None and session_id is not None):
+            return finish(proposal)
+
+        # One shared follow-up budget covers schedule recovery and the existing
+        # historical lookup. There is no retry loop or third main-agent call.
+        if followup_count >= MAX_CONTEXT_RECOVERY_RETRIES:
+            return finish(_context_clarification())
+        recovered = False
+        if missing:
+            try:
+                selected = recovery_selection(missing, context_status)
+            except ValueError:
+                recovery_trace["status"] = "rejected"
+                return finish(_context_clarification())
+            recovery_trace["attempts"] = 1
+            extra = collect(selected)
+            for item in missing:
+                source = item["source"]
+                status = observation_status(source, extra.get(source))
+                recovery_trace["requests"].append({**item,
+                    "status_before": context_status[source], "status_after": status})
+                context[source] = extra.get(source, {"status": "unavailable"})
+                recovered |= status != "unavailable"
+            if selected["activities_scope"] is not None:
+                selection["activities_scope"] = selected["activities_scope"]
+            if selected["include_exams"]:
+                selection.update(include_exams=True, exam_scope=selected["exam_scope"])
+            context_status = build_context_status(context, memory_available=session_id is not None)
+            recovery_trace["status"] = "fetched" if recovered else "unavailable"
+
         if request is not None and session_id is not None:
-            # One extra read-only lookup at most. No intermediate turn is saved.
             memory_selection = MemorySelection.model_validate({
                 "sources": ["raw_archive", "compressed_archive", "durable"],
                 "query": request,
@@ -80,28 +127,57 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
             }).model_dump()
             old_query = (selection.get("memory") or {}).get("query")
             old_sources = (selection.get('memory') or {}).get('sources', [])
-            if old_query == request and set(memory_selection['sources']) <= set(old_sources):
+            already_searched = old_query == request and set(memory_selection['sources']) <= set(old_sources)
+            if not already_searched:
+                memory = (memory_reader(memory_selection) if memory_reader is not None
+                          else build_memory_observation(memory_selection, session_id=session_id))
+                lookup = {"phase": "followup", "sources": memory_selection["sources"],
+                          "result": memory, "used_in_model": False}
+                if include_context:
+                    lookups.append(lookup)
+                if memory["items"] and memory["items"] != context.get("memory", {}).get("items"):
+                    context["memory"] = {**memory, "followup_lookup_remaining": 0}
+                    lookup["used_in_model"] = True
+                    recovered = True
+                elif "memory" not in context:
+                    # A successful schedule recovery can still retry with an
+                    # empty/unavailable historical result. Keep earlier useful
+                    # memory intact when a different follow-up query has no match.
+                    context["memory"] = {**memory, "followup_lookup_remaining": 0}
+                    lookup["used_in_model"] = recovered
+                context_status = build_context_status(context, memory_available=session_id is not None)
+            if not recovered:
                 return finish(_memory_clarification())
-            memory = (memory_reader(memory_selection) if memory_reader is not None
-                      else build_memory_observation(memory_selection, session_id=session_id))
-            lookup = {"phase": "followup", "sources": memory_selection["sources"],
-                      "result": memory, "used_in_model": False}
-            if include_context:
-                lookups.append(lookup)
-            if not memory["items"] or memory["items"] == context.get("memory", {}).get("items"):
-                return finish(_memory_clarification())
-            context["memory"] = {**memory, "followup_lookup_remaining": 0}
-            lookup["used_in_model"] = True
-            response = reasoning.request_agent_response(
-                client, user_request, context, recent_turns, agent_settings, output_limit,
-                **({'chat_summary':chat_summary} if chat_summary is not None else {}),
-            )
-            proposal = reasoning.parse_agent_response(response)
-            if proposal.get("memory_request") is not None:
-                return finish(_memory_clarification())
+
+        if not recovered:
+            return finish(_context_clarification())
+        followup_count += 1
+        if "memory" in context:
+            context["memory"] = {**context["memory"], "followup_lookup_remaining": 0}
+        context_status = build_context_status(context, memory_available=session_id is not None)
+        recovery_trace["main_agent_attempts"] += 1
+        response = reasoning.request_agent_response(
+            client, user_request, context, recent_turns, agent_settings, output_limit,
+            context_status=context_status,
+            context_recovery_remaining=MAX_CONTEXT_RECOVERY_RETRIES - followup_count,
+            **({'chat_summary':chat_summary} if chat_summary is not None else {}),
+        )
+        proposal = reasoning.parse_agent_response(response)
+        if proposal.get("missing_context"):
+            recovery_trace["status"] = "exhausted"
+            return finish(_context_clarification())
+        if proposal.get("memory_request") is not None:
+            recovery_trace["status"] = "exhausted"
+            return finish(_memory_clarification())
+        recovery_trace["status"] = "completed"
     return finish(proposal)
+
+
+def _context_clarification():
+    return {"message": "I couldn't obtain enough reliable context to answer. Could you clarify what information I should base the answer on?",
+            "actions": [], "memory_request": None, "missing_context": []}
 
 
 def _memory_clarification():
     return {"message": "I couldn't retrieve enough reliable historical context. Could you remind me of the discussion or give a more specific topic?",
-            "actions": [], "memory_request": None}
+            "actions": [], "memory_request": None, "missing_context": []}

@@ -726,6 +726,8 @@ an `actions` list:
 ```json
 {
   "message": "You could study after your lecture.",
+  "memory_request": null,
+  "missing_context": [],
   "actions": [
     {
       "tool": "add_activity",
@@ -749,6 +751,97 @@ created. A response with `"actions": []` is also valid. Validation rejects
 unknown tools and malformed activity arguments. `add_activity` is the only
 supported proposed tool; the agent cannot issue SQL. The model and reasoning
 effort for the main agent are configurable separately from the routing stages.
+
+### One-shot context recovery
+
+Each main-agent input now includes a small `context_status` manifest, separate
+from the observation data:
+
+```json
+{
+  "context_status": {
+    "current_chat": "provided",
+    "activities": "not_selected",
+    "exams": "not_selected",
+    "global_memory": "not_selected"
+  },
+  "context_recovery_remaining": 1
+}
+```
+
+`provided` means data is included; `empty` means the source was queried with no
+relevant records; `not_selected` means it was not fetched; `unavailable` means it
+cannot be supplied. The current request and bounded recent turns already form
+the supplied current-chat context. Global memory keeps its existing scoped
+retrieval; it is unavailable without a trusted conversation/session identifier.
+No unselected observations are sent alongside this manifest. Full observation
+counts distinguish genuinely empty results from truncated or untimed data.
+
+If essential activity/exam data was omitted, the main agent may return a control
+response instead of asking the user for schedule information the app can read:
+
+```json
+{
+  "message": null,
+  "actions": [],
+  "memory_request": null,
+  "missing_context": [
+    {"source": "activities", "time_scope": "tomorrow"}
+  ]
+}
+```
+
+`MissingContextRequest` in `ai/agent/contracts.py` permits only `activities` and
+`exams`, with at most two distinct requests. Activity scopes are `today`,
+`tomorrow`, `week`, `this_week`, `next_week`, `month`, `all`; exam scopes use the
+same date scopes plus `upcoming`, without `all`. Python also requires each
+requested source to currently be `not_selected`. Unknown sources, extra fields,
+unsupported scopes, repeated sources and actions attached to a recovery request
+are rejected. Provided, empty and unavailable sources are never re-fetched by
+this fallback. Explicit user exclusions remain part of the agent instructions.
+
+`ai/agent/context_recovery.py` defines `MAX_CONTEXT_RECOVERY_RETRIES = 1`.
+`ai/agent/service.py` uses the existing observation collector/builders to fetch
+only the requested sources, merges them without replacing other observations,
+updates the manifest, and makes at most one follow-up main-agent call. Failed
+activity/exam reads become `unavailable`; a failed recovery with no usable reads
+returns a clarification without another model call. A successful empty query
+is sent to the one retry as `empty`.
+
+The existing `memory_request` lookup and new context recovery share this single
+follow-up budget. They can be satisfied together before one retry, but neither
+can trigger a third main-agent call. A repeated request after the retry returns
+a safe clarification with no proposed actions. Intermediate control responses
+are never saved as completed conversation turns. Normal action validation and
+proposal-only behavior are retained; recovery never calls a mutation tool.
+
+The existing **How the agent used context** inspector shows initial/final source
+statuses, requested scopes, recovery attempts, and main-agent call count. It
+does not display model reasoning or private request/error details.
+
+To reproduce the alarm routing failure deterministically without a paid model
+call or changes to your database, run from the project root:
+
+```bash
+backend/.venv/bin/python -B -m unittest backend.tests.ai.test_context_recovery.ContextRecoveryTests.test_alarm_recovers_once -v
+```
+
+The test forces the router to omit activities, simulates the model's structured
+request, checks that tomorrow's activity builder is called once, and verifies a
+second/final main-agent response. The complete recovery suite also covers jokes,
+empty/unavailable/provided observations, malformed requests, exhausted budgets,
+memory interaction, and an actual activity builder using a read-only in-memory
+database:
+
+```bash
+backend/.venv/bin/python -B -m unittest backend.tests.ai.test_context_recovery -v
+```
+
+In the running app, an ordinary alarm/tomorrow request may already be handled
+correctly by Stage 1 and show zero recovery attempts. That is the intended cheap
+path. Inspect the context panel if a real routing omission triggers recovery;
+one recovery can cost one additional main-agent request. These offline tests
+verify orchestration and validation, not the live model's detection accuracy.
 
 ## Not implemented yet
 

@@ -13,6 +13,12 @@
   font-size: 24px;
 }
 
+.top-bar-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
 .menu-toggle {
   padding: 4px 8px;
   border: 0;

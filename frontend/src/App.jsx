@@ -26,7 +26,7 @@ function App() {
 
   return (
     <>
-      <header className="top-bar">
+      <header className={`top-bar${currentPage === 'AI Agent' ? ' top-bar-sticky' : ''}`}>
         <h1>Activities Planning App</h1>
         <button
           className="menu-toggle"

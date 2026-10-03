@@ -90,7 +90,8 @@ def _busy_ranges(occurrences):
 def build_activity_observation(connection, scope="week"):
     """Summarize the requested date window, or all activity definitions.
 
-    Current activities stay a list so overlapping activities remain visible.
+    Current activities stay a list so overlapping activities remain visible,
+    but are included only when the requested window contains today.
     Date-only activities remain in the lists with null times. The default
     preserves the existing seven-day observation structure.
     """
@@ -107,14 +108,16 @@ def build_activity_observation(connection, scope="week"):
     today = get_current_date()
     first_date, last_date = observation_date_range(today, scope)
     today_string = today.isoformat()
-    now = datetime.strptime(get_current_time(), "%H:%M").time()
+    includes_today = first_date <= today <= last_date
+    if includes_today:
+        now = datetime.strptime(get_current_time(), "%H:%M").time()
 
-    current, next_activity = get_current_and_next_activities(connection)
     occurrences = _occurrences_in_range(connection, first_date, last_date)
 
     relevant = []
     for occurrence in occurrences:
-        if occurrence["calendar_date"] < today_string:
+        if (occurrence["calendar_date"] < max(first_date, today).isoformat()
+                or occurrence["calendar_date"] > last_date.isoformat()):
             continue
         if occurrence["calendar_date"] == today_string and is_valid_activity_time(
             occurrence["start_time"], occurrence["end_time"]
@@ -128,26 +131,31 @@ def build_activity_observation(connection, scope="week"):
         occurrence["calendar_date"], occurrence["start_time"],
         occurrence["name"], occurrence["id"],
     ))
-    current.sort(key=lambda activity: (
-        _time_or_none(activity[7]) or "", activity[1], activity[0]
-    ))
-
-    today_items = [_brief_occurrence(item) for item in relevant
-                   if item['calendar_date'] == today_string]
-    current_items = bounded_details(_brief_activity(item) for item in current)
     busy, untimed = _busy_ranges(relevant)
     observation = {
-        "current": current_items,
-        "current_count": len(current),
-        "next": _brief_activity(next_activity) if next_activity else None,
-        "today": bounded_details(today_items),
-        "today_count": len(today_items),
         "period": {'start': max(first_date, today).isoformat(), 'end': last_date.isoformat()},
         "count": len(relevant),
         "busy": busy,
         "untimed_count": untimed,
-        "truncated": len(current_items) < len(current) or len(bounded_details(today_items)) < len(today_items),
+        "truncated": False,
     }
+    if includes_today:
+        current, next_activity = get_current_and_next_activities(connection)
+        current.sort(key=lambda activity: (
+            _time_or_none(activity[7]) or "", activity[1], activity[0]
+        ))
+        today_items = [_brief_occurrence(item) for item in relevant
+                       if item['calendar_date'] == today_string]
+        current_items = bounded_details(_brief_activity(item) for item in current)
+        today_details = bounded_details(today_items)
+        observation.update({
+            "current": current_items,
+            "current_count": len(current),
+            "next": _brief_activity(next_activity) if next_activity else None,
+            "today": today_details,
+            "today_count": len(today_items),
+            "truncated": len(current_items) < len(current) or len(today_details) < len(today_items),
+        })
     if scope == "today":
         return observation
 

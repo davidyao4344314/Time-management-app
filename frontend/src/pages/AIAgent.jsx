@@ -45,7 +45,7 @@ function AIAgent() {
         {suggestions.map(([title, request]) => <button key={title} className="ai-agent-suggestion" disabled={state.sending}
           onClick={() => state.setDraft(request)}><strong>{title}</strong><span>{request}</span></button>)}
       </div>}
-      <ChatComposer draft={state.draft} setDraft={state.setDraft} disabled={!state.chat || state.loading}
+      <ChatComposer draft={state.draft} setDraft={state.setDraft} disabled={!state.chat || state.loading || state.retryAvailable}
         sending={state.sending || state.summarizing} onSend={() => state.send()} />
     </section>
   </main>

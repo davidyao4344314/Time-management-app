@@ -27,7 +27,7 @@ function App() {
   return (
     <>
       <header className="top-bar">
-        <h1>activites pllaning app</h1>
+        <h1>Activities Planning App</h1>
         <button
           className="menu-toggle"
           type="button"

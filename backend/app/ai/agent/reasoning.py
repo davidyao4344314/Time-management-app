@@ -56,6 +56,7 @@ def build_agent_messages(user_request, observations, recent_turns=None, *, chat_
             "content": json.dumps({
                 "message": turn["assistant"]["message"],
                 "proposed_actions_not_executed": turn["assistant"]["actions"],
+                **({"context_truncated": True} if turn.get('context_truncated') else {}),
             }, ensure_ascii=False),
         })
     input_messages.append({

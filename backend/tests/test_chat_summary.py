@@ -11,6 +11,20 @@ from backend.app.conversations.contracts import ConversationConflict
 
 
 class ChatSummaryTests(unittest.TestCase):
+    def test_large_newest_turn_keeps_recent_context_without_changing_transcript(self):
+        self.add_turns(2)
+        self.connection.execute("UPDATE conversation_messages SET proposal_json=? WHERE role='assistant' AND sequence_number=4",
+            ('{"message":"' + 'x' * 20000 + '","actions":[]}',))
+        self.connection.commit()
+        before = storage.completed_turns(self.connection, self.chat, 'owner')
+        selected = context.build_chat_context(self.connection, self.chat, 'owner')['recent_turns']
+        self.assertEqual(len(selected), 2)
+        self.assertTrue(selected[-1]['context_truncated'])
+        import json
+        self.assertLessEqual(sum(len(json.dumps({'user':t['user'], 'assistant':t['assistant']},ensure_ascii=False))
+                                 for t in selected), context.MAX_RECENT_CONTEXT_CHARS)
+        self.assertEqual(storage.completed_turns(self.connection, self.chat, 'owner'), before)
+
     def setUp(self):
         self.connection = sqlite3.connect(':memory:')
         self.addCleanup(self.connection.close)

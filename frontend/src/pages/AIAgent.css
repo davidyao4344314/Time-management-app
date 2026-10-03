@@ -103,6 +103,13 @@
   margin-top: 1.5rem;
 }
 
+.chat-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 0.75rem; }
+.chat-toolbar select { max-width: 100%; min-width: 0; padding: 0.6rem; font: inherit; }
+.chat-message-list { display: grid; gap: 1rem; margin-block: 1.5rem; }
+.chat-bubble { padding: 1rem; border-radius: 0.75rem; max-width: 95%; min-width: 0; overflow-wrap: anywhere; }
+.chat-bubble-user { justify-self: end; background: #eeeeff; }
+.chat-bubble-assistant { justify-self: start; width: 100%; border: 1px solid #ddd; }
+
 .ai-agent-response-text,
 .agent-context-excerpt {
   white-space: pre-wrap;

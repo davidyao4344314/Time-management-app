@@ -2,6 +2,8 @@
 
 import re
 
+from backend.app.ai.context.policy import apply_context_exclusions, excluded_context_sources
+
 
 TODAY_PHRASES = (
     "today", "tonight", "this evening", "this afternoon", "this morning",
@@ -32,6 +34,14 @@ def _has_phrase(message, phrases):
 
 
 def choose_agent_context(user_message):
+    """Apply explicit source exclusions to the existing keyword selection."""
+    excluded = excluded_context_sources(user_message)
+    return apply_context_exclusions(
+        _choose_keyword_context(user_message, excluded), excluded,
+    )
+
+
+def _choose_keyword_context(user_message, excluded_sources):
     """Return activity scope and exam scope, without reading data or calling an LLM.
 
     An exam-only question can omit activities while retaining its time scope.
@@ -44,7 +54,7 @@ def choose_agent_context(user_message):
     if memory is not None and not _mixed_memory_request(message):
         return {"activities_scope": None, "include_exams": False,
                 "exam_scope": None, "memory": memory}
-    asks_exams = _has_phrase(message, EXAM_WORDS)
+    asks_exams = _has_phrase(message, EXAM_WORDS) and "exams" not in excluded_sources
     asks_study = _has_phrase(message, STUDY_WORDS) or (
         asks_exams and _has_phrase(message, ("what should i do",))
     )
@@ -115,6 +125,10 @@ def assess_stage_one(user_message, recent_turns=None):
     elif any(_has_phrase(message, phrases) for phrases in
              (("remember", "previously", "earlier", "last time", "we discussed", "we decided"),)):
         reason = "ambiguous_conversation_reference"
+    elif "activities" in excluded_context_sources(message):
+        reason = "negated_calendar_reference"
+    elif _has_phrase(message, ("joke", "how does", "general advice", "general tips", "generic advice")):
+        reason = "requires_semantic_information_dependencies"
     elif not any(_has_phrase(message, phrases) for phrases in phrase_groups):
         reason = "no_meaningful_keyword_match"
     elif re.search(

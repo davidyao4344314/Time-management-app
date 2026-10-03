@@ -11,6 +11,7 @@ def collect_agent_observations(
     exam_builder=build_exam_observation,
     session_id=None,
     memory_builder=None,
+    excluded_sources=(),
 ):
     """Keep factual app state separate from the current request and recent turns.
 
@@ -18,11 +19,11 @@ def collect_agent_observations(
     a database. Routing and recurrence are not calculated in this collector.
     """
     context = {}
-    if selection["activities_scope"] is not None:
+    if selection["activities_scope"] is not None and "activities" not in excluded_sources:
         context["activities"] = activity_builder(
             connection, scope=selection["activities_scope"],
         )
-    if selection["include_exams"]:
+    if selection["include_exams"] and "exams" not in excluded_sources:
         context["exams"] = exam_builder(
             connection, scope=selection["exam_scope"],
         )

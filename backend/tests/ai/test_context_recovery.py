@@ -131,6 +131,27 @@ class ContextRecoveryTests(unittest.TestCase):
         self.activities.assert_not_called()
         self.exams.assert_not_called()
 
+    def test_excluded_calendar_cannot_be_loaded_or_recovered(self):
+        # Even a faulty router and a valid-looking model request cannot bypass
+        # the user's explicit exclusion at either observation boundary.
+        self.router.return_value = {**TOMORROW, "include_exams": True, "exam_scope": "tomorrow"}
+        self.respond(missing())
+        result = self.run_agent("Don't use my calendar; give general wake-up advice for tomorrow.")
+        self.activities.assert_not_called()
+        self.exams.assert_not_called()
+        self.assertEqual(self.client.responses.parse.call_count, 1)
+        self.assertEqual(self.model_input(0)["observations"], {})
+        self.assertEqual(self.model_input(0)["excluded_sources"], ["activities", "exams"])
+        self.assertEqual(result["agent_context"]["context_recovery"]["status"], "rejected")
+        self.assertEqual(result["actions"], [])
+
+    def test_excluded_exams_do_not_block_activity_recovery(self):
+        self.respond(missing(), answer())
+        self.run_agent("Don't show me exams, just tell me my schedule tomorrow.")
+        self.activities.assert_called_once_with(self.connection, scope="tomorrow")
+        self.exams.assert_not_called()
+        self.assertEqual(self.client.responses.parse.call_count, 2)
+
     def test_provided_empty_and_unavailable_sources_are_not_fetched_again(self):
         for data, expected in ((CLASS, "provided"), ({"count": 0, "today": []}, "empty"),
                                ({"status": "unavailable"}, "unavailable")):

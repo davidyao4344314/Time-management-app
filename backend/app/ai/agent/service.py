@@ -11,6 +11,7 @@ from backend.app.ai.config import (
 )
 from backend.app.ai.agent import reasoning
 from backend.app.ai.context.selection import select_agent_context
+from backend.app.ai.context.policy import apply_context_exclusions, excluded_context_sources
 from backend.app.ai.observations.activities import build_activity_observation
 from backend.app.ai.observations.collect import collect_agent_observations
 from backend.app.ai.observations.exams import build_exam_observation
@@ -33,6 +34,8 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
     if not isinstance(user_request, str) or not user_request.strip():
         raise ValueError("A user request is required.")
 
+    excluded_sources = excluded_context_sources(user_request)
+
     agent_settings = get_agent_model_settings()
     output_limit, timeout = reasoning.proposal_request_limits(
         agent_settings["reasoning_effort"],
@@ -54,7 +57,7 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
             public['context_sources'].append({'source':'chat_summary','label':'Current-chat summary',
                 'selected':True,'authority':'historical_summary','reason':'Bounded summary of older completed messages in this chat.'})
         public.update(initial_context_status=initial_status, context_status=context_status,
-                      context_recovery=recovery_trace)
+                      context_recovery=recovery_trace, excluded_sources=sorted(excluded_sources))
         return {**proposal, 'agent_context':public}
 
     def collect(selected):
@@ -63,6 +66,7 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
             activity_builder=lambda *args, **kwargs: read_observation(build_activity_observation, *args, **kwargs),
             exam_builder=lambda *args, **kwargs: read_observation(build_exam_observation, *args, **kwargs),
             session_id=session_id,
+            **({'excluded_sources': excluded_sources} if excluded_sources else {}),
             **({'memory_builder': memory_reader} if memory_reader is not None else {}),
         )
 
@@ -71,7 +75,7 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
             client, user_request.strip(), recent_turns, PROPOSAL_MODEL,
             **({"trace": routing_trace} if include_context else {}),
         )
-        selection = dict(selection)
+        selection = apply_context_exclusions(selection, excluded_sources)
         context = dict(collect(selection))
         context_status = build_context_status(context, memory_available=session_id is not None)
         initial_status = dict(context_status)
@@ -97,7 +101,7 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
         recovered = False
         if missing:
             try:
-                selected = recovery_selection(missing, context_status)
+                selected = recovery_selection(missing, context_status, excluded_sources=excluded_sources)
             except ValueError:
                 recovery_trace["status"] = "rejected"
                 return finish(_context_clarification())

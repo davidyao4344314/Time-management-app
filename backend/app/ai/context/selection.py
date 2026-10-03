@@ -4,6 +4,7 @@ from backend.app.ai.context.keywords import assess_stage_one
 from backend.app.ai.context.intent import classify_agent_intent, context_from_classification
 from backend.app.ai.context.fallback import classify_stage_three
 from backend.app.ai.context.contracts import ContextSelection
+from backend.app.ai.context.policy import apply_context_exclusions, excluded_context_sources
 
 
 SAFE_MINIMAL_CONTEXT = {
@@ -24,9 +25,17 @@ def _valid_context_selection(selection):
 
 def select_agent_context(client, user_message, recent_turns, stage_two_model, *, trace=None):
     """Stop at the first confident route; never retry a failed stage."""
+    excluded = excluded_context_sources(user_message)
+
+    def finish(selected, stage, status, reason, decision=None):
+        return _record_route(
+            trace, apply_context_exclusions(selected, excluded),
+            stage, status, reason, decision,
+        )
+
     stage_one = assess_stage_one(user_message, recent_turns)
     if stage_one["confident"] and _valid_context_selection(stage_one["selection"]):
-        return _record_route(trace, stage_one["selection"], "stage_1", "matched",
+        return finish(stage_one["selection"], "stage_1", "matched",
                              "Matched clear keyword/phrase rules.")
     if stage_one["confident"]:
         stage_one = {**stage_one, "confident": False, "reason": "invalid_stage_one_result"}
@@ -38,7 +47,7 @@ def select_agent_context(client, user_message, recent_turns, stage_two_model, *,
         if stage_two.confidence == "high":
             selected = context_from_classification(stage_two)
             ContextSelection.model_validate(selected)
-            return _record_route(trace, selected, "stage_2", "matched",
+            return finish(selected, "stage_2", "matched",
                                  "Stage 1 was unresolved; Stage 2 returned a high-confidence classification.", stage_two)
         stage_two_result = {
             "classification": stage_two.model_dump(),
@@ -55,10 +64,10 @@ def select_agent_context(client, user_message, recent_turns, stage_two_model, *,
             client, user_message, recent_turns, stage_one, stage_two_result,
         )
         selected = context_from_classification(decision)
-        return _record_route(trace, selected, "stage_3", "matched",
+        return finish(selected, "stage_3", "matched",
                              "Earlier stages were unresolved; Stage 3 returned a valid classification.", decision)
     except Exception:
-        return _record_route(trace, SAFE_MINIMAL_CONTEXT.copy(), "safe_fallback", "fallback",
+        return finish(SAFE_MINIMAL_CONTEXT.copy(), "safe_fallback", "fallback",
                              "No confident valid route was available; the existing minimal context was selected.")
 
 

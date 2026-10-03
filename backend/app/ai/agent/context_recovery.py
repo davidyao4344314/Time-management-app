@@ -54,7 +54,7 @@ def build_context_status(observations, *, memory_available=False):
     return result
 
 
-def recovery_selection(requests, context_status):
+def recovery_selection(requests, context_status, *, excluded_sources=()):
     """Validate against current source status before any observation is read."""
     if not isinstance(requests, list) or not 1 <= len(requests) <= 2:
         raise ValueError("Request one or two missing observations.")
@@ -64,6 +64,8 @@ def recovery_selection(requests, context_status):
         request = MissingContextRequest.model_validate(value)
         if request.source not in ALLOWED_MISSING_CONTEXT_SOURCES or request.source in seen:
             raise ValueError("The observation source is unsupported or duplicated.")
+        if request.source in excluded_sources:
+            raise ValueError("The user excluded this observation source.")
         if context_status.get(request.source) != "not_selected":
             raise ValueError("Only unselected observations can be recovered.")
         seen.add(request.source)

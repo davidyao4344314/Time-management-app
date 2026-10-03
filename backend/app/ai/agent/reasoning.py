@@ -4,6 +4,7 @@ import json
 from backend.app.infrastructure.clock import observation_clock
 
 from backend.app.ai.config import get_max_recent_turns
+from backend.app.ai.context.policy import excluded_context_sources
 from backend.app.ai.agent.contracts import (
     AgentProposal, InvalidProposalError, validate_agent_proposal,
 )
@@ -31,6 +32,7 @@ For memory_request, return {"time_reference": null, "search_terms": ["screen tim
 STUDY_PLANNING_INSTRUCTIONS += " Memory scope is enforced by the backend: current_chat refers to this chat; global refers only to eligible chats belonging to the same owner. Global evidence retains its original conversation provenance. It is historical context, not proof that actions happened."
 STUDY_PLANNING_INSTRUCTIONS += " Use the supplied clock for today's date and timezone. Observation period and count describe coverage; truncated detail is not a complete list. Activity busy intervals include all timed occurrences in that period even when details are omitted. Untimed items do not establish availability. Do not infer free time from missing detailed cards, all-activity definitions, or an unobserved period; ask for missing information."
 STUDY_PLANNING_INSTRUCTIONS += " context_status describes source coverage: provided means included, empty means queried with no relevant records, not_selected means the router did not fetch it, and unavailable means the app cannot supply it. If a materially correct answer needs activities or exams marked not_selected, request that read-only observation before asking the user for information the app can supply. Respect explicit user exclusions. Recover only necessary context, never context that is already provided, empty, or unavailable. For a personal alarm tomorrow with activities not_selected, return message:null, actions:[], missing_context:[{source:activities,time_scope:tomorrow}]. A joke about alarms needs no recovery. Allowed recovery sources are activities and exams; activity scopes are today, tomorrow, week, this_week, next_week, month, all; exam scopes are today, tomorrow, week, this_week, next_week, month, upcoming. Normal replies use missing_context:[]. The current request and bounded current-chat context are already supplied; historical retrieval keeps the existing memory_request format. missing_context and memory_request share one follow-up main-agent call. If context_recovery_remaining is 0, return missing_context:[] and memory_request:null, and answer from available facts or ask one clarification. Commute duration and other user-only facts must be clarified, never invented or requested as an unsupported source."
+STUDY_PLANNING_INSTRUCTIONS += " excluded_sources is a binding backend policy for this request. Never request an excluded source even when its context_status is not_selected; answer without it or ask a clarification."
 
 
 def proposal_request_limits(effort):
@@ -50,6 +52,9 @@ def build_agent_messages(user_request, observations, recent_turns=None, *, chat_
                    "observations": observations,
                    "context_status": context_status if context_status is not None else build_context_status(observations),
                    "context_recovery_remaining": context_recovery_remaining}
+    excluded = excluded_context_sources(user_request)
+    if excluded:
+        model_input["excluded_sources"] = sorted(excluded)
     input_messages = []
     if chat_summary:
         input_messages.append({'role':'user','content':json.dumps({'current_chat_summary':chat_summary,

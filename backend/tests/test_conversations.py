@@ -86,7 +86,7 @@ class ConversationAPITests(unittest.TestCase):
 
     def test_send_loads_local_history_and_retries_without_another_model_call(self):
         from backend.app import database
-        from backend.app.conversations import service
+        from backend.app.conversations import service, legacy as legacy_adapter
         with tempfile.TemporaryDirectory() as directory, \
                 patch.object(database, 'db_file', Path(directory)/'db.sqlite'), \
                 patch.object(service, 'is_openai_api_key_configured', return_value=True), \
@@ -124,11 +124,11 @@ class ConversationAPITests(unittest.TestCase):
 class ConversationMemoryTests(unittest.TestCase):
     def test_verified_legacy_link_is_single_and_keeps_original_timestamp(self):
         from backend.app import database
-        from backend.app.conversations import service
+        from backend.app.conversations import service, legacy as legacy_adapter
         legacy=uuid4().hex
         with tempfile.TemporaryDirectory() as directory, patch.object(database,'db_file',Path(directory)/'test.db'), \
-                patch.object(service.recent,'get_recent_turns',return_value=[{'timestamp':'2026-09-01T12:00:00+12:00','user':'Earlier discussion','assistant':{'message':'A proposal','actions':[]}}]), \
-                patch.object(service.archive_store,'iter_archive_records',return_value=iter([])):
+                patch.object(legacy_adapter.recent,'get_recent_turns',return_value=[{'timestamp':'2026-09-01T12:00:00+12:00','user':'Earlier discussion','assistant':{'message':'A proposal','actions':[]}}]), \
+                patch.object(legacy_adapter.archive_store,'iter_archive_records',return_value=iter([])):
             service.link_verified_legacy_chat(legacy,legacy)
             service.link_verified_legacy_chat(legacy,legacy)
             self.assertEqual(len(service.list_chats(legacy)),1)

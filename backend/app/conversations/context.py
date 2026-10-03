@@ -4,7 +4,7 @@ from copy import deepcopy
 
 from backend.app.ai.config import get_max_recent_turns
 from backend.app.conversations import storage
-from backend.app.conversations.summary import read_summary
+from backend.app.conversations.storage import read_summary
 
 MAX_RECENT_CONTEXT_CHARS = 16000
 MAX_TURN_CONTEXT_CHARS = 8000

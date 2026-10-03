@@ -1,7 +1,5 @@
 """Conversation operations; the trusted owner is supplied by the HTTP adapter."""
 import sqlite3
-import json
-from uuid import UUID, uuid5
 from contextlib import contextmanager
 
 from backend.app import database
@@ -14,7 +12,7 @@ from backend.app.ai.agent.service import get_agent_proposal
 from backend.app.ai.config import is_openai_api_key_configured
 from backend.app.ai.agent.contracts import validate_agent_proposal
 from backend.app.conversations.contracts import ConversationConflict
-from backend.app.ai.memory import archive_store, recent
+from backend.app.conversations.legacy import link_legacy_chat
 
 
 @contextmanager
@@ -86,7 +84,7 @@ def update_memory_sharing(owner_id, conversation_id, enabled):
         chat = storage.set_memory_sharing(connection,conversation_id,owner_id,enabled)
         try:
             export_eligible_turns(connection,owner_id,conversation_id)
-        except (OSError, ValueError, RuntimeError):
+        except (sqlite3.Error, OSError, ValueError, RuntimeError):
             chat['memory_export_pending'] = True
         return chat
 
@@ -106,27 +104,4 @@ def link_verified_legacy_chat(owner_id,legacy_id):
     if owner_id != legacy_id:
         return
     with open_store() as connection:
-        row = connection.execute('SELECT owner_id FROM conversations WHERE conversation_id=?',(legacy_id,)).fetchone()
-        if row:
-            return
-        turns = recent.get_recent_turns(legacy_id)
-        has_archive = next(archive_store.iter_archive_records(session_id=legacy_id),None) is not None
-        if not turns and not has_archive:
-            return
-        timestamp=storage.now_iso()
-        with connection:
-            connection.execute('INSERT INTO conversations VALUES(?,?,?,?,?,?,?)',
-                (legacy_id,owner_id,'Previous conversation',timestamp,timestamp,'active',0))
-            sequence=0
-            for index,turn in enumerate(turns):
-                # Undated legacy turns are retained in the original store, not dated by guessing.
-                if not turn.get('timestamp'):
-                    continue
-                proposal={key:value for key,value in turn['assistant'].items() if key!='agent_context'}
-                from backend.app.infrastructure.privacy import redact_secrets
-                proposal=redact_secrets(proposal)
-                request=str(uuid5(UUID(legacy_id),f'legacy-{index}-{turn["timestamp"]}'))
-                for role,content,saved in (('user',redact_secrets(turn['user']),None),('assistant',proposal['message'],json.dumps(proposal))):
-                    sequence+=1
-                    connection.execute('INSERT INTO conversation_messages VALUES(?,?,?,?,?,?,?,?,?,?)',
-                        (str(uuid5(UUID(request),role)),legacy_id,sequence,request,role,content,saved,None,'completed',turn['timestamp']))
+        link_legacy_chat(connection, owner_id, legacy_id)

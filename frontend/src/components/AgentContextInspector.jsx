@@ -35,6 +35,7 @@ function AgentContextInspector({ context, actions = [] }) {
             {context.memory_lookups.map((lookup, index) => (
               <p key={index} className="agent-context-note">
                 {lookup.phase} lookup: {lookup.status} · {lookup.result_count} results
+                {lookup.scope ? ` · ${lookup.scope}` : ''}
                 {lookup.truncated ? ' · Results limited' : ''}
                 {lookup.unavailable_sources.length > 0 ? ` · Unavailable: ${lookup.unavailable_sources.join(', ')}` : ''}
               </p>
@@ -51,6 +52,7 @@ function AgentContextInspector({ context, actions = [] }) {
                     <summary>Provenance details</summary>
                     <dl className="agent-context-fields">
                       <dt>Source ID</dt><dd>{item.source_id || 'Unavailable'}</dd>
+                      {item.conversation_id && <><dt>Conversation</dt><dd>{item.conversation_id}</dd></>}
                       {item.timestamp && <><dt>Timestamp</dt><dd>{item.timestamp}</dd></>}
                       {item.period_start && <><dt>Period start</dt><dd>{item.period_start}</dd></>}
                       {item.period_end && <><dt>Period end</dt><dd>{item.period_end}</dd></>}

@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from backend.app import database
 from backend.app.conversations import storage
 from backend.app.conversations.context import build_chat_context
+from backend.app.conversations.memory_context import retrieve_for_chat
 from backend.app.ai.agent.service import get_agent_proposal
 from backend.app.ai.config import is_openai_api_key_configured
 from backend.app.ai.agent.contracts import validate_agent_proposal
@@ -53,7 +54,9 @@ def send_message(owner_id, conversation_id, request_id, message):
             observation_connection = sqlite3.connect(f'{database.db_file.resolve().as_uri()}?mode=ro', uri=True)
             try:
                 proposal = get_agent_proposal(observation_connection, message, context['recent_turns'],
-                    session_id=conversation_id, include_context=True)
+                    session_id=conversation_id, include_context=True,
+                    memory_reader=lambda selected: retrieve_for_chat(connection, owner_id, conversation_id, selected,
+                                                                   recent_turns=context['recent_turns']))
             finally:
                 observation_connection.close()
             validate_agent_proposal({key:value for key,value in proposal.items() if key != 'agent_context'})

@@ -59,6 +59,13 @@ class MemorySelection(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     sources: list[Literal["raw_archive", "compressed_archive", "durable"]]
     query: MemoryRequest
+    scope: Literal['current_chat', 'global'] | None = None
+
+    def model_dump(self, *args, **kwargs):
+        value = super().model_dump(*args, **kwargs)
+        if self.scope is None:
+            value.pop('scope', None)
+        return value
 
     @model_validator(mode="after")
     def validate_sources(self):

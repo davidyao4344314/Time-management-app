@@ -119,3 +119,35 @@ class ConversationAPITests(unittest.TestCase):
             self.assertEqual(retry['status'], 'failed')
             self.assertEqual(model.call_count,1)
             self.assertEqual(service.read_chat('owner',chat)['messages'][0]['status'],'failed')
+
+
+class ConversationMemoryTests(unittest.TestCase):
+    def test_local_lookup_and_opt_in_global_isolation(self):
+        import json
+        from backend.app.ai.memory import archive_store
+        from backend.app.conversations.memory_context import retrieve_for_chat
+        with tempfile.TemporaryDirectory() as directory, patch.object(archive_store,'ARCHIVE_FILE',Path(directory)/'archive.jsonl'):
+            connection = sqlite3.connect(':memory:')
+            self.addCleanup(connection.close)
+            storage.migrate(connection)
+            a = storage.create_conversation(connection,'owner')['conversation_id']
+            b = storage.create_conversation(connection,'owner')['conversation_id']
+            foreign = storage.create_conversation(connection,'other')['conversation_id']
+            request = str(uuid4())
+            storage.begin_request(connection,a,'owner',request,'COMPSCI local history')
+            storage.complete_request(connection,a,request,{'message':'Only this chat','actions':[]})
+            selection = {'sources':['raw_archive'],'query':{'time_reference':None,'search_terms':['COMPSCI']},'scope':'current_chat'}
+            self.assertEqual(len(retrieve_for_chat(connection,'owner',a,selection)['items']),1)
+            self.assertEqual(retrieve_for_chat(connection,'owner',b,selection)['items'],[])
+            rows = [{'turn_id':str(uuid4()),'session_id':identifier,'timestamp':'2026-10-03T12:00:00+13:00',
+                     'turn':{'user':'COMPSCI','assistant':{'message':text,'actions':[]}}}
+                    for identifier,text in ((a,'Authorized'),(foreign,'PRIVATE OTHER OWNER'))]
+            archive_store.ARCHIVE_FILE.write_text(''.join(json.dumps(row)+'\n' for row in rows))
+            selection['scope']='global'
+            self.assertEqual(retrieve_for_chat(connection,'owner',b,selection)['items'],[])
+            storage.set_memory_sharing(connection,a,'owner',True)
+            storage.set_memory_sharing(connection,foreign,'other',True)
+            result = retrieve_for_chat(connection,'owner',b,selection)
+            self.assertEqual(len(result['items']),1)
+            self.assertNotIn('PRIVATE',json.dumps(result))
+            self.assertEqual(result['items'][0]['conversation_id'],a)

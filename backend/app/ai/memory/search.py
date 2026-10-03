@@ -222,7 +222,7 @@ def _memory_candidates(source, request, session_id, now):
                       "source_refs": ref_ids[:5], "source_ref_count": len(ref_ids)}
 
 
-def search_memory(selection, *, session_id, now=None):
+def search_memory(selection, *, session_id, now=None, authorized_sessions=None):
     """Read selected stores, rank/deduplicate, and cap the complete observation."""
     selected = MemorySelection.model_validate(selection)
     if not isinstance(session_id, str) or not session_id:
@@ -232,13 +232,18 @@ def search_memory(selection, *, session_id, now=None):
     unavailable = []
     truncated = False
     priority = {"raw_archive": 3, "durable": 2, "compressed_archive": 1}
+    sessions = list(dict.fromkeys(authorized_sessions)) if authorized_sessions is not None else [session_id]
     for source in selected.sources:
         try:
             # Retain only a small candidate pool, not the whole raw archive.
             pool = []
-            for position, (score, item) in enumerate(_memory_candidates(
-                source, selected.query, session_id, now
-            )):
+            def candidates_for_sessions():
+                for identity in sessions:
+                    for score, item in _memory_candidates(source, selected.query, identity, now):
+                        if authorized_sessions is not None:
+                            item = {**item, 'conversation_id': identity}
+                        yield score, item
+            for position, (score, item) in enumerate(candidates_for_sessions()):
                 stamp = _parse_timestamp(item.get("timestamp") or item.get("period_end"))
                 recency = stamp.timestamp() if stamp else float("-inf")
                 ranked = (score, priority[source], recency, position, item)

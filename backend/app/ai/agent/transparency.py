@@ -9,6 +9,7 @@ SOURCE_INFO = {
     "raw_archive": ("Raw archive", "historical"),
     "compressed_archive": ("Compressed archive", "historical_summary"),
     "durable": ("Durable memory", "historical"),
+    "current_chat": ("Earlier current-chat messages", "historical"),
 }
 
 
@@ -21,7 +22,8 @@ def _text(value, limit):
 
 def build_agent_context(routing, selection, recent_count, lookups):
     """Describe actual selection/retrieval; no inference from the user's words."""
-    selected_memory = {source for lookup in lookups for source in lookup["sources"]}
+    selected_memory = {source for lookup in lookups for source in
+                       (['current_chat'] if lookup['result'].get('scope') == 'current_chat' else lookup['sources'])}
     sources = []
     for source, (label, authority) in SOURCE_INFO.items():
         if source == "activities":
@@ -35,7 +37,7 @@ def build_agent_context(routing, selection, recent_count, lookups):
             reason = f"Included {recent_count} completed recent conversation turns."
         else:
             selected = source in selected_memory
-            reason = "Requested for a bounded, session-scoped historical lookup."
+            reason = "Requested for a bounded historical lookup within the authorized memory scope."
         sources.append({"source": source, "label": label, "selected": selected,
                         "authority": authority,
                         "reason": reason if selected else "Not selected for this request."})
@@ -46,6 +48,7 @@ def build_agent_context(routing, selection, recent_count, lookups):
         result = lookup["result"]
         lookup_details.append({
             "phase": lookup["phase"], "sources": lookup["sources"],
+            "scope": result.get('scope', 'legacy_session'),
             "status": result.get("status", "unavailable"),
             "result_count": len(result.get("items", [])),
             "truncated": bool(result.get("truncated", False)),
@@ -61,6 +64,7 @@ def build_agent_context(routing, selection, recent_count, lookups):
             label, authority = SOURCE_INFO.get(source, ("Historical memory", "historical"))
             public = {
                 "source_type": source, "label": label, "authority": authority,
+                "conversation_id": _text(item.get('conversation_id'), 80),
                 "category": _text(item.get("type") or item.get("category"), 80),
                 "excerpt": _text(item.get("text"), 240),
                 "source_id": _text(item.get("id"), 128),

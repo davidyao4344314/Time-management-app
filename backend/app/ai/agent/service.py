@@ -22,7 +22,7 @@ from backend.app.ai.agent.transparency import build_agent_context
 PROPOSAL_MODEL = "gpt-6-luna"
 
 
-def get_agent_proposal(connection, user_request, recent_turns=None, *, session_id=None, include_context=False):
+def get_agent_proposal(connection, user_request, recent_turns=None, *, session_id=None, include_context=False, memory_reader=None):
     """Return a validated message and proposed actions; never write to SQLite."""
     if not is_openai_api_key_configured():
         raise RuntimeError("OPENAI_API_KEY is not configured.")
@@ -54,6 +54,7 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
             activity_builder=build_activity_observation,
             exam_builder=build_exam_observation,
             session_id=session_id,
+            **({'memory_builder': memory_reader} if memory_reader is not None else {}),
         )
         if include_context and selection.get("memory") is not None:
             lookups.append({"phase": "initial", "sources": selection["memory"]["sources"],
@@ -72,7 +73,8 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
             old_query = (selection.get("memory") or {}).get("query")
             if old_query == request:
                 return finish(_memory_clarification())
-            memory = build_memory_observation(memory_selection, session_id=session_id)
+            memory = (memory_reader(memory_selection) if memory_reader is not None
+                      else build_memory_observation(memory_selection, session_id=session_id))
             lookup = {"phase": "followup", "sources": memory_selection["sources"],
                       "result": memory, "used_in_model": False}
             if include_context:

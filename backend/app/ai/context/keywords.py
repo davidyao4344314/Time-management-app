@@ -38,6 +38,8 @@ def choose_agent_context(user_message):
     The default is deliberately small: today's activities and upcoming exams.
     """
     message = user_message.casefold().replace("’", "'")
+    if re.search(r"\bwhat did i just say\b", message):
+        return {"activities_scope": None, "include_exams": False, "exam_scope": None}
     memory = _memory_selection(message)
     if memory is not None and not _mixed_memory_request(message):
         return {"activities_scope": None, "include_exams": False,
@@ -92,6 +94,8 @@ def assess_stage_one(user_message, recent_turns=None):
     """Keep the keyword router, but distinguish a clear match from its default."""
     message = user_message.casefold().replace("’", "'")
     selection = choose_agent_context(user_message)
+    if re.search(r"\bwhat did i just say\b", message):
+        return {"selection": selection, "confident": True, "reason": None}
     phrase_groups = (
         TODAY_PHRASES, WEEK_PHRASES, MONTH_PHRASES, EXAM_WORDS,
         ALL_ACTIVITY_PHRASES, ALL_CONTEXT_PHRASES, STUDY_WORDS,
@@ -137,7 +141,7 @@ def _memory_selection(message):
     historical = re.search(
         r"\b(what did (?:we|i) (?:say|discuss|talk|decide|agree|mention)|what (?:was|were) .*(?:discussed|decided|said)|"
         r"(?:we|i) (?:discussed|decided|said|talked)|remember what|"
-        r"(?:my|our) (?:preferences|previous decisions))\b", message)
+        r"(?:my|our) (?:preferences|previous decisions)|remember my preference|earlier in this chat)\b", message)
     if not historical:
         return None
     reference = next((label for phrase, label in (
@@ -155,4 +159,10 @@ def _memory_selection(message):
         ["durable", "raw_archive"] if _has_phrase(message, ("prefer", "preferences", "goal", "goals", "decided", "constraints"))
         else ["compressed_archive", "raw_archive"])
     terms = [term for term in terms if term not in {"exact", "words", "verbatim", "quote"}]
-    return {"sources": sources, "query": {"time_reference": reference, "search_terms": terms}}
+    result = {"sources": sources, "query": {"time_reference": reference, "search_terms": terms}}
+    if 'in this chat' in message or 'in this conversation' in message:
+        result['scope'] = 'current_chat'
+    elif 'remember my preference' in message:
+        result['scope'] = 'global'
+        result['sources'] = ['durable']
+    return result

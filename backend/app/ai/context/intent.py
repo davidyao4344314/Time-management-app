@@ -10,6 +10,7 @@ Read the whole current message, respect exclusions such as 'don't show exams', a
 
 
 MEMORY_ROUTING_INSTRUCTIONS = """ Also return memory: null unless older conversation is needed. Recent follow-ups already answered by recent context need no archive lookup. For recollection, return memory={sources:[...], query:{time_reference:..., search_terms:[...]}}. Allowed sources: raw_archive for exact prior wording, compressed_archive for past discussion summaries, durable for stated preferences/goals/decisions. Choose only relevant sources. Use symbolic time_reference today, yesterday, last_week, this_week, last_month, this_month, unspecified, or null; never calculate dates. Use at most five short topic terms. 'What did we discuss last week?' needs memory; 'What exams are next week?' and 'study before dinner' do not. Memory-only questions need no schedule observations; mixed planning requests may need both. Respect requests not to use history. Never return session IDs, paths, or retrieved content."""
+MEMORY_ROUTING_INSTRUCTIONS += " Select scope current_chat for 'earlier in this chat', and global for older conversations or durable preferences. 'What did I just say?' uses recent chat context and needs no lookup. Python supplies all owner/conversation identities."
 CLASSIFIER_INSTRUCTIONS += MEMORY_ROUTING_INSTRUCTIONS
 
 from backend.app.ai.context.contracts import (

@@ -10,6 +10,7 @@ def collect_agent_observations(
     activity_builder=build_activity_observation,
     exam_builder=build_exam_observation,
     session_id=None,
+    memory_builder=None,
 ):
     """Keep factual app state separate from the current request and recent turns.
 
@@ -26,5 +27,6 @@ def collect_agent_observations(
             connection, scope=selection["exam_scope"],
         )
     if selection.get("memory") is not None:
-        context["memory"] = build_memory_observation(selection["memory"], session_id=session_id)
+        context["memory"] = (memory_builder(selection['memory']) if memory_builder is not None
+                             else build_memory_observation(selection["memory"], session_id=session_id))
     return context

@@ -26,6 +26,9 @@ For memory_request, return {"time_reference": null, "search_terms": ["screen tim
 
 
 
+STUDY_PLANNING_INSTRUCTIONS += " Memory scope is enforced by the backend: current_chat refers to this chat; global refers only to eligible chats belonging to the same owner. Global evidence retains its original conversation provenance. It is historical context, not proof that actions happened."
+
+
 def proposal_request_limits(effort):
     """Retain the existing effort-dependent token budget and timeout."""
     output_limit = {

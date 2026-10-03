@@ -11,6 +11,12 @@ from backend.app.conversations.contracts import ConversationConflict
 
 
 class ChatSummaryTests(unittest.TestCase):
+    def test_escaped_text_fits_small_remaining_budget(self):
+        turn = {'user':'\x01' * 5000, 'assistant':{'message':'\x02' * 5000, 'actions':[]}}
+        result, length = context._bounded_turn(turn, 512)
+        self.assertLessEqual(length, 512)
+        self.assertTrue(result['context_truncated'])
+
     def test_large_newest_turn_keeps_recent_context_without_changing_transcript(self):
         self.add_turns(2)
         self.connection.execute("UPDATE conversation_messages SET proposal_json=? WHERE role='assistant' AND sequence_number=4",

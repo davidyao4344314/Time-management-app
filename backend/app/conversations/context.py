@@ -14,6 +14,8 @@ def _excerpt(text, limit):
     if len(text) <= limit:
         return text
     marker = '\n[Earlier/middle text omitted from context]\n'
+    if limit <= len(marker):
+        return text[:limit]
     remaining = max(0, limit - len(marker))
     return text[:remaining // 2] + marker + text[-(remaining - remaining // 2):]
 
@@ -27,14 +29,14 @@ def _bounded_turn(turn, budget):
     # Retain literal excerpts of both sides; never rewrite the stored transcript.
     snapshot['assistant']['actions'] = []
     snapshot['assistant']['message'] += '\n[Large turn excerpt; proposed action details may be omitted. No actions were executed.]'
+    available = max(1, (budget - 400) // 2)
     while size() > budget:
-        available = max(64, (budget - 400) // 2)
         snapshot['user'] = _excerpt(snapshot['user'], available)
         snapshot['assistant']['message'] = _excerpt(snapshot['assistant']['message'], available)
         if size() > budget:
             # Other response metadata is not needed for conversation context.
             snapshot['assistant'] = {'message': snapshot['assistant']['message'], 'actions': []}
-            budget -= 100
+            available = max(1, available // 2)
     snapshot['context_truncated'] = True
     return snapshot, size()
 

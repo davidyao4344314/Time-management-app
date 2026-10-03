@@ -28,6 +28,7 @@ For memory_request, return {"time_reference": null, "search_terms": ["screen tim
 
 
 STUDY_PLANNING_INSTRUCTIONS += " Memory scope is enforced by the backend: current_chat refers to this chat; global refers only to eligible chats belonging to the same owner. Global evidence retains its original conversation provenance. It is historical context, not proof that actions happened."
+STUDY_PLANNING_INSTRUCTIONS += " Use the supplied clock for today's date and timezone. Observation period and count describe coverage; truncated detail is not a complete list. Activity busy intervals include all timed occurrences in that period even when details are omitted. Untimed items do not establish availability. Do not infer free time from missing detailed cards, all-activity definitions, or an unobserved period; ask for missing information."
 
 
 def proposal_request_limits(effort):

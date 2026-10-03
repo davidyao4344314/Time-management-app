@@ -1,6 +1,22 @@
 """Small formatting helpers shared by activity and exam observations."""
 
 from datetime import datetime, timedelta
+import json
+
+MAX_OBSERVATION_ITEMS = 20
+MAX_DETAIL_CHARS = 6000
+
+
+def bounded_details(items):
+    """Limit descriptive detail without implying that omitted items do not exist."""
+    result, size = [], 2
+    for item in items:
+        length = len(json.dumps(item, ensure_ascii=False)) + 2
+        if len(result) >= MAX_OBSERVATION_ITEMS or size + length > MAX_DETAIL_CHARS:
+            break
+        result.append(item)
+        size += length
+    return result
 
 
 def compact_time(value):

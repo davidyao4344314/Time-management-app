@@ -14,6 +14,7 @@ from backend.app.ai.observations.formatting import (
     chronological_key,
     compact_time as _time_or_none,
     observation_date_range,
+    bounded_details,
 )
 
 
@@ -64,6 +65,28 @@ def _brief_activity_definition(activity):
     }
 
 
+def _busy_ranges(occurrences):
+    """Complete union of occupied times, including occurrences omitted from detail."""
+    days = {}
+    untimed = 0
+    for item in occurrences:
+        if not is_valid_activity_time(item['start_time'], item['end_time']):
+            untimed += 1
+            continue
+        days.setdefault(item['calendar_date'], []).append((
+            _time_or_none(item['start_time']), _time_or_none(item['end_time'])))
+    busy = {}
+    for day, ranges in sorted(days.items()):
+        merged = []
+        for start, end in sorted(ranges):
+            if merged and start <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], end)
+            else:
+                merged.append([start, end])
+        busy[day] = merged
+    return busy, untimed
+
+
 def build_activity_observation(connection, scope="week"):
     """Summarize the requested date window, or all activity definitions.
 
@@ -73,9 +96,12 @@ def build_activity_observation(connection, scope="week"):
     """
     if scope == "all":
         activities = get_all_activities(connection)
+        detailed = bounded_details(_brief_activity_definition(activity) for activity in activities)
         return {
-            "all_activities": [_brief_activity_definition(activity) for activity in activities],
+            "all_activities": detailed,
             "count": len(activities),
+            "truncated": len(detailed) < len(activities),
+            "coverage": 'activity definitions, not availability; request a date window for free time',
         }
 
     today = get_current_date()
@@ -106,25 +132,30 @@ def build_activity_observation(connection, scope="week"):
         _time_or_none(activity[7]) or "", activity[1], activity[0]
     ))
 
+    today_items = [_brief_occurrence(item) for item in relevant
+                   if item['calendar_date'] == today_string]
+    current_items = bounded_details(_brief_activity(item) for item in current)
+    busy, untimed = _busy_ranges(relevant)
     observation = {
-        "current": [_brief_activity(activity) for activity in current],
+        "current": current_items,
+        "current_count": len(current),
         "next": _brief_activity(next_activity) if next_activity else None,
-        "today": [
-            _brief_occurrence(occurrence)
-            for occurrence in relevant
-            if occurrence["calendar_date"] == today_string
-        ],
+        "today": bounded_details(today_items),
+        "today_count": len(today_items),
+        "period": {'start': max(first_date, today).isoformat(), 'end': last_date.isoformat()},
+        "count": len(relevant),
+        "busy": busy,
+        "untimed_count": untimed,
+        "truncated": len(current_items) < len(current) or len(bounded_details(today_items)) < len(today_items),
     }
     if scope == "today":
         return observation
 
     # Keep the original 20-occurrence limit for the default seven-day view.
     # An explicitly requested month includes the whole remaining month.
-    detailed = relevant[:20] if scope in {"week", "this_week", "next_week"} else relevant
-    observation["upcoming_month" if scope == "month" else "upcoming_7d"] = [
-        _brief_occurrence(occurrence, include_date=True)
-        for occurrence in detailed
-    ]
+    detailed = bounded_details(_brief_occurrence(item, include_date=True) for item in relevant)
+    observation["upcoming_month" if scope == "month" else "upcoming_7d"] = detailed
+    observation['truncated'] |= len(detailed) < len(relevant)
     return observation
 
 

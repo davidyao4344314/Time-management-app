@@ -8,10 +8,29 @@ from backend.app.ai.context.intent import context_from_classification
 from backend.app.ai.observations.formatting import observation_date_range
 from backend.app.ai.observations.exams import build_exam_observation
 from backend.app.ai.agent.reasoning import build_agent_messages
+from backend.app.ai.observations.activities import build_activity_observation
+from datetime import timedelta
 import json
 
 
 class ContextCorrectnessTests(unittest.TestCase):
+    def test_limited_details_keep_all_busy_dates(self):
+        def occurrences(connection, start):
+            return [{'id':number, 'name':f'Class {number}',
+                     'calendar_date':(start + timedelta(days=day)).isoformat(),
+                     'start_time':f'{number+9:02}:00', 'end_time':f'{number+10:02}:00'}
+                    for day in range(7) for number in range(4)]
+        with patch('backend.app.ai.observations.activities.get_current_date', return_value=date(2026, 10, 3)), \
+             patch('backend.app.ai.observations.activities.get_current_time', return_value='08:00'), \
+             patch('backend.app.ai.observations.activities.get_current_and_next_activities', return_value=([], None)), \
+             patch('backend.app.ai.observations.activities.get_week_activities', side_effect=occurrences):
+            for scope in ('week', 'month'):
+                result = build_activity_observation(None, scope)
+                self.assertTrue(result['truncated'])
+                self.assertGreater(result['count'], 20)
+                self.assertEqual(len(result['upcoming_7d' if scope == 'week' else 'upcoming_month']), 20)
+                self.assertEqual(result['busy'][result['period']['end']], [['09:00','13:00']])
+
     def test_empty_schedule_still_has_authoritative_clock(self):
         clock = {'date':'2026-10-04', 'time':'12:00', 'timezone':'Pacific/Auckland',
                  'as_of':'2026-10-04T12:00:00+13:00'}

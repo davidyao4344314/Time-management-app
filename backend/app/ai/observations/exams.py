@@ -5,7 +5,7 @@ from datetime import date, timedelta
 from backend.app.planner.calendar import get_current_date, get_current_time
 from backend.app.planner.exams import get_all_exams
 from backend.app.ai.observations.formatting import (
-    chronological_key, compact_time, observation_date_range,
+    chronological_key, compact_time, observation_date_range, bounded_details,
 )
 
 
@@ -52,8 +52,7 @@ def build_exam_observation(connection, scope="upcoming"):
         item[1].isoformat(), item[0][5], item[0][1], item[0][0],
     ))
 
-    return {
-        "upcoming": [
+    detailed = bounded_details(
             {
                 "name": exam[1],
                 "subject": exam[3],
@@ -62,9 +61,13 @@ def build_exam_observation(connection, scope="upcoming"):
                 "end": compact_time(exam[6]),
                 "days_left": (exam_date - today).days,
             }
-            for exam, exam_date in relevant[:20]
-        ],
+            for exam, exam_date in relevant
+        )
+    return {
+        "upcoming": detailed,
         "count": len(relevant),
+        "truncated": len(detailed) < len(relevant),
+        "period": {'start':first_date.isoformat(), 'end':end_date.isoformat()},
     }
 
 

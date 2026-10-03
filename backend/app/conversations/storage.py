@@ -1,7 +1,7 @@
 """SQLite chat storage. No agent calls, archive access or HTTP dependencies."""
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from uuid import uuid4
 
 from backend.app.conversations.contracts import ConversationConflict, ConversationNotFound
@@ -148,6 +148,14 @@ def complete_request(connection, conversation_id, request_id, proposal):
 def fail_request(connection, conversation_id, request_id):
     with connection:
         connection.execute("UPDATE conversation_messages SET status='failed' WHERE conversation_id=? AND request_id=? AND status='pending'", (conversation_id, request_id))
+
+
+def expire_interrupted_requests(connection, conversation_id):
+    """Maintenance before reads/sends; never retry a paid request automatically."""
+    cutoff = (datetime.now(timezone.utc)-timedelta(minutes=20)).isoformat(timespec='seconds')
+    with connection:
+        connection.execute("UPDATE conversation_messages SET status='failed' WHERE conversation_id=? AND status='pending' AND created_at<?",
+                           (conversation_id,cutoff))
 
 
 def completed_turns(connection, conversation_id, owner_id, *, limit=100):

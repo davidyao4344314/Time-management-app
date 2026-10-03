@@ -22,7 +22,7 @@ from backend.app.ai.agent.transparency import build_agent_context
 PROPOSAL_MODEL = "gpt-6-luna"
 
 
-def get_agent_proposal(connection, user_request, recent_turns=None, *, session_id=None, include_context=False, memory_reader=None):
+def get_agent_proposal(connection, user_request, recent_turns=None, *, session_id=None, include_context=False, memory_reader=None, chat_summary=None):
     """Return a validated message and proposed actions; never write to SQLite."""
     if not is_openai_api_key_configured():
         raise RuntimeError("OPENAI_API_KEY is not configured.")
@@ -40,9 +40,13 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
         if not include_context:
             return proposal
         recent_count = len(list(recent_turns or [])[-get_max_recent_turns():])
-        return {**proposal, "agent_context": build_agent_context(
+        public = build_agent_context(
             routing_trace, selection, recent_count, lookups,
-        )}
+        )
+        if chat_summary:
+            public['context_sources'].append({'source':'chat_summary','label':'Current-chat summary',
+                'selected':True,'authority':'historical_summary','reason':'Bounded summary of older completed messages in this chat.'})
+        return {**proposal, 'agent_context':public}
 
     with OpenAI(api_key=os.environ["OPENAI_API_KEY"].strip(), timeout=timeout, max_retries=0) as client:
         selection = select_agent_context(
@@ -61,6 +65,7 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
                             "result": context["memory"], "used_in_model": True})
         response = reasoning.request_agent_response(
             client, user_request, context, recent_turns, agent_settings, output_limit,
+            **({'chat_summary':chat_summary} if chat_summary is not None else {}),
         )
         proposal = reasoning.parse_agent_response(response)
         request = proposal.get("memory_request")
@@ -69,6 +74,9 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
             memory_selection = MemorySelection.model_validate({
                 "sources": ["raw_archive", "compressed_archive", "durable"],
                 "query": request,
+                # A follow-up lookup must retain an explicitly local scope.
+                **({"scope": selection["memory"]["scope"]}
+                   if (selection.get("memory") or {}).get("scope") else {}),
             }).model_dump()
             old_query = (selection.get("memory") or {}).get("query")
             if old_query == request:
@@ -85,6 +93,7 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
             lookup["used_in_model"] = True
             response = reasoning.request_agent_response(
                 client, user_request, context, recent_turns, agent_settings, output_limit,
+                **({'chat_summary':chat_summary} if chat_summary is not None else {}),
             )
             proposal = reasoning.parse_agent_response(response)
             if proposal.get("memory_request") is not None:

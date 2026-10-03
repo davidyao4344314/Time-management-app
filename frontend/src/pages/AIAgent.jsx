@@ -29,17 +29,24 @@ function AIAgent() {
         onChange={event => state.setMemorySharing(event.target.checked)} /> Allow older completed turns from this chat to be used as global memory</label>}
       {state.loading && <p role="status">Loading conversation…</p>}
       {!state.chat && !state.loading && <p>Start a New Chat to begin.</p>}
-      {state.nextBefore && <button onClick={state.loadOlder}>Load earlier messages</button>}
+      {state.nextBefore && <button className="chat-secondary" onClick={state.loadOlder}>Load earlier messages</button>}
       <MessageList messages={state.messages} sending={state.sending} />
       {state.error && <p role="alert">{state.error}</p>}
-      {state.retryAvailable && <button onClick={state.checkLast} disabled={state.sending}>Check last request</button>}
-      {state.chat && <button onClick={() => state.selectChat(state.chat.conversation_id)} disabled={state.sending}>Refresh chat</button>}
+      {state.retryAvailable && <button className="chat-secondary" onClick={state.checkLast} disabled={state.sending}>Check last request</button>}
+      {state.chat && <button className="chat-secondary" onClick={() => state.selectChat(state.chat.conversation_id)} disabled={state.sending}>Refresh chat</button>}
+      {state.chat && <div>
+        <button className="chat-secondary" onClick={state.summarizeChat} disabled={state.sending || state.summarizing || state.loading}>
+          {state.summarizing ? 'Summarizing…' : 'Summarize older messages'}
+        </button>
+        <p className="agent-context-note">Optional for long chats. Updating a summary makes an additional AI request.</p>
+        {state.summaryMessage && <p role="status">{state.summaryMessage}</p>}
+      </div>}
       {state.messages.length === 0 && state.chat && <div className="ai-agent-suggestions" aria-label="Request suggestions">
         {suggestions.map(([title, request]) => <button key={title} className="ai-agent-suggestion" disabled={state.sending}
           onClick={() => state.setDraft(request)}><strong>{title}</strong><span>{request}</span></button>)}
       </div>}
       <ChatComposer draft={state.draft} setDraft={state.setDraft} disabled={!state.chat || state.loading}
-        sending={state.sending} onSend={() => state.send()} />
+        sending={state.sending || state.summarizing} onSend={() => state.send()} />
     </section>
   </main>
 }

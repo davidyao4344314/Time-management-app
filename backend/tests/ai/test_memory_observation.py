@@ -228,6 +228,19 @@ class MemoryWorkflowTests(unittest.TestCase):
         self.assertEqual(model.call_count, 1)
         self.assertEqual(result["actions"], [])
 
+    def test_followup_lookup_keeps_explicit_current_chat_scope(self):
+        request = {"time_reference": None, "search_terms": ["COMPSCI"]}
+        selected = {"activities_scope": None, "include_exams": False, "exam_scope": None,
+                    "memory": {"scope": "current_chat", "sources": ["raw_archive"],
+                               "query": {"time_reference": None, "search_terms": ["study"]}}}
+        reader = Mock(side_effect=[{"status": "empty", "items": []},
+                                   {"status": "ok", "items": [{"text": "Past discussion"}]}])
+        with patch.object(service, "select_agent_context", return_value=selected), \
+                patch.object(reasoning, "request_agent_response", side_effect=[self.response(request), self.response()]):
+            service.get_agent_proposal(Mock(), "Earlier in this chat", [], session_id="one", memory_reader=reader)
+        self.assertEqual(reader.call_count, 2)
+        self.assertTrue(all(call.args[0]["scope"] == "current_chat" for call in reader.call_args_list))
+
     def test_selected_memory_is_separate_from_recent_and_current_facts(self):
         recent = [{"user": "Old plan", "assistant": {"message": "An exam tomorrow", "actions": []}}]
         observation = {"activities": {"today": []}, "exams": {"upcoming": []},

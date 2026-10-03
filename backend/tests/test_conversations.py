@@ -122,6 +122,35 @@ class ConversationAPITests(unittest.TestCase):
 
 
 class ConversationMemoryTests(unittest.TestCase):
+    def test_verified_legacy_link_is_single_and_keeps_original_timestamp(self):
+        from backend.app import database
+        from backend.app.conversations import service
+        legacy=uuid4().hex
+        with tempfile.TemporaryDirectory() as directory, patch.object(database,'db_file',Path(directory)/'test.db'), \
+                patch.object(service.recent,'get_recent_turns',return_value=[{'timestamp':'2026-09-01T12:00:00+12:00','user':'Earlier discussion','assistant':{'message':'A proposal','actions':[]}}]), \
+                patch.object(service.archive_store,'iter_archive_records',return_value=iter([])):
+            service.link_verified_legacy_chat(legacy,legacy)
+            service.link_verified_legacy_chat(legacy,legacy)
+            self.assertEqual(len(service.list_chats(legacy)),1)
+            messages=service.read_chat(legacy,legacy)['messages']
+            self.assertEqual(len(messages),2)
+            self.assertEqual(messages[0]['created_at'],'2026-09-01T12:00:00+12:00')
+            service.link_verified_legacy_chat('other',legacy)
+            self.assertEqual(service.list_chats('other'),[])
+
+    def test_interrupted_request_expires_without_restarting_model(self):
+        connection=sqlite3.connect(':memory:')
+        self.addCleanup(connection.close)
+        storage.migrate(connection)
+        chat=storage.create_conversation(connection,'owner')['conversation_id']
+        request=str(uuid4())
+        storage.begin_request(connection,chat,'owner',request,'Question')
+        connection.execute("UPDATE conversation_messages SET created_at='2020-01-01T00:00:00+00:00'")
+        connection.commit()
+        storage.expire_interrupted_requests(connection,chat)
+        self.assertEqual(storage.request_messages(connection,chat,request)[0]['status'],'failed')
+        storage.begin_request(connection,chat,'owner',str(uuid4()),'New question')
+
     def test_export_receipt_retry_and_summary_provenance_prevent_duplicates(self):
         import json
         from backend.app.ai.memory import archive_store

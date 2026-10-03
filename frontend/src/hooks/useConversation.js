@@ -20,7 +20,10 @@ export default function useConversation() {
   const pending = useRef(null)
   const load = useRef(null)
   const mounted = useRef(false)
+  const inFlight = useRef(false)
   const [retryAvailable, setRetryAvailable] = useState(false)
+  const [summarizing, setSummarizing] = useState(false)
+  const [summaryMessage, setSummaryMessage] = useState('')
 
   async function selectChat(id) {
     load.current?.abort()
@@ -28,9 +31,11 @@ export default function useConversation() {
     load.current = controller
     active.current = id
     setLoading(true)
+    setChat(null)
     setMessages([])
     setDraft('')
     setError('')
+    setSummaryMessage('')
     try {
       const result = await api(`/${id}/messages`, { signal: controller.signal })
       if (!mounted.current || active.current !== id) return
@@ -86,7 +91,8 @@ export default function useConversation() {
   }, [])
 
   async function send(attempt = null) {
-    if (sending || !chat || (!attempt && !draft.trim())) return
+    if (inFlight.current || !chat || (!attempt && !draft.trim())) return
+    inFlight.current = true
     const request = attempt || { id: chat.conversation_id, request_id: crypto.randomUUID(), message: draft.trim() }
     pending.current = request
     setSending(true)
@@ -114,7 +120,7 @@ export default function useConversation() {
         setError(`${failure.message} Your text is kept. Check the last request before sending again.`)
         setRetryAvailable(true)
       }
-    } finally { if (mounted.current) setSending(false) }
+    } finally { inFlight.current = false; if (mounted.current) setSending(false) }
   }
 
   async function loadOlder() {
@@ -138,6 +144,21 @@ export default function useConversation() {
     } catch (failure) { if (mounted.current) setError(failure.message) }
   }
 
+  async function summarizeChat() {
+    if (!chat || sending || summarizing) return
+    const id = chat.conversation_id
+    setSummarizing(true)
+    setSummaryMessage('')
+    try {
+      const result = await api(`/${id}/summary`, {method:'POST'})
+      if (mounted.current && active.current===id) setSummaryMessage(result.status==='updated'
+        ? 'Older messages summarized for this chat. Your original messages are preserved.'
+        : 'A summary is not needed yet. At least 10 older completed turns outside recent context are required.')
+    } catch (failure) { if (mounted.current) setError(failure.message) }
+    finally { if (mounted.current) setSummarizing(false) }
+  }
+
   return { chats, chat, messages, draft, setDraft, loading, sending, error, nextBefore,
-    selectChat, newChat, send, loadOlder, setMemorySharing, retryAvailable, checkLast: () => send(pending.current) }
+    selectChat, newChat, send, loadOlder, setMemorySharing, summarizeChat, summarizing, summaryMessage,
+    retryAvailable, checkLast: () => send(pending.current) }
 }

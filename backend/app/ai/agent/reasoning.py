@@ -39,10 +39,13 @@ def proposal_request_limits(effort):
     return output_limit, timeout
 
 
-def build_agent_messages(user_request, observations, recent_turns=None):
+def build_agent_messages(user_request, observations, recent_turns=None, *, chat_summary=None):
     """Keep conversation context and fresh factual observations separate."""
     model_input = {"request": user_request.strip(), "observations": observations}
     input_messages = []
+    if chat_summary:
+        input_messages.append({'role':'user','content':json.dumps({'current_chat_summary':chat_summary,
+            'note':'Historical context only. Proposed actions were not executed. Current observations take priority.'},ensure_ascii=False)})
     for turn in list(recent_turns or [])[-get_max_recent_turns():]:
         input_messages.append({"role": "user", "content": turn["user"]})
         input_messages.append({
@@ -58,12 +61,12 @@ def build_agent_messages(user_request, observations, recent_turns=None):
     return input_messages
 
 
-def request_agent_response(client, user_request, observations, recent_turns, settings, output_limit):
+def request_agent_response(client, user_request, observations, recent_turns, settings, output_limit, *, chat_summary=None):
     """Request structured advice/proposals only; never call an activity tool."""
     return client.responses.parse(
         model=settings["model"],
         instructions=STUDY_PLANNING_INSTRUCTIONS,
-        input=build_agent_messages(user_request, observations, recent_turns),
+        input=build_agent_messages(user_request, observations, recent_turns, chat_summary=chat_summary),
         text_format=AgentProposal,
         reasoning={"effort": settings["reasoning_effort"]},
         max_output_tokens=output_limit,

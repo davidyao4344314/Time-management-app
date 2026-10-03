@@ -3,6 +3,7 @@ import json
 
 from backend.app.ai.config import get_max_recent_turns
 from backend.app.conversations import storage
+from backend.app.conversations.summary import read_summary
 
 MAX_RECENT_CONTEXT_CHARS = 16000
 
@@ -16,4 +17,7 @@ def build_chat_context(connection, conversation_id, owner_id):
             break  # Preserve a contiguous suffix of whole completed turns.
         recent.insert(0, turn)
         size += length
-    return {'recent_turns': recent, 'summary': None}
+    summary = read_summary(connection,conversation_id)
+    if summary and recent and summary['through_sequence_number'] >= recent[0]['sequence_number']:
+        summary = None  # Increased recent window: don't send covered messages twice.
+    return {'recent_turns': recent, 'summary': summary}

@@ -4,6 +4,15 @@ This README explains how to run the project and describes the backend as it
 currently works. The AI agent can **propose** an activity, but cannot yet save
 an AI-proposed activity.
 
+## Multi-conversation AI chat
+
+AI Agent now supports New Chat, persisted message history and switching between
+conversations. Recent context belongs only to the selected chat. Global memory
+sharing is opt-in; optional local summaries preserve the original transcript.
+See [Conversations and memory](CONVERSATIONS.md) for the API, storage boundaries,
+migration details and no-charge tests. The older `/ai/propose` route remains a
+compatibility path with its original recent-memory behavior.
+
 ## Run the API
 
 From the project root, install dependencies into the existing backend virtual
@@ -45,6 +54,7 @@ backend/
 │   ├── server.py             # FastAPI app: mounts feature routers
 │   ├── cli.py                # Existing interactive planner program
 │   ├── database.py           # Existing SQLite connection/schema setup
+│   ├── conversations/        # Persistent chats, local context, summaries, export receipts
 │   ├── ai/
 │   │   ├── config.py         # Local API key/model/memory-limit settings
 │   │   ├── agent/            # Agent coordination, reasoning and contracts
@@ -96,34 +106,39 @@ backend/.venv/bin/python -m backend.app.cli
 ## AI study-planning workflow: implemented
 
 ```text
-POST /ai/propose with a user message and browser session
-  -> read up to the configured number of recent completed turns (5–100)
+POST /conversations/{id}/messages with a message and request ID
+  -> verify signed owner, save the pending user message
+  -> select bounded recent completed turns from this chat (5–100)
   -> choose activity/exam context with the Stage 1/2/3 routing pipeline
-  -> build fresh observations from the current SQLite data
-  -> send the request, selected observations and recent turns to OpenAI
+  -> build fresh observations and retrieve memory only when selected
+  -> send selected context, optional local summary and recent turns to OpenAI
   -> validate a structured message and proposed actions
-  -> return the proposal; do not execute its actions
+  -> persist the assistant response; return it without executing actions
 ```
 
 The API checks for a configured `OPENAI_API_KEY` before calling OpenAI. The key
 stays in the backend's local environment configuration; it is not returned in
-the proposal. `/ai/propose` reads the database without writing to it.
+the proposal. New conversation requests write transcript tables, not planner
+activities/exams. The compatibility `/ai/propose` endpoint still reads the
+planner database without writing to it.
 
 ### Recent conversation memory
 
-A completed turn contains a user message and the assistant's response. The
-backend keeps 5–100 recent completed turns per browser session in memory; the
-default is 5. Change the limit in AI Settings. When a new turn exceeds the
-limit, the oldest turn is appended to the Git-ignored
-`backend/ai_memory_archive.jsonl` file. Lowering the limit archives excess
-in-memory turns before the next AI request; increasing it does not restore
-turns already archived. Archive entries preserve their order and session ID.
+A completed turn contains a user message and the assistant's response. New chats
+persist their full transcript in SQLite and select 5–100 recent completed turns
+for context (default 5, adjustable in AI Settings). A 16,000-character budget
+also bounds this whole-turn window. A separately requested local summary can
+cover older turns without deleting them or repeating recent messages.
 
-Only recent turns are supplied to normal model requests. An archive-search helper
-exists, but it is not automatically called or sent to the model. Recent in-memory
-turns do not survive a server restart; the archive is not automatically restored.
-Failed proposals do not become completed turns. The conversation records a
-proposal as a proposal, not as a completed calendar change.
+Global sharing is off by default. Opted-in older completed turns can enter the
+Git-ignored archive using idempotent export receipts. Global memory is retrieved
+only when selected and only from the same owner's opted-in chats. Failed requests
+do not enter completed context. Proposed actions are not completed changes.
+See [Conversations and memory](CONVERSATIONS.md) for limits and recovery details.
+
+The compatibility `/ai/propose` route retains its RAM-backed recent turns and
+legacy archive behavior. Its recent turns do not survive a backend restart;
+SQLite conversation transcripts do.
 
 ### Archive compaction threshold (Stage 1)
 
@@ -632,16 +647,14 @@ effort for the main agent are configurable separately from the routing stages.
 
 ## Not implemented yet
 
-The React AI Agent page has an Ask AI placeholder, but it does not call
-`/ai/propose` or display returned proposals. The AI Settings key form is also a
-frontend placeholder, although backend key-configuration endpoints exist; the
-model selector is connected to the backend. There is no Accept/Reject UI, no
+The React AI Agent now sends conversation messages through FastAPI and displays
+saved replies, proposals and context inspectors. AI Settings configures the key
+locally without returning it to React. There is still no Accept/Reject UI, no
 approval/execution endpoint, and no automatic call to `add_activity` for an
 AI-proposed action. A normal activity can still be added through the existing
 manual app workflow.
 
-Automatic archive-compaction runs, automatic durable-memory extraction and
-retrieval of archived turns, compressed summaries or durable memories, Screen
+Automatic archive-compaction runs, automatic durable-memory extraction, Screen
 Time context routing, goals and study-history
 observations, and observation hash/change caching are not part of the normal
 AI request flow. They should not be assumed to affect a current AI response.

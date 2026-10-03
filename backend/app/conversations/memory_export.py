@@ -4,6 +4,7 @@ from uuid import UUID, uuid5
 
 from backend.app.ai.config import get_max_recent_turns
 from backend.app.ai.memory import archive_store
+from backend.app.ai.memory.selection import report_archive_size
 from backend.app.conversations import storage
 
 
@@ -47,4 +48,6 @@ def export_eligible_turns(connection, owner_id, conversation_id):
         with connection:
             connection.execute("UPDATE conversation_memory_exports SET status='exported' WHERE conversation_id=? AND request_id=?",(conversation_id,request_id))
         exported += 1
+    if exported:
+        report_archive_size()
     return {'exported':exported}

@@ -57,7 +57,9 @@ class FolderLayoutTests(unittest.TestCase):
         expected_paths = ["/activities","/activities/all","/activities/current","/activities/current-next","/activities/remove-duplicates","/activities/search","/activities/today","/activities/week","/activities/{activity_id}","/activities/{activity_id}/move","/ai/config","/ai/config/status","/ai/memory-config","/ai/model-config","/ai/propose","/ai/test-observation","/canvas/import","/canvas/status","/exams","/exams/search","/exams/{exam_id}","/uoa/import","/uoa/status"]
         self.assertEqual(set(app.openapi()["paths"]), set(expected_paths) | {
             '/conversations', '/conversations/{conversation_id}/messages',
-            '/conversations/{conversation_id}/settings', '/conversations/{conversation_id}/memory/export'})
+            '/conversations/{conversation_id}/settings', '/conversations/{conversation_id}/memory/export',
+            '/conversations/{conversation_id}/summary'})
+        self.assertIn('/conversations/{conversation_id}/summary', app.openapi()['paths'])
         route_pairs = [(route.path, tuple(sorted(route.methods)))
                        for route in app.routes if hasattr(route, "methods")]
         self.assertEqual(len(route_pairs), len(set(route_pairs)))

@@ -23,6 +23,9 @@ def resolve_owner(request, response):
         for name, value in (('ai_owner', owner), ('ai_owner_signature', sign_owner(owner))):
             response.set_cookie(name, value, httponly=True, samesite='lax', path='/',
                                 secure=request.url.scheme == 'https')
+    legacy = request.cookies.get('ai_agent_session')
+    if legacy == owner and valid_owner(legacy, request.cookies.get('ai_agent_session_signature')):
+        call_service(service.link_verified_legacy_chat,owner,legacy)
     return owner
 
 
@@ -39,6 +42,8 @@ def call_service(function, *args, **kwargs):
         raise HTTPException(502, 'The AI request failed. Check model access, key and network.') from None
     except (InvalidProposalError, ValidationError):
         raise HTTPException(502, 'The AI response was incomplete or invalid.') from None
+    except RuntimeError:
+        raise HTTPException(502, 'Could not complete the AI request. Your saved messages are preserved.') from None
 
 
 @router.post('')
@@ -70,3 +75,8 @@ def update_settings(conversation_id: str, body: ConversationSettings, request: R
 @router.post('/{conversation_id}/memory/export')
 def export_memory(conversation_id: str, request: Request, response: Response):
     return call_service(service.retry_memory_export,resolve_owner(request,response),conversation_id)
+
+
+@router.post('/{conversation_id}/summary')
+def summarize_chat(conversation_id: str, request: Request, response: Response):
+    return call_service(service.summarize_chat,resolve_owner(request,response),conversation_id)

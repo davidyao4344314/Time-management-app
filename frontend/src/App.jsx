@@ -10,11 +10,18 @@ import AIAgent from './pages/AIAgent'
 
 function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
-  const [currentPage, setCurrentPage] = useState('Home')
+  const [currentPage, setCurrentPage] = useState(() =>
+    new URL(window.location.href).searchParams.has('chat') ? 'AI Agent' : 'Home'
+  )
 
   function changePage(pageName) {
     setCurrentPage(pageName)
     setIsSidebarOpen(false)
+    if (pageName !== 'AI Agent') {
+      const url = new URL(window.location.href)
+      url.searchParams.delete('chat')
+      window.history.replaceState(null, '', url)
+    }
   }
 
   return (

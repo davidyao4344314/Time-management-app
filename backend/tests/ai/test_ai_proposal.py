@@ -204,6 +204,20 @@ class AIProposalTests(unittest.TestCase):
                     "exam_scope": exam_scope,
                 })
 
+    def test_general_question_can_independently_require_schedule_context(self):
+        for activities in (True, False):
+            with self.subTest(include_activities=activities):
+                classification = ai_intent_classifier.validate_intent_classification({
+                    "intent": "general_question", "time_scope": "tomorrow",
+                    "include_activities": activities, "include_exams": False,
+                    "memory": None, "confidence": "high",
+                })
+                selected = ai_intent_classifier.context_from_classification(classification)
+                self.assertEqual(selected, {
+                    "activities_scope": "tomorrow" if activities else None,
+                    "include_exams": False, "exam_scope": None,
+                })
+
     def test_classifier_uses_only_brief_history_and_no_observations(self):
         history = [
             {

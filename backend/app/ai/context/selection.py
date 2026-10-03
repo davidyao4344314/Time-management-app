@@ -37,6 +37,7 @@ def select_agent_context(client, user_message, recent_turns, stage_two_model, *,
         )
         if stage_two.confidence == "high":
             selected = context_from_classification(stage_two)
+            ContextSelection.model_validate(selected)
             return _record_route(trace, selected, "stage_2", "matched",
                                  "Stage 1 was unresolved; Stage 2 returned a high-confidence classification.", stage_two)
         stage_two_result = {

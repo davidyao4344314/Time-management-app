@@ -316,6 +316,38 @@ class AIProposalTests(unittest.TestCase):
         })
         self.assertEqual(stage_three.call_args.args[4]["reason"], "invalid_or_unavailable")
 
+    def test_invalid_converted_stage_two_context_reaches_stage_three(self):
+        stage_two = ai_intent_classifier.AgentIntentClassification(
+            intent="general_question", time_scope="tomorrow",
+            include_activities=True, include_exams=False, confidence="high",
+        )
+        stage_three = ai_intent_classifier.AgentRoutingDecision(
+            intent="general_question", time_scope="tomorrow",
+            include_activities=True, include_exams=False,
+        )
+        malformed_selections = (
+            {"activities_scope": "year", "include_exams": False, "exam_scope": None},
+            {"activities_scope": "tomorrow", "include_exams": True, "exam_scope": None},
+            {"activities_scope": "tomorrow", "include_exams": "false", "exam_scope": None},
+        )
+        expected = {"activities_scope": "tomorrow", "include_exams": False, "exam_scope": None}
+        unresolved = {"selection": expected, "confident": False, "reason": "test_unresolved"}
+        for malformed in malformed_selections:
+            with self.subTest(selection=malformed), \
+                    patch.object(ai_routing_pipeline, "assess_stage_one", return_value=unresolved), \
+                    patch.object(ai_routing_pipeline, "classify_agent_intent", return_value=stage_two) as classifier, \
+                    patch.object(ai_routing_pipeline, "context_from_classification", side_effect=[malformed, expected]), \
+                    patch.object(ai_routing_pipeline, "classify_stage_three", return_value=stage_three) as fallback:
+                trace = {}
+                selected = ai_routing_pipeline.select_agent_context(
+                    Mock(), "When should I wake up tomorrow?", [], "stage-two-model", trace=trace,
+                )
+                self.assertEqual(selected, expected)
+                self.assertEqual(trace["stage"], "stage_3")
+                classifier.assert_called_once()
+                fallback.assert_called_once()
+                self.assertEqual(fallback.call_args.args[4]["reason"], "invalid_or_unavailable")
+
     def test_stage_three_uses_only_routing_data_and_rejects_actions(self):
         history = [{"user": "Previous question", "assistant": {"message": "Previous reply", "actions": []}}]
         stage_one = {"selection": ai_context_router.choose_agent_context("Make it later."),

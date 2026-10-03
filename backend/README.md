@@ -585,13 +585,98 @@ change the calendar. The final selection has this shape:
 | Stage | Current behavior |
 | --- | --- |
 | 1 | Local keyword/phrase router. A confident, valid match is used immediately. It also recognizes ambiguity such as conflicting time scopes or negated exam requests. |
-| 2 | Small OpenAI intent-classification call when Stage 1 is not confident. It returns a validated intent, time scope, activity/exam flags and confidence. It receives the request and at most two brief recent turns, not the activity/exam observations. |
+| 2 | Small OpenAI classifier when Stage 1 is not confident. It independently selects intent and required observations, returning a validated time scope, activity/exam flags, optional memory selection and confidence. It receives the request and at most two brief recent turns, not the activity/exam observations. |
 | 3 | Fallback OpenAI classifier when Stage 2 is unavailable, invalid, or low-confidence. It receives limited request/history and earlier routing metadata, not the full observations. |
 
 If the later classifiers cannot produce a usable selection, the existing safe
 default is today's activities plus upcoming exams. Stage 1 remains the initial
 no-LLM route. The classifiers select context only; the main study agent generates
 the user-facing response afterward.
+
+#### Stage 2: intent and information dependencies
+
+The intent describes what the user wants; observation flags describe the facts
+needed to answer. `general_question` can therefore request tomorrow's activities
+for a personal alarm, wake-up or departure recommendation. A joke or explanation
+about alarm clocks needs no schedule data. Explicit exclusions override inferred
+usefulness: general wake-up advice without calendar access selects no activities.
+Missing commute/preparation information is left for the main agent to clarify.
+
+Stage 2 retains the existing strict response contract:
+
+```json
+{
+  "intent": "general_question",
+  "time_scope": "tomorrow",
+  "include_activities": true,
+  "include_exams": false,
+  "memory": null,
+  "confidence": "high"
+}
+```
+
+The converted context is also validated before Stage 2 is accepted. Invalid,
+unavailable or low-confidence results reach the existing Stage 3 fallback.
+Current observations remain authoritative for live schedules; historical
+questions can separately select existing memory sources. No new source flags,
+memory storage, observation builders or action behavior are introduced here.
+
+#### Direct Stage 2 regression checks
+
+The exact alarm/tomorrow question currently matches Stage 1 confidently, so an
+answer in the app may not exercise Stage 2. Inspect the reported routing stage
+for full-app tests. The following developer command bypasses Stage 1 and Stage 3
+and calls only the Stage 2 classifier when explicitly enabled.
+
+| Case | Request | Activities | Exams | Memory |
+| --- | --- | --- | --- | --- |
+| A | What time should I set my alarm tomorrow? | Tomorrow | None | None |
+| B | What time should I wake up tomorrow? | Tomorrow | None | None |
+| C | When should I leave home tomorrow? | Tomorrow | None | None |
+| D | What should I study tonight? | Today | Upcoming | None |
+| E | What exams do I have this week? | None | `this_week` | None |
+| F | Tell me a joke about alarm clocks. | None | None | None |
+| G | How does an alarm clock work? | None | None | None |
+| H | Don't use my calendar. Give general wake-up tips. | None | None | None |
+| I | Don't show exams; tell me my schedule tomorrow. | Tomorrow | None | None |
+| J | What did we decide last month about my study plan? | None | None | Global, last month |
+
+From the project root, preview the cases and expectations for free:
+
+```bash
+backend/.venv/bin/python -B -m backend.app.dev.stage_two_check
+```
+
+This default mode makes no model calls and does not verify semantic accuracy.
+To test one case with the actual classifier, explicitly enable **paid API usage**:
+
+```bash
+backend/.venv/bin/python -B -m backend.app.dev.stage_two_check --case A --llm
+```
+
+Repeat `--case` to select several cases, or omit it to evaluate all ten:
+
+```bash
+backend/.venv/bin/python -B -m backend.app.dev.stage_two_check --llm
+```
+
+Live mode reads the API key using the existing backend configuration and uses
+the same Stage 2 model as the app. It makes one classifier request per selected
+case with retries disabled. It prints the classification, selected scopes and
+pass/fail result, never the key. A low-confidence result is marked unsuccessful
+for these clear cases; the command does not call Stage 3. It does not open SQLite,
+retrieve conversations/memory, run observations or call the main planning agent.
+Matching is based on required context rather than insisting on a particular
+intent label. Case J checks global scope and the symbolic `last_month` reference;
+the validated memory sources and search terms are shown for manual inspection.
+
+Offline tests verify validation, observation selection, fallback and evaluator
+isolation using mocked model responses. They do not prove the prompt's semantic
+accuracy. Run them without an OpenAI charge:
+
+```bash
+backend/.venv/bin/python -B -m unittest backend.tests.ai.test_ai_proposal backend.tests.ai.test_observation_collection backend.tests.ai.test_routing_review backend.tests.ai.test_stage_two_check -v
+```
 
 ### Activity and exam observations
 

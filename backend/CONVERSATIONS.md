@@ -13,7 +13,9 @@ validated proposals and separate inspector metadata. `conversation_summaries`
 stores an optional local summary and its exact message boundary.
 `conversation_memory_exports` stores receipts for archive handoff.
 
-Database migrations only add tables. Activities, exams and imports are preserved.
+Conversation tables are initialized by the conversation service's `open_store`,
+independently of planner connection setup. Migrations only add tables.
+Activities, exams and imports are preserved.
 The previously tracked database files are kept locally but removed from the Git
 index. `.env`, SQLite runtime files and archive/durable stores remain ignored.
 Old database contents remain in earlier Git commits; this change does not rewrite
@@ -56,8 +58,13 @@ does not guarantee cancellation of an already-running backend model request.
 Normal requests include bounded recent completed turns from this chat, optional
 local summary, the new message and only routed activity/exam observations.
 The configured recent-turn limit defaults to five (5–100); an additional 16,000
-character budget limits whole turns. This is a character budget, not an exact
+character budget limits completed-turn context. This is a character budget, not an exact
 token count. The current message is never silently truncated.
+
+Large completed turns are represented by literal excerpts of both sides with
+an explicit truncation marker, at most 8,000 characters per turn. This avoids
+losing all recent context when one reply is large. The original transcript is
+unchanged; omitted proposed-action details are never treated as executed actions.
 
 The existing three-stage router may select `memory.scope = current_chat` or
 `global`. Local lookups search this chat's persisted completed messages. Global
@@ -70,6 +77,18 @@ Examples: “What did I just say?” uses recent chat context. “Earlier in thi
 what did we discuss about COMPSCI?” can look up local messages. “What did we
 decide last month?” can request global memory. “What should I study tonight?”
 uses current activities and exams without automatically loading global history.
+
+The frontend keeps unresolved request IDs per chat. After a lost response or a
+pending result, **Check last request** reuses the same ID; ordinary submission
+is disabled until that result is resolved. Refreshing a chat recovers pending
+requests from its saved messages. A conversation-list refresh failure does not
+mark an already completed reply as failed. Late errors are displayed only in
+the chat that initiated the operation.
+
+Local/global search shares timestamp parsing, literal excerpts and matching
+helpers. Authorized global search reads each selected source a fixed number of
+times rather than once per chat; mixed-session summaries remain excluded.
+Recent exported evidence is excluded by stable provenance before result limits.
 
 ## Global promotion
 
@@ -108,6 +127,23 @@ These tests use temporary databases, isolated archive files and mocked model
 responses. They verify owner/chat isolation, persistence, failure handling,
 retry identity, opt-in global search, export crash recovery, summary coverage and
 preservation of original messages.
+
+Run the complete backend regression suite from the project root:
+
+```bash
+backend/.venv/bin/python -B -m unittest discover -s backend/tests -t . -q
+```
+
+Run the frontend request-recovery tests and build from `frontend`:
+
+```bash
+npm test
+npm run lint
+npm run build
+```
+
+The frontend tests use Node's built-in test runner and mocked fetch responses;
+they require no new library or live API request.
 
 ## Manual test
 

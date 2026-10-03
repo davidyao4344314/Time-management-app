@@ -1,5 +1,11 @@
 # React + Vite
 
+From this folder, use `npm run dev` to start the frontend. The development
+server proxies `/api` to FastAPI on port 8001; see the backend README for startup.
+
+Run `npm test` for the offline conversation retry/isolation checks, `npm run lint`
+for lint, and `npm run build` for a production build. These checks do not call OpenAI.
+
 This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
 
 Currently, two official plugins are available:

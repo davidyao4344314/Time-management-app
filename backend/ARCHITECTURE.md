@@ -10,12 +10,19 @@ Activities and exams still use the same SQLite database and CRUD functions.
 ## Normal request flow
 
 ```text
-React -> api/ai.py -> ai/agent/service.py
+React -> api/conversations.py -> conversations/service.py
+                                    | -> storage.py: pending/completed messages
+                                    | -> context.py: recent turns/local summary
+                                    | -> memory_context.py: owner-authorized retrieval
+                                    v
+                               ai/agent/service.py
                         |
                         +-> ai/context/selection.py -> keywords / intent / fallback
                         +-> ai/observations/collect.py -> activities / exams -> existing CRUD/calendar
                         +-> ai/agent/reasoning.py -> OpenAI -> validated proposal
-api/ai.py -> ai/memory/recent.py -> ai/memory/archive_store.py when the recent limit is exceeded
+conversations/service.py -> memory_export.py -> archive_store.py for opted-in older turns
+
+Compatibility only: api/ai.py -> ai/memory/recent.py -> archive_store.py
 ```
 
 Observations are current factual application data. Recent memory is conversation
@@ -45,7 +52,16 @@ backend/
 └── app/
     ├── server.py               # FastAPI assembly, no business logic
     ├── cli.py                  # Existing interactive planner CLI
-    ├── database.py             # Existing connection/schema logic; unchanged
+    ├── database.py             # Planner connection/schema setup
+    ├── conversations/
+    │   ├── contracts.py        # Chat requests, responses and safe errors
+    │   ├── storage.py          # All chat SQL, summary reservations, export receipts
+    │   ├── service.py          # Request orchestration; no business SQL
+    │   ├── context.py          # Bounded recent turn excerpts and local summary
+    │   ├── summary.py          # Explicit local-summary model coordination
+    │   ├── memory_context.py   # Authorized local/global read-only retrieval
+    │   ├── memory_export.py    # Retry-safe archive handoff
+    │   └── legacy.py           # Verified legacy adoption through storage
     ├── ai/
     │   ├── config.py           # Existing local key/model/context configuration
     │   ├── actions/
@@ -70,6 +86,7 @@ backend/
     │   │   ├── paths.py        # Existing ignored file locations
     │   │   ├── settings.py     # Threshold and candidate batch size
     │   │   ├── records.py      # Serialization, hashes, IDs/timestamps
+    │   │   ├── search_helpers.py # Shared pure matching/timestamp/excerpt helpers
     │   │   ├── recent.py       # In-process per-session recent turns
     │   │   ├── session_identity.py # Restart-safe signed conversation cookies
     │   │   ├── archive_store.py # Raw append/read/count and shared lock
@@ -106,6 +123,7 @@ backend/
     │   └── common.py          # Existing row formatting/time adapters
     ├── infrastructure/
     │   ├── paths.py           # Stable project/backend locations
+    │   ├── clock.py           # Shared Pacific/Auckland clock
     │   ├── atomic_files.py    # Regular files, locks, private temps and fsync
     │   ├── errors.py          # Shared safe utility error
     │   ├── privacy.py         # Secret redaction
@@ -304,9 +322,15 @@ All 23 API paths, request schemas and response contracts are unchanged.
 
 ## Review boundary fixes
 
-- Compaction selects up to the configured batch size from the oldest identified
-  session. Other sessions remain for subsequent passes. Stage 4 and persistence
+- Compaction selects up to the configured batch size from one identified
+  session, advancing past protected-only chats/prefixes when other work exists.
+  An optional `after_session_id` supports explicit advancement. Stage 4 and persistence
   reject mixed-session or unidentified summaries. Protected-turn rules are unchanged.
+- Chat storage owns summary reservations/persistence, export receipts and legacy
+  inserts. Orchestrators do not embed business SQL. Planner database initialization
+  does not import conversation modules; the conversation service initializes its tables.
+- Architecture tests enforce conversation import/SQL boundaries and the acyclic
+  import graph alongside the existing routing, observation and infrastructure rules.
 - `iter_archive_records(session_id=...)` is the shared read-only archive interface.
   It excludes ambiguous/mixed-session legacy summaries from scoped reads without
   deleting them. Raw and summary search reuse this reader.

@@ -127,7 +127,8 @@ planner database without writing to it.
 A completed turn contains a user message and the assistant's response. New chats
 persist their full transcript in SQLite and select 5–100 recent completed turns
 for context (default 5, adjustable in AI Settings). A 16,000-character budget
-also bounds this whole-turn window. A separately requested local summary can
+also bounds this window. Oversized turns use literal excerpts (at most 8,000
+characters per turn); original SQLite messages remain complete. A separately requested local summary can
 cover older turns without deleting them or repeating recent messages.
 
 Global sharing is off by default. Opted-in older completed turns can enter the
@@ -164,11 +165,15 @@ The tests cover archives of 0, 50, 99, 100, 101, and 150 turns.
 
 `backend/app/ai/memory/selection.py` provides
 `select_archive_compaction_candidates()`, which uses the Stage 1 threshold. If the
-archive exceeds 100 turns, it returns up to 50 oldest archived turns as
+archive exceeds 100 turns, it returns up to 50 archived turns from one session as
 `compaction_candidates`, along with candidate/remaining counts and known
 timestamp bounds. Dated turns are ordered by their stored completion times;
 undated legacy turns use archive file order after dated turns. At 100 archived
-turns it selects none; at 101 it selects 50 and leaves 51 unselected. This
+turns it selects none. A protected-only oldest chat cannot block later work;
+protected prefixes can be skipped for selection without deleting them.
+`after_session_id` optionally advances selection to another session, and the
+result includes `selected_session_id`. A protected-only archive remains available
+for durable extraction. This
 function reads only archived turns, not recent in-memory turns. It does not
 rewrite the archive.
 
@@ -596,22 +601,37 @@ resolve occurrences. Its scopes are:
 | Scope | Data sent |
 | --- | --- |
 | `today` | Current activity or activities, next activity, and relevant activities today. |
+| `tomorrow` | Tomorrow's activity occurrences. |
 | `week` | Today's information plus up to 20 occurrences across today and the following six dates. |
-| `month` | Today's information plus occurrences from today through the end of the current month. This scope currently has no 20-item cap. |
-| `all` | A broader set of activity definitions and a count; this can be much larger than the other scopes. |
+| `this_week` | Remaining occurrences in the current Monday–Sunday week. |
+| `next_week` | Occurrences in the next Monday–Sunday week. |
+| `month` | Occurrences from today through the end of the current month. |
+| `all` | Activity definitions and the full count, with bounded descriptive detail. |
+
+Detail lists use a 20-item/6,000-character budget. Date-window observations
+include `period`, `count`, `truncated`, complete merged `busy` time intervals,
+and `untimed_count`. Missing detailed cards do not imply free time. Untimed
+activities remain represented in counts and cannot establish availability.
 
 The exam observation builder keeps exams separate from activities. By default,
 it includes exams from today through the next 30 days, limits the detailed list
 to 20, and calculates `days_left` in Python. The router can narrow exam dates
-for today, week, or month requests. Missing start/end times remain `null`; no
+for today, tomorrow, rolling/calendar week, or month requests. Exam responses
+also report period, total count and truncation. Missing start/end times remain `null`; no
 time is invented. Neither builder sends the entire database by default, and
 neither produces an explicit list of free time slots.
 
-The main request contains a `request` field and a separate `observations` object
+The main request contains a `request` field, a backend-generated `clock`
+(`as_of`, date, time and `Pacific/Auckland` timezone), and a separate `observations` object
 with only the selected `activities` and/or `exams` sections. Recent conversation
 turns are supplied as separate messages, not mixed into the observation data.
 The current database observations take precedence over outdated statements in
 the conversation.
+
+Mixed historical/current requests retain fresh observations; for example,
+“Last time we discussed my exam. What is its current date?” selects exam facts
+as well as historical context. “What did I just say?” alone stays a recent-chat
+question, while adding “what exams do I have today?” also selects today's exams.
 
 ### Main agent output
 

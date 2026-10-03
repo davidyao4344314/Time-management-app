@@ -72,19 +72,28 @@ def get_archive_turn_count():
     return sum(1 for _ in iter_archived_turns())
 
 
-def append_archived_turn(session_id, turn):
+def append_archived_turn(session_id, turn, *, turn_id=None, owner_id=None):
     """Append one JSON record, leaving all earlier archive records intact."""
     archived_turn = {key: value for key, value in turn.items() if key != "timestamp"}
     record = {
-        "turn_id": str(uuid.uuid4()),
+        "turn_id": turn_id or str(uuid.uuid4()),
         "session_id": session_id,
         "turn": _redact_secrets(archived_turn),
     }
     if turn.get("timestamp") is not None:
         record["timestamp"] = turn["timestamp"]
+    if owner_id is not None:
+        record['owner_id'] = owner_id
+        record['conversation_id'] = session_id
     data = (json.dumps(record, ensure_ascii=False) + "\n").encode("utf-8")
     flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
     with archive_write_lock():
+        if turn_id is not None:
+            # Raw rows may already have been compacted; provenance still proves export.
+            for _, existing in iter_archive_records(strict=True):
+                if existing.get('turn_id') == turn_id or any(
+                    ref.get('turn_id') == turn_id for ref in existing.get('source_turn_refs', []) if isinstance(ref,dict)):
+                    return False
         descriptor = os.open(ARCHIVE_FILE, flags, 0o600)
         try:
             fcntl.flock(descriptor, fcntl.LOCK_EX)
@@ -101,3 +110,4 @@ def append_archived_turn(session_id, turn):
                 fcntl.flock(descriptor, fcntl.LOCK_UN)
             finally:
                 os.close(descriptor)
+    return True

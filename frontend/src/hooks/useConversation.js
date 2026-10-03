@@ -101,7 +101,10 @@ export default function useConversation() {
       if (active.current === request.id) {
         setMessages((current) => [...current.filter((item) => item.request_id !== request.request_id), ...result.messages]
           .sort((a, b) => a.sequence_number - b.sequence_number))
-        if (result.status === 'completed') setDraft('')
+        if (result.status === 'completed') {
+          setDraft('')
+          if (result.memory_export_pending) setError('Reply saved. Memory export is pending; it can be retried later.')
+        }
         else setError(result.status === 'pending' ? 'This request is pending. Refresh the chat to check its result.' : 'This request failed. You can send a new request.')
       }
       await refreshList()
@@ -126,6 +129,15 @@ export default function useConversation() {
     } catch (failure) { if (mounted.current) setError(failure.message) }
   }
 
+  async function setMemorySharing(enabled) {
+    if (!chat) return
+    try {
+      const result = await api(`/${chat.conversation_id}/settings`, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({memory_sharing_enabled:enabled})})
+      if (mounted.current && active.current === result.conversation_id) setChat(result)
+      if (result.memory_export_pending) setError('Setting saved. Memory export is pending.')
+    } catch (failure) { if (mounted.current) setError(failure.message) }
+  }
+
   return { chats, chat, messages, draft, setDraft, loading, sending, error, nextBefore,
-    selectChat, newChat, send, loadOlder, retryAvailable, checkLast: () => send(pending.current) }
+    selectChat, newChat, send, loadOlder, setMemorySharing, retryAvailable, checkLast: () => send(pending.current) }
 }

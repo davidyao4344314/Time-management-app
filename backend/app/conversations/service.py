@@ -6,6 +6,7 @@ from backend.app import database
 from backend.app.conversations import storage
 from backend.app.conversations.context import build_chat_context
 from backend.app.conversations.memory_context import retrieve_for_chat
+from backend.app.conversations.memory_export import export_eligible_turns
 from backend.app.ai.agent.service import get_agent_proposal
 from backend.app.ai.config import is_openai_api_key_configured
 from backend.app.ai.agent.contracts import validate_agent_proposal
@@ -61,7 +62,27 @@ def send_message(owner_id, conversation_id, request_id, message):
                 observation_connection.close()
             validate_agent_proposal({key:value for key,value in proposal.items() if key != 'agent_context'})
             messages = storage.complete_request(connection, conversation_id, request_id, proposal)
+            try:
+                export_eligible_turns(connection,owner_id,conversation_id)
+            except (OSError, ValueError, RuntimeError):
+                # A memory export failure must not discard a saved assistant response.
+                return {'messages':messages,'status':'completed','memory_export_pending':True}
             return {'messages': messages, 'status':'completed'}
         except Exception:
             storage.fail_request(connection, conversation_id, request_id)
             raise
+
+
+def update_memory_sharing(owner_id, conversation_id, enabled):
+    with open_store() as connection:
+        chat = storage.set_memory_sharing(connection,conversation_id,owner_id,enabled)
+        try:
+            export_eligible_turns(connection,owner_id,conversation_id)
+        except (OSError, ValueError, RuntimeError):
+            chat['memory_export_pending'] = True
+        return chat
+
+
+def retry_memory_export(owner_id, conversation_id):
+    with open_store() as connection:
+        return export_eligible_turns(connection,owner_id,conversation_id)

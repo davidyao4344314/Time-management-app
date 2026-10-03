@@ -25,6 +25,8 @@ function AIAgent() {
         </select>
       </div>
       <h2 id="ai-agent-heading">{state.chat?.title || 'What do you want help with?'}</h2>
+      {state.chat && <label><input type="checkbox" checked={state.chat.memory_sharing_enabled} disabled={state.sending || state.loading}
+        onChange={event => state.setMemorySharing(event.target.checked)} /> Allow older completed turns from this chat to be used as global memory</label>}
       {state.loading && <p role="status">Loading conversation…</p>}
       {!state.chat && !state.loading && <p>Start a New Chat to begin.</p>}
       {state.nextBefore && <button onClick={state.loadOlder}>Load earlier messages</button>}

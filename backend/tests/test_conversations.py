@@ -122,6 +122,40 @@ class ConversationAPITests(unittest.TestCase):
 
 
 class ConversationMemoryTests(unittest.TestCase):
+    def test_export_receipt_retry_and_summary_provenance_prevent_duplicates(self):
+        import json
+        from backend.app.ai.memory import archive_store
+        from backend.app.conversations import memory_export
+        with tempfile.TemporaryDirectory() as directory, patch.object(archive_store,'ARCHIVE_FILE',Path(directory)/'archive.jsonl'), \
+                patch.object(memory_export,'get_max_recent_turns',return_value=5):
+            connection = sqlite3.connect(':memory:')
+            self.addCleanup(connection.close)
+            storage.migrate(connection)
+            chat = storage.create_conversation(connection,'owner')['conversation_id']
+            for number in range(7):
+                request = str(uuid4())
+                storage.begin_request(connection,chat,'owner',request,f'Turn {number}')
+                storage.complete_request(connection,chat,request,{'message':'Suggested only','actions':[]})
+            self.assertEqual(memory_export.export_eligible_turns(connection,'owner',chat),{'exported':0})
+            self.assertFalse(archive_store.ARCHIVE_FILE.exists())
+            storage.set_memory_sharing(connection,chat,'owner',True)
+            self.assertEqual(memory_export.export_eligible_turns(connection,'owner',chat),{'exported':2})
+            self.assertEqual(memory_export.export_eligible_turns(connection,'owner',chat),{'exported':0})
+            records = [row for _,row in archive_store.iter_archive_records()]
+            self.assertEqual(len(records),2)
+            self.assertEqual(records[0]['owner_id'],'owner')
+            # Simulate successful append followed by a crash before receipt commit.
+            connection.execute("UPDATE conversation_memory_exports SET status='pending'")
+            connection.commit()
+            memory_export.export_eligible_turns(connection,'owner',chat)
+            self.assertEqual(len(list(archive_store.iter_archive_records())),2)
+            # A compacted source must not be appended again either.
+            archive_store.ARCHIVE_FILE.write_text(json.dumps({'record_type':'compressed_summary','source_turn_refs':[{'turn_id':row['turn_id'],'session_id':chat} for row in records]})+'\n')
+            connection.execute("UPDATE conversation_memory_exports SET status='pending'")
+            connection.commit()
+            memory_export.export_eligible_turns(connection,'owner',chat)
+            self.assertEqual(len(list(archive_store.iter_archive_records())),1)
+
     def test_local_lookup_and_opt_in_global_isolation(self):
         import json
         from backend.app.ai.memory import archive_store

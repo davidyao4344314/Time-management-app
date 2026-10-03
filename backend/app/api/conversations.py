@@ -5,7 +5,7 @@ from sqlite3 import Error as SQLiteError
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 
 from backend.app.conversations import service
-from backend.app.conversations.contracts import CreateConversation, SendMessage, ConversationNotFound, ConversationConflict
+from backend.app.conversations.contracts import CreateConversation, SendMessage, ConversationSettings, ConversationNotFound, ConversationConflict
 from backend.app.ai.agent.contracts import InvalidProposalError
 from openai import OpenAIError
 from pydantic import ValidationError
@@ -60,3 +60,13 @@ def read_conversation(conversation_id: str, request: Request, response: Response
 @router.post('/{conversation_id}/messages')
 def send_message(conversation_id: str, body: SendMessage, request: Request, response: Response):
     return call_service(service.send_message, resolve_owner(request, response), conversation_id, body.request_id, body.message)
+
+
+@router.patch('/{conversation_id}/settings')
+def update_settings(conversation_id: str, body: ConversationSettings, request: Request, response: Response):
+    return call_service(service.update_memory_sharing, resolve_owner(request,response),conversation_id,body.memory_sharing_enabled)
+
+
+@router.post('/{conversation_id}/memory/export')
+def export_memory(conversation_id: str, request: Request, response: Response):
+    return call_service(service.retry_memory_export,resolve_owner(request,response),conversation_id)

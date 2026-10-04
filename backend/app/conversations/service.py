@@ -13,6 +13,7 @@ from backend.app.ai.config import is_openai_api_key_configured
 from backend.app.ai.agent.contracts import validate_agent_proposal
 from backend.app.conversations.contracts import ConversationConflict
 from backend.app.conversations.legacy import link_legacy_chat
+from backend.app.ai.context.adaptive import store as routing_store
 
 
 @contextmanager
@@ -22,6 +23,7 @@ def open_store():
         connection.execute('PRAGMA foreign_keys=ON')
         storage.migrate(connection)
         summary.migrate(connection)
+        routing_store.migrate(connection)
         yield connection
     finally:
         connection.close()

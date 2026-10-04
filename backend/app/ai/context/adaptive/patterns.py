@@ -38,7 +38,6 @@ def compile_patterns(records, *, states=None, now=None):
         seen.add(event.event_id)
         stamp = datetime.fromisoformat(event.timestamp.replace("Z", "+00:00"))
         if (label is None or not label.complete or event.context_dependent
-                or label.selection.memory is not None
                 or event.schema_version != settings.SCHEMA_VERSION or event.router_version != settings.ROUTER_VERSION
                 or not now - timedelta(days=settings.EVIDENCE_MAX_DAYS) <= stamp <= now):
             continue
@@ -48,12 +47,15 @@ def compile_patterns(records, *, states=None, now=None):
         rows = sorted(rows, key=lambda row: (datetime.fromisoformat(row["event"].timestamp), row["event"].event_id), reverse=True)[:settings.EVIDENCE_WINDOW]
         counts = Counter(profile_key(row["label"].selection) for row in rows)
         profile, agreement_count = counts.most_common(1)[0]
+        selected_profile = json.loads(profile)
         count = len(rows)
         agreement = agreement_count / count
         days = len({datetime.fromisoformat(row["event"].timestamp).date() for row in rows})
         last = max(datetime.fromisoformat(row["event"].timestamp) for row in rows)
         eligible = (count >= settings.MIN_CONFIRMED_SAMPLES and agreement >= settings.PROMOTION_AGREEMENT
-                    and days >= settings.MIN_EVIDENCE_DAYS and now - last <= timedelta(days=settings.STALE_AFTER_DAYS))
+                    and days >= settings.MIN_EVIDENCE_DAYS and now - last <= timedelta(days=settings.STALE_AFTER_DAYS)
+                    and selected_profile["memory"] is None)
+        # Memory outcomes are evidence, although V1 cannot activate memory shortcuts.
         identifier = pattern_id(pattern)
         raw_state = (states or {}).get(identifier)
         state = PatternApproval.model_validate(raw_state) if raw_state else None
@@ -65,7 +67,7 @@ def compile_patterns(records, *, states=None, now=None):
             suspended |= any(row["label_id"] not in state.approved_label_ids
                              and profile_key(row["label"].selection) != profile_key(state.selection) for row in rows)
         result.append({"pattern_id": identifier, "pattern": pattern,
-                       "selection": json.loads(profile), "confirmed_count": count,
+                       "selection": selected_profile, "confirmed_count": count,
                        "agreement_count": agreement_count, "agreement": agreement,
                        "evidence_days": days, "eligible": eligible and not suspended,
                        "state": "suspended" if suspended else "active" if eligible and state else "shadow" if eligible else "candidate",

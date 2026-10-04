@@ -200,6 +200,8 @@ Global memory, current-chat memory and schedule observations remain distinct.
   last **90 days**; the newest supporting evidence must be within **30 days**.
 - Full-profile agreement compares activity/exam inclusion and windows, and
   memory selection—not merely the intent label.
+  Reviews requiring memory count toward agreement and contradictions, even
+  though V1 cannot activate a memory-retrieval shortcut.
 - Promotion requires a separate explicit shadow-review approval. V1 learns
   **exact normalized phrases**, preserving date/negation words; it does not
   generate broad keywords, regex rules, or memory-retrieval shortcuts.

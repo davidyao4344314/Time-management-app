@@ -2,10 +2,10 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock, patch
 
-from backend.app.ai.context.adaptive.contracts import RoutingEvent, RoutingLabel
-from backend.app.ai.context.adaptive.patterns import compile_patterns, match_pattern
+from backend.app.ai.context.adaptive.contracts import RoutingEvent, RoutingLabel, PatternApproval
+from backend.app.ai.context.adaptive.patterns import compile_patterns, match_pattern, pattern_id
 from backend.app.ai.context import selection
-from backend.app.ai.context.contracts import AgentIntentClassification
+from backend.app.ai.context.contracts import AgentIntentClassification, ContextSelection
 from backend.tests.ai.test_adaptive_store import make_event, EMPTY
 
 NOW = datetime(2026, 10, 4, tzinfo=timezone.utc)
@@ -25,6 +25,37 @@ def evidence_rows(count=30):
 
 
 class AdaptivePatternTests(unittest.TestCase):
+    def test_memory_reviews_count_against_schedule_shortcuts(self):
+        memory_profile = ContextSelection.model_validate({**EMPTY, "memory": {
+            "sources": ["raw_archive"], "scope": "current_chat",
+            "query": {"time_reference": "unspecified", "search_terms": ["focus"]}}})
+        for schedule_count, memory_count, agreement, eligible in (
+                (30, 70, 0.70, False), (97, 3, 0.97, True), (0, 30, 1.0, False)):
+            with self.subTest(schedule=schedule_count, memory=memory_count):
+                rows = evidence_rows(schedule_count + memory_count)
+                for row in rows[schedule_count:]:
+                    row["label"].selection = memory_profile
+                result = compile_patterns(rows, now=NOW)[0]
+                self.assertEqual(result["confirmed_count"], schedule_count + memory_count)
+                self.assertEqual(result["agreement"], agreement)
+                self.assertEqual(result["eligible"], eligible)
+                if not eligible:
+                    self.assertIsNone(match_pattern("Help me choose a focus", [result]))
+
+    def test_new_memory_conflict_suspends_an_approved_schedule_rule(self):
+        rows = evidence_rows(100)
+        identifier = pattern_id(rows[0]["event"].pattern)
+        approval = PatternApproval(selection=PROFILE, approved_label_ids=[row["label_id"] for row in rows], shadow_reviewed=True)
+        rows[0]["label_id"] = "new-memory-correction"
+        rows[0]["label"].selection = ContextSelection.model_validate({**EMPTY, "memory": {
+            "sources": ["raw_archive"], "scope": "current_chat",
+            "query": {"time_reference": "unspecified", "search_terms": ["focus"]}}})
+        result = compile_patterns(rows, now=NOW, states={identifier: approval.model_dump()})[0]
+        self.assertEqual(result["confirmed_count"], 100)
+        self.assertEqual(result["agreement"], 0.99)
+        self.assertEqual(result["state"], "suspended")
+        self.assertFalse(result["eligible"])
+
     def test_only_confirmed_consistent_recent_evidence_qualifies(self):
         self.assertFalse(compile_patterns(evidence_rows(29), now=NOW)[0]["eligible"])
         self.assertTrue(compile_patterns(evidence_rows(), now=NOW)[0]["eligible"])

@@ -5,7 +5,7 @@ from backend.app.ai.context.intent import classify_agent_intent, context_from_cl
 from backend.app.ai.context.fallback import classify_stage_three
 from backend.app.ai.context.contracts import ContextSelection
 from backend.app.ai.context.policy import apply_context_exclusions, excluded_context_sources
-from backend.app.ai.context.adaptive.patterns import match_pattern
+from backend.app.ai.context.adaptive.patterns import match_pattern, profile_key
 
 
 SAFE_MINIMAL_CONTEXT = {
@@ -46,6 +46,9 @@ def select_agent_context(client, user_message, recent_turns, stage_two_model, *,
         )
 
     stage_one = assess_stage_one(user_message, recent_turns)
+    if not isinstance(adaptive_snapshot, dict):
+        adaptive_snapshot = None
+    matched = None
     if adaptive_snapshot and adaptive_snapshot.get("mode") in {"shadow", "active"}:
         try:
             matched = match_pattern(user_message, adaptive_snapshot.get("patterns", []), recent_turns)
@@ -57,11 +60,30 @@ def select_agent_context(client, user_message, recent_turns, stage_two_model, *,
                     "shortcut_state": matched["state"] if matched else "no_match"}
         except (ValueError, KeyError, TypeError):
             matched = None
+    protected_reasons = {"depends_on_recent_conversation", "conflicting_time_scopes",
+                         "mixed_memory_and_current_request", "ambiguous_conversation_reference",
+                         "independent_exam_horizon", "negated_calendar_reference", "negated_exam_reference"}
+    use_learned = (adaptive_snapshot and adaptive_snapshot.get("mode") == "active" and matched
+                   and matched["state"] == "active" and not excluded
+                   and stage_one.get("reason") not in protected_reasons)
+    learned_reason = None
+    if use_learned:
+        conflict = stage_one["confident"] and _valid_context_selection(stage_one["selection"]) \
+            and profile_key(stage_one["selection"]) != profile_key(matched["selection"])
+        if conflict or adaptive_snapshot.get("audit_due"):
+            stage_one = {**stage_one, "confident": False,
+                         "reason": "learned_rule_conflict" if conflict else "learned_rule_audit"}
+            if evidence is not None:
+                evidence["adaptive"]["shortcut_state"] = stage_one["reason"]
+                evidence["audit_selected"] = bool(adaptive_snapshot.get("audit_due"))
+        else:
+            stage_one = {"selection": matched["selection"], "confident": True, "reason": None}
+            learned_reason = "Matched a reviewed learned phrase with sufficient recent confirmed evidence."
     candidate("stage_1", "matched" if stage_one["confident"] and _valid_context_selection(stage_one["selection"])
               else "unresolved", stage_one["selection"] if _valid_context_selection(stage_one["selection"]) else None)
     if stage_one["confident"] and _valid_context_selection(stage_one["selection"]):
         return finish(stage_one["selection"], "stage_1", "matched",
-                             "Matched clear keyword/phrase rules.")
+                             learned_reason or "Matched clear keyword/phrase rules.")
     if stage_one["confident"]:
         stage_one = {**stage_one, "confident": False, "reason": "invalid_stage_one_result"}
 

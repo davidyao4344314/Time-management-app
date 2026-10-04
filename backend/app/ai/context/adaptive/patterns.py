@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from backend.app.ai.context.adaptive import settings
 from backend.app.ai.context.adaptive.store import clean_text
 from backend.app.ai.context.contracts import ContextSelection
+from backend.app.ai.context.adaptive.contracts import PatternApproval
 
 
 def normalize_request(text):
@@ -29,8 +30,12 @@ def compile_patterns(records, *, states=None, now=None):
     """Only complete explicit labels count. Recompute after sharing/review changes."""
     now = now or datetime.now(timezone.utc)
     groups = defaultdict(list)
+    seen = set()
     for row in records:
         event, label = row["event"], row["label"]
+        if event.event_id in seen:
+            continue
+        seen.add(event.event_id)
         stamp = datetime.fromisoformat(event.timestamp.replace("Z", "+00:00"))
         if (label is None or not label.complete or event.context_dependent
                 or label.selection.memory is not None
@@ -40,7 +45,7 @@ def compile_patterns(records, *, states=None, now=None):
         groups[event.pattern].append(row)
     result = []
     for pattern, rows in sorted(groups.items()):
-        rows = sorted(rows, key=lambda row: (row["event"].timestamp, row["event"].event_id), reverse=True)[:settings.EVIDENCE_WINDOW]
+        rows = sorted(rows, key=lambda row: (datetime.fromisoformat(row["event"].timestamp), row["event"].event_id), reverse=True)[:settings.EVIDENCE_WINDOW]
         counts = Counter(profile_key(row["label"].selection) for row in rows)
         profile, agreement_count = counts.most_common(1)[0]
         count = len(rows)
@@ -50,14 +55,20 @@ def compile_patterns(records, *, states=None, now=None):
         eligible = (count >= settings.MIN_CONFIRMED_SAMPLES and agreement >= settings.PROMOTION_AGREEMENT
                     and days >= settings.MIN_EVIDENCE_DAYS and now - last <= timedelta(days=settings.STALE_AFTER_DAYS))
         identifier = pattern_id(pattern)
-        state = (states or {}).get(identifier, {})
+        raw_state = (states or {}).get(identifier)
+        state = PatternApproval.model_validate(raw_state) if raw_state else None
         # Cached decisions never substitute for freshly eligible evidence.
-        suspended = bool(state.get("suspended"))
+        suspended = bool(state and (state.suspended or state.schema_version != settings.SCHEMA_VERSION
+                                   or state.router_version != settings.ROUTER_VERSION
+                                   or profile_key(state.selection) != profile))
+        if state:
+            suspended |= any(row["label_id"] not in state.approved_label_ids
+                             and profile_key(row["label"].selection) != profile_key(state.selection) for row in rows)
         result.append({"pattern_id": identifier, "pattern": pattern,
                        "selection": json.loads(profile), "confirmed_count": count,
                        "agreement_count": agreement_count, "agreement": agreement,
                        "evidence_days": days, "eligible": eligible and not suspended,
-                       "state": "suspended" if suspended else "shadow" if eligible else "candidate",
+                       "state": "suspended" if suspended else "active" if eligible and state else "shadow" if eligible else "candidate",
                        "label_ids": [row["label_id"] for row in rows],
                        "profile_key": profile, "last_confirmed": last.isoformat()})
     return result

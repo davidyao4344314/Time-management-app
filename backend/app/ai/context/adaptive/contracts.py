@@ -80,3 +80,12 @@ class RoutingLabel(StrictRecord):
     @property
     def complete(self):
         return self.status == "confirmed" and set(self.confirmed_fields) == SELECTION_FIELDS
+
+
+class PatternApproval(StrictRecord):
+    schema_version: int = SCHEMA_VERSION
+    router_version: str = ROUTER_VERSION
+    selection: ContextSelection
+    approved_label_ids: list[str] = Field(max_length=100)
+    shadow_reviewed: Literal[True]
+    suspended: bool = False

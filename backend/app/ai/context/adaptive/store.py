@@ -5,7 +5,7 @@ import re
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from backend.app.ai.context.adaptive.contracts import RoutingEvent, RoutingLabel
+from backend.app.ai.context.adaptive.contracts import RoutingEvent, RoutingLabel, PatternApproval
 from backend.app.infrastructure.privacy import redact_secrets
 
 
@@ -76,13 +76,22 @@ def event_by_id(connection, owner_id, event_id):
     return RoutingEvent.model_validate_json(row[0])
 
 
-def record_label(connection, owner_id, event_id, value):
+def record_label(connection, owner_id, event_id, value, *, invalidate_pattern=None):
     event_by_id(connection, owner_id, event_id)
     label = RoutingLabel.model_validate(redact_secrets(value))
     identifier = uuid4().hex
     with connection:
         connection.execute("INSERT INTO routing_labels VALUES(?,?,?,?,?)",
                            (identifier, event_id, owner_id, now_iso(), label.model_dump_json()))
+        if invalidate_pattern is not None:
+            for scope_key, value in list(connection.execute(
+                    "SELECT scope_key, pattern_json FROM routing_patterns WHERE owner_id=? AND pattern_id=?",
+                    (owner_id, invalidate_pattern))):
+                approval = PatternApproval.model_validate_json(value)
+                if not label.complete or approval.selection != label.selection:
+                    approval.suspended = True
+                    connection.execute("UPDATE routing_patterns SET pattern_json=? WHERE owner_id=? AND scope_key=? AND pattern_id=?",
+                                       (approval.model_dump_json(), owner_id, scope_key, invalidate_pattern))
     return identifier
 
 
@@ -123,3 +132,25 @@ def reset_owner_learning(connection, owner_id):
         connection.execute("DELETE FROM routing_labels WHERE owner_id=?", (owner_id,))
         connection.execute("DELETE FROM routing_events WHERE owner_id=?", (owner_id,))
         connection.execute("DELETE FROM routing_patterns WHERE owner_id=?", (owner_id,))
+
+
+def reserve_audit(connection, owner_id, conversation_id, request_id, day, *, limit):
+    """Reserve a paid audit slot atomically, including failed attempts in the cap."""
+    _require_chat(connection, owner_id, conversation_id)
+    scope = "audit:" + day
+    identifier = conversation_id + ":" + request_id
+    connection.execute("BEGIN IMMEDIATE")
+    try:
+        existing = connection.execute("SELECT 1 FROM routing_patterns WHERE owner_id=? AND scope_key=? AND pattern_id=?",
+                                      (owner_id, scope, identifier)).fetchone()
+        count = connection.execute("SELECT COUNT(*) FROM routing_patterns WHERE owner_id=? AND scope_key=?",
+                                   (owner_id, scope)).fetchone()[0]
+        allowed = bool(existing) or count < limit
+        if allowed and not existing:
+            connection.execute("INSERT INTO routing_patterns VALUES(?,?,?,?)",
+                               (owner_id, scope, identifier, '{"kind":"audit_reservation"}'))
+        connection.commit()
+        return allowed
+    except Exception:
+        connection.rollback()
+        raise

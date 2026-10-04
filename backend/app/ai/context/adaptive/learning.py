@@ -1,22 +1,33 @@
 """Turn completed routing telemetry into unconfirmed, bounded evidence."""
 
 from uuid import NAMESPACE_URL, uuid5
-from backend.app.ai.context.adaptive.contracts import RoutingEvent, RoutingLabel
+import hashlib
+from datetime import datetime, timezone
+from backend.app.ai.context.adaptive.contracts import RoutingEvent, RoutingLabel, PatternApproval
 from backend.app.ai.context.adaptive import store
 from backend.app.ai.context.intent import CLASSIFIER_VERSION, context_from_classification
 from backend.app.ai.context.contracts import ContextSelection
 from backend.app.ai.context.policy import apply_context_exclusions
-from backend.app.ai.context.adaptive.patterns import normalize_request, compile_patterns
+from backend.app.ai.context.adaptive.patterns import normalize_request, compile_patterns, pattern_id, match_pattern
+from backend.app.ai.context.adaptive import settings
 
 
-def load_snapshot(connection, owner_id, conversation_id, adaptive_settings):
+def load_snapshot(connection, owner_id, conversation_id, adaptive_settings, *, request_id=None, message="", recent_turns=()):
     records = store.load_eligible_evidence(connection, owner_id, conversation_id)
     states = store.load_pattern_states(connection, owner_id, conversation_id)
+    patterns = compile_patterns(records, states=states)
+    matched = match_pattern(message, patterns, recent_turns)
+    audit_due = False
+    if (adaptive_settings.mode == "active" and adaptive_settings.audits_enabled and request_id
+            and matched and matched["state"] == "active"
+            and int(hashlib.sha256(request_id.encode()).hexdigest()[:8], 16) % settings.AUDIT_EVERY == 0):
+        audit_due = store.reserve_audit(connection, owner_id, conversation_id, request_id,
+                                       datetime.now(timezone.utc).date().isoformat(), limit=settings.AUDIT_DAILY_LIMIT)
     return {"mode": adaptive_settings.mode,
-            "patterns": compile_patterns(records, states=states),
+            "patterns": patterns,
             "examples_enabled": adaptive_settings.examples_enabled,
             "calibration_enabled": adaptive_settings.calibration_enabled,
-            "audit_due": False}
+            "audit_due": audit_due}
 
 
 def make_completed_event(owner_id, conversation_id, request_id, message, evidence):
@@ -54,4 +65,22 @@ def apply_reviewed_label(connection, owner_id, event_id, value):
             raise ValueError("Reviewed classification and context selection must agree.")
     if label.example_approved and (event.context_dependent or not event.request_excerpt):
         raise ValueError("Examples must be bounded self-contained requests.")
-    return store.record_label(connection, owner_id, event_id, label.model_dump())
+    return store.record_label(connection, owner_id, event_id, label.model_dump(),
+                              invalidate_pattern=pattern_id(event.pattern))
+
+
+def approve_pattern(connection, owner_id, conversation_id, identifier, *, shadow_reviewed):
+    if not shadow_reviewed:
+        raise ValueError("Explicit shadow review is required before enabling a shortcut.")
+    patterns = compile_patterns(store.load_eligible_evidence(connection, owner_id, conversation_id))
+    candidate = next((item for item in patterns if item["pattern_id"] == identifier), None)
+    if candidate is None or not candidate["eligible"]:
+        raise ValueError("Pattern does not meet promotion thresholds.")
+    old = store.load_pattern_states(connection, owner_id, conversation_id).get(identifier)
+    if old:
+        previous = PatternApproval.model_validate(old)
+        new_ids = set(candidate["label_ids"]) - set(previous.approved_label_ids)
+        if previous.suspended and len(new_ids) < settings.MIN_REACTIVATION_SAMPLES:
+            raise ValueError("A suspended pattern needs new confirmed evidence before re-review.")
+    approval = PatternApproval(selection=candidate["selection"], approved_label_ids=candidate["label_ids"], shadow_reviewed=True)
+    store.save_pattern(connection, owner_id, conversation_id, identifier, approval.model_dump())

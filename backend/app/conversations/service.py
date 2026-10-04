@@ -66,7 +66,8 @@ def send_message(owner_id, conversation_id, request_id, message):
             adaptive_snapshot = None
             if adaptive_settings.mode in {'shadow', 'active'}:
                 try:
-                    adaptive_snapshot = load_snapshot(connection, owner_id, conversation_id, adaptive_settings)
+                    adaptive_snapshot = load_snapshot(connection, owner_id, conversation_id, adaptive_settings,
+                                                      request_id=request_id, message=message, recent_turns=context['recent_turns'])
                 except (sqlite3.Error, OSError, ValueError, KeyError, TypeError):
                     pass  # Invalid/missing knowledge uses the original routing pipeline.
             # Model observations use a separate read-only connection.

@@ -7,7 +7,8 @@ from pathlib import Path
 
 from backend.app import database
 from backend.app.ai.context.adaptive import store
-from backend.app.ai.context.adaptive.learning import apply_reviewed_label
+from backend.app.ai.context.adaptive.learning import apply_reviewed_label, approve_pattern
+from backend.app.ai.context.adaptive.patterns import compile_patterns
 
 
 def main(argv=None):
@@ -17,6 +18,12 @@ def main(argv=None):
     commands = parser.add_subparsers(dest="command", required=True)
     listing = commands.add_parser("list")
     listing.add_argument("--chat", required=True)
+    patterns = commands.add_parser("patterns")
+    patterns.add_argument("--chat", required=True)
+    activation = commands.add_parser("activate")
+    activation.add_argument("--chat", required=True)
+    activation.add_argument("--pattern", required=True)
+    activation.add_argument("--confirm-shadow-review", action="store_true")
     review = commands.add_parser("label")
     review.add_argument("--event", required=True)
     review.add_argument("--selection", required=True, help="Existing ContextSelection JSON.")
@@ -44,6 +51,12 @@ def main(argv=None):
             elif args.command == "reset":
                 store.reset_owner_learning(connection, args.owner)
                 result = {"reset": True}
+            elif args.command == "patterns":
+                result = compile_patterns(store.load_eligible_evidence(connection, args.owner, args.chat),
+                                          states=store.load_pattern_states(connection, args.owner, args.chat))
+            elif args.command == "activate":
+                approve_pattern(connection, args.owner, args.chat, args.pattern, shadow_reviewed=args.confirm_shadow_review)
+                result = {"approved": True}
             else:
                 if args.command == "reject":
                     event = store.event_by_id(connection, args.owner, args.event)

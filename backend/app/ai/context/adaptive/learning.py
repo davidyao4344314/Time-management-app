@@ -2,9 +2,11 @@
 
 import re
 from uuid import NAMESPACE_URL, uuid5
-from backend.app.ai.context.adaptive.contracts import RoutingEvent
+from backend.app.ai.context.adaptive.contracts import RoutingEvent, RoutingLabel
 from backend.app.ai.context.adaptive import store
-from backend.app.ai.context.intent import CLASSIFIER_VERSION
+from backend.app.ai.context.intent import CLASSIFIER_VERSION, context_from_classification
+from backend.app.ai.context.contracts import ContextSelection
+from backend.app.ai.context.policy import apply_context_exclusions
 
 
 def normalize_request(text):
@@ -31,3 +33,20 @@ def make_completed_event(owner_id, conversation_id, request_id, message, evidenc
         "recovery_completed": evidence.get("recovery_completed", False),
         "audit_selected": evidence.get("audit_selected", False),
     })
+
+
+def apply_reviewed_label(connection, owner_id, event_id, value):
+    """Local explicit review only. No model prediction can invoke this path."""
+    event = store.event_by_id(connection, owner_id, event_id)
+    label = RoutingLabel.model_validate(value)
+    guarded = ContextSelection.model_validate(apply_context_exclusions(
+        label.selection.model_dump(), event.excluded_sources))
+    if guarded != label.selection:
+        raise ValueError("A reviewed route cannot override the request's source exclusions.")
+    if label.classification is not None:
+        converted = ContextSelection.model_validate(context_from_classification(label.classification.model_dump()))
+        if converted != label.selection:
+            raise ValueError("Reviewed classification and context selection must agree.")
+    if label.example_approved and (event.context_dependent or not event.request_excerpt):
+        raise ValueError("Examples must be bounded self-contained requests.")
+    return store.record_label(connection, owner_id, event_id, label.model_dump())

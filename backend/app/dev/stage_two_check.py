@@ -40,6 +40,12 @@ CASES = {
     "H": _case("Don't use my calendar. What are some general tips for waking up earlier?"),
     "I": _case("Don't show me exams, just tell me my schedule tomorrow.", activities="tomorrow"),
     "J": _case("What did we decide last month about my study plan?", memory_time="last_month"),
+    "K": _case("Help me plan study tomorrow for my upcoming exams.", activities="tomorrow", exams="upcoming"),
+    "L": _case("Don't use my calendar; give generic wake-up advice for tomorrow."),
+    "M": _case("What exams do I have today?", exams="today"),
+    "N": _case("Help me plan study tonight for exams this week.", activities="today", exams="this_week"),
+    "O": _case("Tell me a joke about alarm clocks tomorrow."),
+    "P": _case("What should I study next week for upcoming exams?", activities="next_week", exams="upcoming"),
 }
 
 
@@ -71,7 +77,7 @@ def check_case(client, label):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--case", choices=tuple(CASES), action="append",
-                        help="Check a named case; repeat to select several. Default: A-J.")
+                        help="Check a named case; repeat to select several. Default: all cases (A-P).")
     parser.add_argument("--llm", action="store_true",
                         help="Make paid classifier calls using the backend's configured API key.")
     args = parser.parse_args(argv)

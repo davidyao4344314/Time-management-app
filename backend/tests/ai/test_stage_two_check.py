@@ -5,7 +5,7 @@ import json
 import unittest
 from contextlib import redirect_stdout
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from backend.app.dev import stage_two_check as check
 
@@ -16,7 +16,7 @@ class StageTwoCheckTests(unittest.TestCase):
                 patch.object(check, "OpenAI") as client, redirect_stdout(io.StringIO()) as output:
             self.assertEqual(check.main([]), 0)
         preview = json.loads(output.getvalue())
-        self.assertEqual([case["case"] for case in preview["cases"]], list("ABCDEFGHIJ"))
+        self.assertEqual([case["case"] for case in preview["cases"]], list("ABCDEFGHIJKLMNOP"))
         self.assertIn("no model calls", preview["mode"])
         configured.assert_not_called()
         client.assert_not_called()
@@ -63,6 +63,43 @@ class StageTwoCheckTests(unittest.TestCase):
         self.assertIn("Classifier request failed", output.getvalue())
         self.assertNotIn("offline-test-key", output.getvalue())
         self.assertNotIn("private details", output.getvalue())
+
+    def test_all_fixture_selections_are_consistent_with_the_adapter(self):
+        # This tests evaluator wiring only. Mocked classifications do not prove
+        # that the live model understands these messages.
+        for label, case in check.CASES.items():
+            with self.subTest(case=label):
+                expected = case["expected"]
+                client = Mock()
+                memory = None
+                if expected["memory_scope"]:
+                    memory = {"sources": ["compressed_archive"], "scope": "global", "query": {
+                        "time_reference": expected["memory_time_reference"], "search_terms": ["study plan"],
+                    }}
+                client.responses.parse.return_value = SimpleNamespace(status="completed", output_parsed={
+                    "intent": "general_question", "confidence": "high", "memory": memory,
+                    "time_scope": expected["activities_scope"] or expected["exam_scope"] or "unspecified",
+                    "include_activities": expected["activities_scope"] is not None,
+                    "include_exams": expected["include_exams"], "exam_scope": expected["exam_scope"],
+                })
+                self.assertTrue(check.check_case(client, label)["passed"])
+                client.responses.parse.assert_called_once()
+
+    def test_semantic_evaluator_does_not_hide_exclusion_errors_with_backend_policy(self):
+        client = Mock()
+        client.responses.parse.return_value = SimpleNamespace(status="completed", output_parsed={
+            "intent": "general_question", "time_scope": "tomorrow", "confidence": "high",
+            "include_activities": True, "include_exams": False, "exam_scope": None,
+        })
+        self.assertFalse(check.check_case(client, "L")["passed"])
+
+    def test_semantic_evaluator_rejects_an_incorrect_exam_horizon(self):
+        client = Mock()
+        client.responses.parse.return_value = SimpleNamespace(status="completed", output_parsed={
+            "intent": "study_planning", "time_scope": "tomorrow", "confidence": "high",
+            "include_activities": True, "include_exams": True, "exam_scope": "tomorrow",
+        })
+        self.assertFalse(check.check_case(client, "K")["passed"])
 
 
 if __name__ == "__main__":

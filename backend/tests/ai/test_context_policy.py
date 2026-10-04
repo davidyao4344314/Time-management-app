@@ -21,6 +21,8 @@ class ContextPolicyTests(unittest.TestCase):
             "Don't use my calendar; give general wake-up advice for tomorrow.",
             "DO NOT CONSULT MY SCHEDULE tomorrow.",
             "Give advice without my timetable.",
+            "Give generic advice without using my calendar.",
+            "Give generic advice without considering my schedule.",
         ):
             with self.subTest(message=message):
                 self.assertEqual(excluded_context_sources(message), {"activities", "exams"})
@@ -42,6 +44,12 @@ class ContextPolicyTests(unittest.TestCase):
         ):
             self.assertEqual(excluded_context_sources(message), {"exams"})
 
+    def test_multiple_direct_source_objects_can_be_excluded(self):
+        self.assertEqual(excluded_context_sources("Don't show me activities or exams."),
+                         {"activities", "exams"})
+        self.assertEqual(excluded_context_sources("Ignore my activities and upcoming exams."),
+                         {"activities", "exams"})
+
     def test_arbitrary_negation_does_not_exclude_observations(self):
         for message in (
             "I'm not sure what my exams are.",
@@ -49,6 +57,15 @@ class ContextPolicyTests(unittest.TestCase):
             "Please show my calendar tomorrow.",
         ):
             self.assertEqual(excluded_context_sources(message), set())
+
+    def test_exclusion_must_apply_to_the_source_not_an_unrelated_verb(self):
+        for message in (
+            "Help me plan study without forgetting my exams tomorrow.",
+            "Don't ignore my activities tomorrow.",
+            "Never skip my exams tomorrow.",
+        ):
+            with self.subTest(message=message):
+                self.assertEqual(excluded_context_sources(message), set())
 
     def test_policy_does_not_mutate_selection_or_memory(self):
         original = {**SELECTED, "memory": {"scope": "current_chat"}}

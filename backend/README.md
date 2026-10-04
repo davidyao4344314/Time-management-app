@@ -584,12 +584,13 @@ change the calendar. The final selection has this shape:
 
 | Stage | Current behavior |
 | --- | --- |
-| 1 | Local keyword/phrase router. A confident, valid match is used immediately. It also recognizes ambiguity such as conflicting time scopes or negated exam requests. |
-| 2 | Small OpenAI classifier when Stage 1 is not confident. It independently selects intent and required observations, returning a validated time scope, activity/exam flags, optional memory selection and confidence. It receives the request and at most two brief recent turns, not the activity/exam observations. |
+| 1 | Local keyword/phrase router. A confident, valid match is used immediately. Conflicting time scopes, source exclusions, and joke/explanation/general-advice phrases can defer to semantic routing. |
+| 2 | Small OpenAI classifier when Stage 1 is not confident. It independently selects intent and required observations, returning a validated activity time scope, separate exam scope, activity/exam flags, optional memory selection and confidence. It receives the request and at most two brief recent turns, not the activity/exam observations. |
 | 3 | Fallback OpenAI classifier when Stage 2 is unavailable, invalid, or low-confidence. It receives limited request/history and earlier routing metadata, not the full observations. |
 
 If the later classifiers cannot produce a usable selection, the existing safe
-default is today's activities plus upcoming exams. Stage 1 remains the initial
+default is today's activities plus upcoming exams, with explicitly excluded
+sources removed. Stage 1 remains the initial
 no-LLM route. The classifiers select context only; the main study agent generates
 the user-facing response afterward.
 
@@ -602,7 +603,7 @@ about alarm clocks needs no schedule data. Explicit exclusions override inferred
 usefulness: general wake-up advice without calendar access selects no activities.
 Missing commute/preparation information is left for the main agent to clarify.
 
-Stage 2 retains the existing strict response contract:
+Stage 2 uses a strict response contract, now with an independent `exam_scope`:
 
 ```json
 {
@@ -610,6 +611,7 @@ Stage 2 retains the existing strict response contract:
   "time_scope": "tomorrow",
   "include_activities": true,
   "include_exams": false,
+  "exam_scope": null,
   "memory": null,
   "confidence": "high"
 }
@@ -620,6 +622,69 @@ unavailable or low-confidence results reach the existing Stage 3 fallback.
 Current observations remain authoritative for live schedules; historical
 questions can separately select existing memory sources. No new source flags,
 memory storage, observation builders or action behavior are introduced here.
+
+#### Independent study windows and exam horizons
+
+`time_scope` controls the activity window. `exam_scope` controls which exams are
+relevant independently of that window or the intent label. For example:
+
+```json
+{
+  "intent": "study_planning",
+  "time_scope": "tomorrow",
+  "include_activities": true,
+  "include_exams": true,
+  "exam_scope": "upcoming",
+  "memory": null,
+  "confidence": "high"
+}
+```
+
+This sends tomorrow's commitments alongside upcoming exams over the existing
+30-day horizon, so an exam later in the week is not hidden. Explicit exam
+listings still use their requested scope: "exams tomorrow" selects `tomorrow`.
+"Plan study tonight for exams this week" can use activity scope `today` and
+exam scope `this_week`. Stage 3 supports the same independent scope field.
+
+Allowed exam scopes are `today`, `tomorrow`, `week`, `this_week`, `next_week`,
+`month`, and `upcoming`. When exams are excluded, `exam_scope` must be null.
+For compatibility, old results without this field default to `upcoming` for
+study planning; other dated requests use their date scope. Inclusion flags
+remain independent of intent, and invalid scope combinations reach fallback.
+
+#### Explicit source exclusions
+
+`ai/context/policy.py` recognizes direct phrases such as "don't use my calendar",
+"do not consult my schedule", "without my timetable", and "don't show exams".
+Calendar/schedule/timetable exclusion blocks both activities and exams, since
+both can appear in the calendar. Excluding exams alone still permits activities.
+The guard requires a direct source exclusion; "I'm not sure about my exams",
+"don't delete my activities", "don't ignore my exams", and "without forgetting
+my exams" do not revoke read access. "Without using my calendar" does.
+
+The guard is conservative phrase matching, not a complete natural-language
+negation parser; Stage 2 still interprets the full message. Recognized exclusions
+are enforced after every routing stage, including safe fallback, again before
+observation collection, and before recovery. The main agent receives a separate
+`excluded_sources` list, and the context inspector response includes that list.
+An excluded source may remain `not_selected` in the status manifest, but that is
+not permission to recover it: backend policy rejects the request before reading.
+
+#### Offline context-correctness regressions
+
+The regression suite checks exclusions even with faulty model flags, independent
+study/exam periods, future windows without today's current/next data, NULL times,
+and fresh observations kept separate from older conversation claims. Integration
+fixtures use the existing insert/calendar functions with an in-memory SQLite
+database switched to read-only before observation reads. No project database,
+secrets, or live model calls are needed.
+
+```bash
+backend/.venv/bin/python -B -m unittest backend.tests.ai.test_context_policy backend.tests.ai.test_routing_review backend.tests.ai.test_activity_observation_scopes backend.tests.ai.test_context_selection_regressions backend.tests.ai.test_context_recovery backend.tests.ai.test_stage_two_check -v
+```
+
+These tests verify backend correctness and what is transmitted, not whether a
+real model will reason correctly. Actual semantic evaluation remains opt-in.
 
 #### Direct Stage 2 regression checks
 
@@ -640,6 +705,12 @@ and calls only the Stage 2 classifier when explicitly enabled.
 | H | Don't use my calendar. Give general wake-up tips. | None | None | None |
 | I | Don't show exams; tell me my schedule tomorrow. | Tomorrow | None | None |
 | J | What did we decide last month about my study plan? | None | None | Global, last month |
+| K | Help me plan study tomorrow for upcoming exams. | Tomorrow | Upcoming | None |
+| L | Don't use my calendar; give generic wake-up advice for tomorrow. | None | None | None |
+| M | What exams do I have today? | None | Today | None |
+| N | Help me plan study tonight for exams this week. | Today | `this_week` | None |
+| O | Tell me a joke about alarm clocks tomorrow. | None | None | None |
+| P | What should I study next week for upcoming exams? | `next_week` | Upcoming | None |
 
 From the project root, preview the cases and expectations for free:
 
@@ -654,10 +725,17 @@ To test one case with the actual classifier, explicitly enable **paid API usage*
 backend/.venv/bin/python -B -m backend.app.dev.stage_two_check --case A --llm
 ```
 
-Repeat `--case` to select several cases, or omit it to evaluate all ten:
+Repeat `--case` to select several cases, or omit it to evaluate all sixteen:
 
 ```bash
 backend/.venv/bin/python -B -m backend.app.dev.stage_two_check --llm
+```
+
+To evaluate only the newly fixed horizon/exclusion cases, this explicitly makes
+four paid classifier calls:
+
+```bash
+backend/.venv/bin/python -B -m backend.app.dev.stage_two_check --case K --case L --case M --case N --llm
 ```
 
 Live mode reads the API key using the existing backend configuration and uses
@@ -669,6 +747,8 @@ retrieve conversations/memory, run observations or call the main planning agent.
 Matching is based on required context rather than insisting on a particular
 intent label. Case J checks global scope and the symbolic `last_month` reference;
 the validated memory sources and search terms are shown for manual inspection.
+The evaluator intentionally does not apply backend exclusion masks: incorrect
+classifier flags must fail the semantic check rather than be hidden by a guard.
 
 Offline tests verify validation, observation selection, fallback and evaluator
 isolation using mocked model responses. They do not prove the prompt's semantic
@@ -692,6 +772,12 @@ resolve occurrences. Its scopes are:
 | `next_week` | Occurrences in the next Monday–Sunday week. |
 | `month` | Occurrences from today through the end of the current month. |
 | `all` | Activity definitions and the full count, with bounded descriptive detail. |
+
+Windows that do not contain today, such as `tomorrow` and `next_week`, omit
+`current`, `current_count`, `next`, `today`, and `today_count` entirely and do
+not query today's current/next activities. Windows containing today retain
+those fields. Every dated occurrence and busy interval belongs to the returned
+period; date-only items retain null times and still count as relevant data.
 
 Detail lists use a 20-item/6,000-character budget. Date-window observations
 include `period`, `count`, `truncated`, complete merged `busy` time intervals,
@@ -798,7 +884,9 @@ same date scopes plus `upcoming`, without `all`. Python also requires each
 requested source to currently be `not_selected`. Unknown sources, extra fields,
 unsupported scopes, repeated sources and actions attached to a recovery request
 are rejected. Provided, empty and unavailable sources are never re-fetched by
-this fallback. Explicit user exclusions remain part of the agent instructions.
+this fallback. Recognized explicit user exclusions are separately enforced by
+backend policy, not just the agent instructions. An excluded source cannot be
+recovered even if its manifest status is `not_selected`.
 
 `ai/agent/context_recovery.py` defines `MAX_CONTEXT_RECOVERY_RETRIES = 1`.
 `ai/agent/service.py` uses the existing observation collector/builders to fetch

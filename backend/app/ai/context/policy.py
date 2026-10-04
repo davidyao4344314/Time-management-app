@@ -12,6 +12,18 @@ _CLAUSE_BOUNDARY = re.compile(
     r"[.!?;,\n]|\b(?:but|just|instead|then)\b|"
     r"\b(?:and|or)\s+(?=(?:use|show|include|tell|give|check|fetch|read)\b)"
 )
+_NEGATED_EXCLUSION = re.compile(r"\b(?:don't|dont|do not|never)\s+$")
+_SOURCE_OBJECT = re.compile(
+    r"\s+(?:(?:me|my|the|any|all|our|your|personal|scheduled|upcoming|"
+    r"current|existing|stored|daily|weekly|of)\s+)*"
+    r"(?P<source>calendar|schedule|timetable|activity|activities|exam|exams|"
+    r"test|tests|assessment|assessments|deadline|deadlines|quiz|quizzes)\b"
+)
+_WITHOUT_ACCESS = re.compile(
+    r"^\s+(?:using|showing|including|loading|fetching|reading|consulting|"
+    r"accessing|considering|looking at)\b"
+)
+_NEXT_SOURCE = re.compile(r"^\s+(?:and|or)\b")
 
 
 def excluded_context_sources(user_message):
@@ -24,16 +36,30 @@ def excluded_context_sources(user_message):
     message = user_message.casefold().replace("’", "'")
     excluded = set()
     for clause in _CLAUSE_BOUNDARY.split(message):
-        match = _EXCLUSION.search(clause)
-        if match is None:
-            continue
-        targets = clause[match.end():]
-        if re.search(r"\b(?:calendar|schedule|timetable)\b", targets):
-            excluded.update(("activities", "exams"))
-        if re.search(r"\b(?:activity|activities)\b", targets):
-            excluded.add("activities")
-        if re.search(r"\b(?:exam|exams|test|tests|assessment|assessments|deadline|deadlines|quiz|quizzes)\b", targets):
-            excluded.add("exams")
+        for match in _EXCLUSION.finditer(clause):
+            # "Don't ignore exams" negates exclusion, rather than requesting it.
+            if _NEGATED_EXCLUSION.search(clause[:match.start()]):
+                continue
+            targets = clause[match.end():]
+            if match.group() == "without":
+                access = _WITHOUT_ACCESS.match(targets)
+                if access:
+                    targets = targets[access.end():]
+            # Require a direct source object: "without forgetting my exams" is
+            # not an exclusion. Stop before unrelated text or a positive request.
+            while source_match := _SOURCE_OBJECT.match(targets):
+                source = source_match.group("source")
+                if source in {"calendar", "schedule", "timetable"}:
+                    excluded.update(("activities", "exams"))
+                elif source in {"activity", "activities"}:
+                    excluded.add("activities")
+                else:
+                    excluded.add("exams")
+                targets = targets[source_match.end():]
+                conjunction = _NEXT_SOURCE.match(targets)
+                if conjunction is None:
+                    break
+                targets = targets[conjunction.end():]
     return frozenset(excluded)
 
 

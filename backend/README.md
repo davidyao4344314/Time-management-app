@@ -191,6 +191,8 @@ Evidence from the current chat is eligible. Another chat must belong to the
 same signed owner **and** currently allow memory sharing. Sharing is rechecked
 on every snapshot; revoking it also removes its evidence/examples from use.
 Global memory, current-chat memory and schedule observations remain distinct.
+Corrections and rejections use the same sharing rule when suspending learned
+patterns: a private source chat can affect only its own pattern approvals.
 
 `ai/context/adaptive/settings.py` defines the conservative thresholds:
 

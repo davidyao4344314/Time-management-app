@@ -87,7 +87,7 @@ def event_by_id(connection, owner_id, event_id):
 
 
 def record_label(connection, owner_id, event_id, value, *, invalidate_pattern=None):
-    event_by_id(connection, owner_id, event_id)
+    event = event_by_id(connection, owner_id, event_id)
     label = RoutingLabel.model_validate(clean_record(value))
     identifier = uuid4().hex
     with connection:
@@ -95,8 +95,12 @@ def record_label(connection, owner_id, event_id, value, *, invalidate_pattern=No
                            (identifier, event_id, owner_id, now_iso(), label.model_dump_json()))
         if invalidate_pattern is not None:
             for scope_key, value in list(connection.execute(
-                    "SELECT scope_key, pattern_json FROM routing_patterns WHERE owner_id=? AND pattern_id=?",
-                    (owner_id, invalidate_pattern))):
+                    """SELECT p.scope_key, p.pattern_json FROM routing_patterns p
+                    JOIN conversations target ON target.conversation_id=p.scope_key AND target.owner_id=p.owner_id
+                    JOIN conversations source ON source.conversation_id=? AND source.owner_id=p.owner_id
+                    WHERE p.owner_id=? AND p.pattern_id=?
+                      AND (p.scope_key=source.conversation_id OR source.memory_sharing_enabled=1)""",
+                    (event.conversation_id, owner_id, invalidate_pattern))):
                 approval = PatternApproval.model_validate_json(value)
                 if not label.complete or approval.selection != label.selection:
                     approval.suspended = True

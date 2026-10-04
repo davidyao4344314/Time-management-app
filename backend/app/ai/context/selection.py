@@ -1,7 +1,7 @@
 """One-pass Stage 1 → Stage 2 → Stage 3 → safe fallback routing."""
 
 from backend.app.ai.context.keywords import assess_stage_one
-from backend.app.ai.context.intent import classify_agent_intent, context_from_classification
+from backend.app.ai.context.intent import classify_agent_intent, context_from_classification, CLASSIFIER_VERSION
 from backend.app.ai.context.fallback import classify_stage_three
 from backend.app.ai.context.contracts import ContextSelection
 from backend.app.ai.context.policy import apply_context_exclusions, excluded_context_sources
@@ -88,8 +88,19 @@ def select_agent_context(client, user_message, recent_turns, stage_two_model, *,
         stage_one = {**stage_one, "confident": False, "reason": "invalid_stage_one_result"}
 
     try:
+        examples = []
+        if adaptive_snapshot and adaptive_snapshot.get("mode") == "active" and adaptive_snapshot.get("examples_enabled"):
+            from backend.app.ai.context.adaptive.examples import validate_examples, EXAMPLE_POLICY_VERSION
+            try:
+                examples = validate_examples(adaptive_snapshot.get("examples", []))
+            except ValueError:
+                examples = []
+        if evidence is not None:
+            evidence["classifier_version"] = CLASSIFIER_VERSION + ("+" + EXAMPLE_POLICY_VERSION if examples else "")
+            evidence.setdefault("adaptive", {})["examples_used"] = len(examples)
         stage_two = classify_agent_intent(
             client, user_message, recent_turns, stage_two_model,
+            **({"confirmed_examples": examples} if examples else {}),
         )
         candidate("stage_2", "matched" if stage_two.confidence == "high" else "unresolved",
                   context_from_classification(stage_two), stage_two)

@@ -13,6 +13,41 @@ SOURCE_INFO = {
 }
 
 
+def build_adaptive_metadata(evidence=None, snapshot=None):
+    """Only aggregate routing facts; never expose example text, owners or labels."""
+    snapshot = snapshot if isinstance(snapshot, dict) else {}
+    data = (evidence or {}).get("adaptive", {})
+    data = data if isinstance(data, dict) else {}
+    mode = snapshot.get("mode", "observe" if evidence is not None else "off")
+    if mode not in {"off", "observe", "shadow", "active"}:
+        mode = "off"
+
+    def count(value, maximum):
+        return value if type(value) is int and 0 <= value <= maximum else 0
+
+    def agreement(value):
+        return value if type(value) in {int, float} and 0 <= value <= 1 else None
+
+    state = data.get("shortcut_state", "disabled" if mode == "off" else "observing" if mode == "observe" else "unavailable")
+    if snapshot.get("knowledge_unavailable"):
+        state = "unavailable"
+    if state not in {"disabled", "observing", "unavailable", "no_match", "active", "shadow", "candidate",
+                     "suspended", "learned_rule_conflict", "learned_rule_audit"}:
+        state = "unavailable"
+    calibration = data.get("calibration", {})
+    calibration = calibration if isinstance(calibration, dict) else {}
+    status = calibration.get("status", "not_used")
+    if status not in {"not_used", "disabled", "low_confidence", "insufficient_evidence", "escalated", "accepted", "unavailable"}:
+        status = "unavailable"
+    return {"mode": mode, "shortcut_state": state, "shortcut_used": data.get("shortcut_used") is True,
+            "confirmed_samples": count(data.get("confirmed_samples"), 100),
+            "observed_agreement": agreement(data.get("observed_agreement")),
+            "examples_used": count(data.get("examples_used"), 3),
+            "audit_selected": (evidence or {}).get("audit_selected") is True,
+            "calibration": {"status": status, "confirmed_samples": count(calibration.get("confirmed_count"), 100),
+                            "observed_agreement": agreement(calibration.get("observed_agreement"))}}
+
+
 def _text(value, limit):
     if not isinstance(value, str):
         return None

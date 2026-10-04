@@ -58,7 +58,7 @@ backend/
 │   ├── ai/
 │   │   ├── config.py         # Local API key/model/memory-limit settings
 │   │   ├── agent/            # Agent coordination, reasoning and contracts
-│   │   ├── context/          # Stage 1/2/3 context routing
+│   │   ├── context/          # Stage 1/2/3 routing + opt-in adaptive evidence
 │   │   ├── observations/     # Compact activity/exam/Screen Time formatters
 │   │   ├── actions/          # Proposal contracts only; no action execution
 │   │   ├── memory/           # Recent, archive, compaction and durable memory
@@ -140,6 +140,162 @@ See [Conversations and memory](CONVERSATIONS.md) for limits and recovery details
 The compatibility `/ai/propose` route retains its RAM-backed recent turns and
 legacy archive behavior. Its recent turns do not survive a backend restart;
 SQLite conversation transcripts do.
+
+### Adaptive context selection (opt-in)
+
+The nine adaptive-routing steps are implemented. They improve **context
+selection**, not the model's weights or the schedule itself:
+
+```text
+completed routing choices / recovery signals
+  -> bounded owner-scoped evidence (unconfirmed)
+  -> explicit developer/structured-user review
+  -> consistent exact-phrase patterns, reviewed Stage 2 examples, reliability statistics
+
+new request
+  -> static Stage 1 or eligible, explicitly activated learned phrase
+  -> Stage 2 if unresolved (optionally 1–3 confirmed examples)
+  -> unchanged Stage 3 if unresolved/unreliable
+  -> validated context selection -> fresh observations -> main agent -> proposal only
+```
+
+Learning is **off by default**. Configure these optional values in the existing
+ignored project-root `.env` (never put a key or private URL in source code):
+
+```dotenv
+AI_ADAPTIVE_ROUTING_MODE=observe
+AI_ADAPTIVE_STAGE2_EXAMPLES=false
+AI_ADAPTIVE_CALIBRATION=false
+AI_ADAPTIVE_AUDITS=false
+```
+
+Restart FastAPI after changing local configuration. Modes:
+
+| Mode | Behavior |
+| --- | --- |
+| `off` | Original routing, no new evidence recorded. Invalid mode also disables adaptation. |
+| `observe` | Original routing; record completed choices/recovery for later review. |
+| `shadow` | Compute learned-pattern matches for inspection; do not change routing or classifier input. |
+| `active` | Use explicitly approved, freshly eligible shortcuts. Examples/calibration/audits each require their separate flag. |
+
+The conversation service creates three small learning tables in the **existing**
+SQLite database: `routing_events`, `routing_labels`, `routing_patterns`. No
+planner columns change. Evidence is keyed by owner/conversation/request, so a
+retried completed request is not counted again. Labels are append-only; the
+latest review supersedes earlier ones. Requests are bounded to 600 characters;
+private URLs/API keys are redacted. Observations, model scratchpads and raw API
+metadata are not stored here. The database remains Git-ignored. This is local
+private conversation data, not anonymized telemetry.
+
+Evidence from the current chat is eligible. Another chat must belong to the
+same signed owner **and** currently allow memory sharing. Sharing is rechecked
+on every snapshot; revoking it also removes its evidence/examples from use.
+Global memory, current-chat memory and schedule observations remain distinct.
+
+`ai/context/adaptive/settings.py` defines the conservative thresholds:
+
+- A phrase needs at least **30 complete confirmed reviews**, **97% joint
+  context-profile agreement**, and evidence from **3 distinct UTC dates**.
+- Statistics use up to the newest **100** unique labeled requests from the
+  last **90 days**; the newest supporting evidence must be within **30 days**.
+- Full-profile agreement compares activity/exam inclusion and windows, and
+  memory selection—not merely the intent label.
+- Promotion requires a separate explicit shadow-review approval. V1 learns
+  **exact normalized phrases**, preserving date/negation words; it does not
+  generate broad keywords, regex rules, or memory-retrieval shortcuts.
+- Follow-up dependencies, explicit exclusions, conflicting dates, static-rule
+  conflicts and absolute-date phrases cannot be bypassed by learned shortcuts.
+- A new contradictory review or rejection suspends an approved rule. Stale or
+  insufficient evidence also makes it unusable. A suspended rule requires at
+  least **10 new confirmed reviews**, qualifying statistics, and explicit
+  reapproval; it never silently re-enables. The 90% demotion floor is weaker
+  than the implemented conservative contradiction/97% eligibility guards.
+- Stage 2 examples require a complete, explicitly approved classification.
+  Selection uses simple topic overlap, not another LLM call. Maximum **3**
+  examples, **600 characters per complete example**, **1,800 in total**;
+  contradictory examples for the same normalized request are excluded.
+- Reliability separates intent confusion from context-selection errors.
+  Partial reviews score only reviewed fields. At least **50 full reviews** in
+  the same model/prompt/example-pack/source-family/high-confidence bucket are
+  needed before agreement below **95%** can escalate to Stage 3. Low-confidence
+  outputs are never promoted. Model/policy/example-pack changes start a new
+  calibration bucket. These are empirical agreement rates, not probabilities
+  returned by the LLM.
+- Optional audits sample roughly **1 in 20** matched active shortcuts, with at
+  most **5 audit requests per owner per UTC day**. Slots are atomically reserved;
+  failed attempts count and retries reuse the same slot. An audit runs normal
+  semantic routing and **can incur API cost**. Audits are disabled by default.
+
+Stage 3 disagreement, successful context recovery and syntactically valid
+output are **not truth labels**. They are review signals only; self-predictions
+never confirm themselves. Current SQLite observations remain authoritative.
+Action validation/approval is unchanged, and no proposed action is executed.
+The legacy `/ai/propose` path remains nonadaptive; this feature belongs to the
+owner-authorized `/conversations/{id}/messages` flow.
+
+#### Local review commands
+
+The developer tool opens an existing database only; it cannot create a second
+database or call an LLM. Start the app once to create the learning tables. Supply
+the owner and chat IDs from your local development conversation records. The
+CLI is a local developer utility, not a public endpoint or an owner-authentication
+replacement. Do not publish its private request excerpts.
+
+```bash
+backend/.venv/bin/python -B -m backend.app.dev.routing_learning --owner OWNER list --chat CHAT
+backend/.venv/bin/python -B -m backend.app.dev.routing_learning --owner OWNER label \
+  --event EVENT \
+  --selection '{"activities_scope":"tomorrow","include_exams":false,"exam_scope":null,"memory":null}' \
+  --fields activities_scope,include_exams,exam_scope,memory
+backend/.venv/bin/python -B -m backend.app.dev.routing_learning --owner OWNER patterns --chat CHAT
+backend/.venv/bin/python -B -m backend.app.dev.routing_learning --owner OWNER activate \
+  --chat CHAT --pattern PATTERN_HASH --confirm-shadow-review
+backend/.venv/bin/python -B -m backend.app.dev.routing_learning --owner OWNER metrics --chat CHAT
+```
+
+`label` can confirm only selected fields (use a shorter `--fields` list), but
+partial reviews cannot promote a shortcut or calibrate the whole profile. To
+approve an example, also supply reviewed `--classification` JSON in the existing
+`AgentRoutingDecision` format and `--approve-example`; it must agree with the
+selection. `reject --event EVENT` withdraws evidence and suspends an associated
+rule. `reset --confirm-reset` clears **only that owner's learning tables**, not
+chats, activity/exam rows or archives. No natural-language correction is
+automatically treated as a complete review.
+
+The existing **How the agent used context** panel displays mode, shortcut use,
+review counts, observed agreement, examples used, reliability status and audit
+status. It also shows separate activity/exam windows. It exposes no learned
+example text, owner IDs, label IDs, prompts or reasoning.
+
+#### Test without API charges
+
+Run from the project root:
+
+```bash
+backend/.venv/bin/python -B -m backend.app.dev.adaptive_routing_check
+backend/.venv/bin/python -B -m unittest discover -s backend/tests -t .
+cd frontend
+npm test
+npm run lint
+npm run build
+```
+
+The offline check compares original/shadow/active behavior using synthetic
+reviews and a fake classifier; it does not read `.env`, real chats or archives,
+open a database, or make an API call. It covers exact/nearby phrases, punctuation,
+exclusions, changing dates, follow-ups and audit routing. Unit tests additionally
+cover owner isolation, revoked sharing, correction/suspension, budget limits,
+model-version buckets and partial evidence. **These tests verify wiring and
+guards, not real semantic accuracy or actual cost savings.**
+
+Before enabling `active`, review shadow results and evaluate a separate held-out
+set of paraphrases, exclusions, personal-vs-generic questions, independent exam
+horizons, memory scopes and follow-ups. Do not train on the held-out labels.
+Compare source/window errors, missing-context recovery and classifier-call counts
+against the original routing; accuracy must not regress. The existing
+`backend.app.dev.stage_two_check` previews cases offline; adding `--llm`
+explicitly makes **paid** Stage 2 calls. Live conversational tests also cost money.
+No paid evaluation was automatically run for this implementation.
 
 ### Archive compaction threshold (Stage 1)
 

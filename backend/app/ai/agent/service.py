@@ -19,7 +19,7 @@ from backend.app.ai.observations.collect import collect_agent_observations
 from backend.app.ai.observations.exams import build_exam_observation
 from backend.app.ai.observations.memory import build_memory_observation
 from backend.app.ai.memory.contracts import MemorySelection
-from backend.app.ai.agent.transparency import build_agent_context
+from backend.app.ai.agent.transparency import build_agent_context, build_adaptive_metadata
 from backend.app.ai.agent.context_recovery import (
     MAX_CONTEXT_RECOVERY_RETRIES, build_context_status, read_observation,
     recovery_selection, observation_status,
@@ -69,7 +69,8 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
             public['context_sources'].append({'source':'chat_summary','label':'Current-chat summary',
                 'selected':True,'authority':'historical_summary','reason':'Bounded summary of older completed messages in this chat.'})
         public.update(initial_context_status=initial_status, context_status=context_status,
-                      context_recovery=recovery_trace, excluded_sources=sorted(excluded_sources))
+                      context_recovery=recovery_trace, excluded_sources=sorted(excluded_sources),
+                      adaptive_routing=build_adaptive_metadata(routing_evidence, adaptive_snapshot))
         return {**proposal, 'agent_context':public}
 
     def collect(selected):

@@ -59,7 +59,7 @@ def select_agent_context(client, user_message, recent_turns, stage_two_model, *,
                     "pattern_id": matched["pattern_id"] if matched else None,
                     "confirmed_samples": matched["confirmed_count"] if matched else 0,
                     "observed_agreement": matched["agreement"] if matched else None,
-                    "shortcut_state": matched["state"] if matched else "no_match"}
+                    "shortcut_state": matched["state"] if matched else "no_match", "shortcut_used": False}
         except (ValueError, KeyError, TypeError):
             matched = None
     protected_reasons = {"depends_on_recent_conversation", "conflicting_time_scopes",
@@ -81,6 +81,8 @@ def select_agent_context(client, user_message, recent_turns, stage_two_model, *,
         else:
             stage_one = {"selection": matched["selection"], "confident": True, "reason": None}
             learned_reason = "Matched a reviewed learned phrase with sufficient recent confirmed evidence."
+            if evidence is not None:
+                evidence["adaptive"]["shortcut_used"] = True
     candidate("stage_1", "matched" if stage_one["confident"] and _valid_context_selection(stage_one["selection"])
               else "unresolved", stage_one.get("selection") if _valid_context_selection(stage_one.get("selection")) else None)
     if stage_one["confident"] and _valid_context_selection(stage_one["selection"]):
@@ -163,5 +165,7 @@ def _record_route(trace, selected, stage, status, reason, decision=None):
                           or selected.get("exam_scope")
                           or (selected.get("memory") or {}).get("query", {}).get("time_reference"),
             "reason": reason,
+            "activities_scope": selected.get("activities_scope"),
+            "exam_scope": selected.get("exam_scope"),
         })
     return selected

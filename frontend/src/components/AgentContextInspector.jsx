@@ -12,9 +12,33 @@ function AgentContextInspector({ context, actions = [] }) {
               <dt>Status</dt><dd>{context.routing.status || 'Unavailable'}</dd>
               <dt>Intent</dt><dd>{context.routing.intent || 'Not classified by this stage'}</dd>
               <dt>Time scope</dt><dd>{context.routing.time_scope || 'Not specified'}</dd>
+              <dt>Activity window</dt><dd>{context.routing.activities_scope || 'Not selected'}</dd>
+              <dt>Exam window</dt><dd>{context.routing.exam_scope || 'Not selected'}</dd>
             </dl>
             <p>{context.routing.reason}</p>
           </section>
+
+          {context.adaptive_routing && (
+            <section aria-label="Adaptive routing">
+              <h3>Adaptive Routing</h3>
+              <dl className="agent-context-fields">
+                <dt>Mode</dt><dd>{context.adaptive_routing.mode}</dd>
+                <dt>Learned shortcut</dt><dd>{context.adaptive_routing.shortcut_state.replaceAll('_', ' ')}</dd>
+                <dt>Shortcut used</dt><dd>{context.adaptive_routing.shortcut_used ? 'Yes' : 'No'}</dd>
+                <dt>Reviewed samples</dt><dd>{context.adaptive_routing.confirmed_samples}</dd>
+                <dt>Observed agreement</dt><dd>{context.adaptive_routing.observed_agreement === null
+                  ? 'Not available'
+                  : `${Math.round(context.adaptive_routing.observed_agreement * 100)}%`}</dd>
+                <dt>Confirmed examples used</dt><dd>{context.adaptive_routing.examples_used}</dd>
+                <dt>Reliability check</dt><dd>{context.adaptive_routing.calibration.status.replaceAll('_', ' ')}</dd>
+                <dt>Audit selected</dt><dd>{context.adaptive_routing.audit_selected ? 'Yes' : 'No'}</dd>
+              </dl>
+              <p className="agent-context-note">
+                Agreement is measured against explicit reviews, not the model's confidence.
+                This layer selects context only; it never executes actions.
+              </p>
+            </section>
+          )}
 
           <section aria-label="Context sources">
             <h3>Context Sources</h3>

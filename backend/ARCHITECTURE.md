@@ -74,7 +74,9 @@ backend/
     │   │   ├── keywords.py     # Stage 1 routing
     │   │   ├── intent.py       # Stage 2 classification/schemas
     │   │   ├── fallback.py     # Stage 3 fallback classification
-    │   │   └── selection.py    # First confident route; safe fallback
+    │   │   ├── selection.py    # First confident route; safe fallback
+    │   │   ├── profiles.py     # Shared classification -> selection adapter
+    │   │   └── adaptive/       # Opt-in reviewed routing evidence/patterns/examples/metrics
     │   ├── observations/
     │   │   ├── formatting.py   # Shared time/date formatting and ordering
     │   │   ├── activities.py   # Compact activity/calendar scopes
@@ -161,6 +163,9 @@ previous module's function names. Legacy wrappers are omitted from this tree.
 | `ai/observations/collect.py` | `collect_agent_observations` | Deciding intent or formatting conversation history |
 | `ai/context/selection.py` | `select_agent_context`, Stage 1/2/3 ordering | Building observations, answering the user |
 | `ai/context/keywords.py` | `choose_agent_context`, `assess_stage_one` | LLM calls |
+| `ai/context/adaptive/store.py` | Owner-scoped routing evidence/labels/patterns, atomic audit reservations | Planner CRUD, model calls, automatic truth labels |
+| `ai/context/adaptive/learning.py` | Completed telemetry, explicit review/approval, scoped snapshots | Observation formatting, action execution |
+| `ai/context/adaptive/patterns.py`, `examples.py`, `metrics.py` | Pure phrase statistics/matching, bounded reviewed examples, measured agreement | SQL, model calls, factual app state |
 | `ai/context/intent.py`, `fallback.py` | Existing strict classification models and small classifier calls | Full observations, advice or tool execution |
 | `ai/agent/service.py` | `get_agent_proposal`: key/settings checks, client lifetime, routing/collection | Archive compaction, SQL writes or executing proposals |
 | `ai/agent/reasoning.py` | Prompt, `build_agent_messages`, request budgets, model request/response parsing | CRUD, archive reading, recurrence |
@@ -228,8 +233,11 @@ new folder depth. These files stay in place:
 - `backend/ai_memory_archive.jsonl`
 - `backend/ai_durable_memories.json`
 
-Only Python modules/tests and documentation moved or changed; this grouping
-does not migrate schemas, modify records or copy secrets.
+The earlier grouping did not migrate schemas or copy secrets. The opt-in
+adaptive-routing feature now creates three learning tables in the same existing
+SQLite database when the conversation service opens it. It does not change
+planner tables, move archives, or store API keys. See the README for defaults,
+review gates and no-charge evaluation.
 
 ## Import direction and safety
 

@@ -11,6 +11,7 @@ from backend.app.ai.context.policy import apply_context_exclusions
 from backend.app.ai.context.adaptive.patterns import normalize_request, compile_patterns, pattern_id, match_pattern
 from backend.app.ai.context.adaptive import settings
 from backend.app.ai.context.adaptive.examples import select_examples
+from backend.app.ai.context.adaptive.metrics import summarize_reliability
 
 
 def load_snapshot(connection, owner_id, conversation_id, adaptive_settings, *, request_id=None, message="", recent_turns=()):
@@ -29,6 +30,7 @@ def load_snapshot(connection, owner_id, conversation_id, adaptive_settings, *, r
             "examples_enabled": adaptive_settings.examples_enabled,
             "calibration_enabled": adaptive_settings.calibration_enabled,
             "examples": select_examples(records, message) if adaptive_settings.examples_enabled else [],
+            "reliability": summarize_reliability(records) if adaptive_settings.calibration_enabled else {},
             "audit_due": audit_due}
 
 

@@ -9,6 +9,7 @@ from backend.app import database
 from backend.app.ai.context.adaptive import store
 from backend.app.ai.context.adaptive.learning import apply_reviewed_label, approve_pattern
 from backend.app.ai.context.adaptive.patterns import compile_patterns
+from backend.app.ai.context.adaptive.metrics import summarize_reliability
 
 
 def main(argv=None):
@@ -20,6 +21,8 @@ def main(argv=None):
     listing.add_argument("--chat", required=True)
     patterns = commands.add_parser("patterns")
     patterns.add_argument("--chat", required=True)
+    metrics = commands.add_parser("metrics")
+    metrics.add_argument("--chat", required=True)
     activation = commands.add_parser("activate")
     activation.add_argument("--chat", required=True)
     activation.add_argument("--pattern", required=True)
@@ -54,6 +57,8 @@ def main(argv=None):
             elif args.command == "patterns":
                 result = compile_patterns(store.load_eligible_evidence(connection, args.owner, args.chat),
                                           states=store.load_pattern_states(connection, args.owner, args.chat))
+            elif args.command == "metrics":
+                result = summarize_reliability(store.load_eligible_evidence(connection, args.owner, args.chat))
             elif args.command == "activate":
                 approve_pattern(connection, args.owner, args.chat, args.pattern, shadow_reviewed=args.confirm_shadow_review)
                 result = {"approved": True}

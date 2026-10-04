@@ -53,13 +53,23 @@ def clean_text(text):
     return re.sub(r"(?:https?|webcal)://\S+", "[redacted URL]", redact_secrets(text), flags=re.I)
 
 
+def clean_record(value):
+    if isinstance(value, str):
+        return clean_text(value)
+    if isinstance(value, list):
+        return [clean_record(item) for item in value]
+    if isinstance(value, dict):
+        return {key: clean_record(item) for key, item in value.items()}
+    return value
+
+
 def record_event(connection, value):
     event = RoutingEvent.model_validate(value)
     _require_chat(connection, event.owner_id, event.conversation_id)
     event.pattern = clean_text(event.pattern)
     if event.request_excerpt is not None:
         event.request_excerpt = clean_text(event.request_excerpt)
-    clean = RoutingEvent.model_validate(redact_secrets(event.model_dump()))
+    clean = RoutingEvent.model_validate(clean_record(event.model_dump()))
     with connection:
         cursor = connection.execute("""INSERT INTO routing_events VALUES(?,?,?,?,?,?)
             ON CONFLICT(owner_id, conversation_id, request_id) DO NOTHING""",
@@ -78,7 +88,7 @@ def event_by_id(connection, owner_id, event_id):
 
 def record_label(connection, owner_id, event_id, value, *, invalidate_pattern=None):
     event_by_id(connection, owner_id, event_id)
-    label = RoutingLabel.model_validate(redact_secrets(value))
+    label = RoutingLabel.model_validate(clean_record(value))
     identifier = uuid4().hex
     with connection:
         connection.execute("INSERT INTO routing_labels VALUES(?,?,?,?,?)",
@@ -116,7 +126,7 @@ def save_pattern(connection, owner_id, scope_key, pattern_id, value):
     with connection:
         connection.execute("""INSERT INTO routing_patterns VALUES(?,?,?,?)
             ON CONFLICT(owner_id, scope_key, pattern_id) DO UPDATE SET pattern_json=excluded.pattern_json""",
-            (owner_id, scope_key, pattern_id, json.dumps(redact_secrets(value))))
+            (owner_id, scope_key, pattern_id, json.dumps(clean_record(value))))
 
 
 def load_pattern_states(connection, owner_id, conversation_id):

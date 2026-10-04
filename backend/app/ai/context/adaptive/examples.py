@@ -1,6 +1,7 @@
 """Small, explicitly reviewed routing examples; no observations or model calls."""
 
 import json
+import hashlib
 import re
 from datetime import datetime, timedelta, timezone
 
@@ -11,6 +12,13 @@ from backend.app.ai.context.profiles import context_from_classification
 
 EXAMPLE_POLICY_VERSION = "reviewed-examples-v1"
 STOP_WORDS = frozenset("a an and are as at be can do for from have help i in is it me my of on or should that the this to what when with you your".split())
+
+
+def example_version_suffix(examples):
+    if not examples:
+        return ""
+    fingerprint = hashlib.sha256(json.dumps(examples, sort_keys=True).encode()).hexdigest()[:8]
+    return "+" + EXAMPLE_POLICY_VERSION + ":" + fingerprint
 
 
 def topic_tokens(text):

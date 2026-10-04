@@ -71,4 +71,3 @@ def classify_agent_intent(client, user_message, recent_turns, model, *, confirme
     if response.status != "completed" or response.output_parsed is None:
         raise ValueError("The classifier did not return a complete result.")
     return validate_intent_classification(response.output_parsed)
-

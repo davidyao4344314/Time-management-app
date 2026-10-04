@@ -6,6 +6,8 @@ from backend.app.ai.context.fallback import classify_stage_three
 from backend.app.ai.context.contracts import ContextSelection
 from backend.app.ai.context.policy import apply_context_exclusions, excluded_context_sources
 from backend.app.ai.context.adaptive.patterns import match_pattern, profile_key
+from backend.app.ai.context.adaptive.metrics import high_confidence_reliability
+from backend.app.ai.context.adaptive.examples import validate_examples, example_version_suffix
 
 
 SAFE_MINIMAL_CONTEXT = {
@@ -80,7 +82,7 @@ def select_agent_context(client, user_message, recent_turns, stage_two_model, *,
             stage_one = {"selection": matched["selection"], "confident": True, "reason": None}
             learned_reason = "Matched a reviewed learned phrase with sufficient recent confirmed evidence."
     candidate("stage_1", "matched" if stage_one["confident"] and _valid_context_selection(stage_one["selection"])
-              else "unresolved", stage_one["selection"] if _valid_context_selection(stage_one["selection"]) else None)
+              else "unresolved", stage_one.get("selection") if _valid_context_selection(stage_one.get("selection")) else None)
     if stage_one["confident"] and _valid_context_selection(stage_one["selection"]):
         return finish(stage_one["selection"], "stage_1", "matched",
                              learned_reason or "Matched clear keyword/phrase rules.")
@@ -90,28 +92,36 @@ def select_agent_context(client, user_message, recent_turns, stage_two_model, *,
     try:
         examples = []
         if adaptive_snapshot and adaptive_snapshot.get("mode") == "active" and adaptive_snapshot.get("examples_enabled"):
-            from backend.app.ai.context.adaptive.examples import validate_examples, EXAMPLE_POLICY_VERSION
             try:
                 examples = validate_examples(adaptive_snapshot.get("examples", []))
             except ValueError:
                 examples = []
+        classifier_version = CLASSIFIER_VERSION + example_version_suffix(examples)
         if evidence is not None:
-            evidence["classifier_version"] = CLASSIFIER_VERSION + ("+" + EXAMPLE_POLICY_VERSION if examples else "")
+            evidence["classifier_version"] = classifier_version
             evidence.setdefault("adaptive", {})["examples_used"] = len(examples)
         stage_two = classify_agent_intent(
             client, user_message, recent_turns, stage_two_model,
             **({"confirmed_examples": examples} if examples else {}),
         )
-        candidate("stage_2", "matched" if stage_two.confidence == "high" else "unresolved",
-                  context_from_classification(stage_two), stage_two)
+        selected = context_from_classification(stage_two)
+        ContextSelection.model_validate(selected)
+        reliability = {"status": "low_confidence", "escalate": False}
         if stage_two.confidence == "high":
-            selected = context_from_classification(stage_two)
-            ContextSelection.model_validate(selected)
+            try:
+                reliability = high_confidence_reliability(selected, adaptive_snapshot, stage_two_model, classifier_version)
+            except (ValueError, TypeError, KeyError):
+                reliability = {"status": "unavailable", "escalate": False}
+        if evidence is not None:
+            evidence.setdefault("adaptive", {})["calibration"] = reliability
+        accepted = stage_two.confidence == "high" and not reliability["escalate"]
+        candidate("stage_2", "matched" if accepted else "unresolved", selected, stage_two)
+        if accepted:
             return finish(selected, "stage_2", "matched",
                                  "Stage 1 was unresolved; Stage 2 returned a high-confidence classification.", stage_two)
         stage_two_result = {
             "classification": stage_two.model_dump(),
-            "reason": "low_confidence",
+            "reason": "reviewed_reliability_low" if reliability["escalate"] else "low_confidence",
         }
     except Exception:
         if evidence is not None and not any(item["stage"] == "stage_2" for item in evidence.get("candidates", [])):

@@ -1,6 +1,8 @@
 """Coordinate routing, fresh observations and main-agent reasoning."""
 
 import os
+import re
+from copy import deepcopy
 
 from openai import OpenAI
 
@@ -27,7 +29,7 @@ from backend.app.ai.agent.context_recovery import (
 PROPOSAL_MODEL = "gpt-6-luna"
 
 
-def get_agent_proposal(connection, user_request, recent_turns=None, *, session_id=None, include_context=False, memory_reader=None, chat_summary=None):
+def get_agent_proposal(connection, user_request, recent_turns=None, *, session_id=None, include_context=False, memory_reader=None, chat_summary=None, routing_evidence=None):
     """Return a validated message and proposed actions; never write to SQLite."""
     if not is_openai_api_key_configured():
         raise RuntimeError("OPENAI_API_KEY is not configured.")
@@ -45,8 +47,18 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
     recovery_trace = {"max_retries": MAX_CONTEXT_RECOVERY_RETRIES, "attempts": 0,
                       "main_agent_attempts": 0, "status": "not_requested", "requests": []}
     followup_count = 0
+    memory_requested = False
 
     def finish(proposal):
+        if routing_evidence is not None:
+            routing_evidence.update(
+                classifier_model=PROPOSAL_MODEL,
+                final_selection=deepcopy(selection), initial_status=initial_status, final_status=context_status,
+                excluded_sources=sorted(excluded_sources),
+                context_dependent=bool(recent_turns and re.search(r"\b(it|that|those|same|earlier|previously)\b", user_request.casefold())),
+                recovery_requested=bool(recovery_trace["attempts"] or memory_requested),
+                recovery_completed=recovery_trace["status"] == "completed",
+            )
         if not include_context:
             return proposal
         recent_count = len(list(recent_turns or [])[-get_max_recent_turns():])
@@ -74,8 +86,11 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
         selection = select_agent_context(
             client, user_request.strip(), recent_turns, PROPOSAL_MODEL,
             **({"trace": routing_trace} if include_context else {}),
+            **({"evidence": routing_evidence} if routing_evidence is not None else {}),
         )
         selection = apply_context_exclusions(selection, excluded_sources)
+        if routing_evidence is not None:
+            routing_evidence["initial_selection"] = deepcopy(selection)
         context = dict(collect(selection))
         context_status = build_context_status(context, memory_available=session_id is not None)
         initial_status = dict(context_status)
@@ -90,6 +105,7 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
         )
         proposal = reasoning.parse_agent_response(response)
         request = proposal.get("memory_request")
+        memory_requested = request is not None
         missing = proposal.get("missing_context", [])
         if not missing and not (request is not None and session_id is not None):
             return finish(proposal)

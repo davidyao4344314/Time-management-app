@@ -14,6 +14,8 @@ from backend.app.ai.agent.contracts import validate_agent_proposal
 from backend.app.conversations.contracts import ConversationConflict
 from backend.app.conversations.legacy import link_legacy_chat
 from backend.app.ai.context.adaptive import store as routing_store
+from backend.app.ai.context.adaptive.settings import get_adaptive_settings
+from backend.app.ai.context.adaptive.learning import make_completed_event
 
 
 @contextmanager
@@ -59,23 +61,33 @@ def send_message(owner_id, conversation_id, request_id, message):
             return {'messages': messages, 'status': messages[0]['status']}
         try:
             context = build_chat_context(connection, conversation_id, owner_id)
+            routing_evidence = {} if get_adaptive_settings().mode != 'off' else None
             # Model observations use a separate read-only connection.
             observation_connection = sqlite3.connect(f'{database.db_file.resolve().as_uri()}?mode=ro', uri=True)
             try:
                 proposal = get_agent_proposal(observation_connection, message, context['recent_turns'],
                     session_id=conversation_id, include_context=True, chat_summary=context['summary'],
                     memory_reader=lambda selected: retrieve_for_chat(connection, owner_id, conversation_id, selected,
-                                                                   recent_turns=context['recent_turns']))
+                                                                   recent_turns=context['recent_turns']),
+                    **({'routing_evidence': routing_evidence} if routing_evidence is not None else {}))
             finally:
                 observation_connection.close()
             validate_agent_proposal({key:value for key,value in proposal.items() if key != 'agent_context'})
             messages = storage.complete_request(connection, conversation_id, request_id, proposal)
+            learning_pending = False
+            if routing_evidence is not None:
+                try:
+                    event = make_completed_event(owner_id, conversation_id, request_id, message, routing_evidence)
+                    routing_store.record_event(connection, event.model_dump())
+                except (sqlite3.Error, OSError, ValueError, KeyError, TypeError):
+                    learning_pending = True
             try:
                 export_eligible_turns(connection,owner_id,conversation_id)
             except (sqlite3.Error, OSError, ValueError, RuntimeError):
                 # A memory export failure must not discard a saved assistant response.
                 return {'messages':messages,'status':'completed','memory_export_pending':True}
-            return {'messages': messages, 'status':'completed'}
+            return {'messages': messages, 'status':'completed',
+                    **({'routing_learning_pending': True} if learning_pending else {})}
         except Exception:
             storage.fail_request(connection, conversation_id, request_id)
             raise

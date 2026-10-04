@@ -124,6 +124,18 @@ class ContextRecoveryTests(unittest.TestCase):
         self.assertEqual(second["context_recovery_remaining"], 0)
         self.assertEqual(result["agent_context"]["context_recovery"]["attempts"], MAX_CONTEXT_RECOVERY_RETRIES)
 
+    def test_telemetry_keeps_initial_and_recovered_selection_separate(self):
+        self.respond(missing(), answer())
+        evidence = {}
+        self.run_agent(routing_evidence=evidence)
+        self.assertEqual(evidence["initial_selection"], NO_CONTEXT)
+        self.assertEqual(evidence["final_selection"], TOMORROW)
+        self.assertEqual(evidence["initial_status"]["activities"], "not_selected")
+        self.assertEqual(evidence["final_status"]["activities"], "provided")
+        self.assertTrue(evidence["recovery_requested"])
+        self.assertTrue(evidence["recovery_completed"])
+        self.assertNotIn("confirmed", evidence)
+
     def test_joke_requires_no_recovery(self):
         self.respond(answer("The alarm clock needed a wake-up call."))
         self.run_agent("Tell me a joke about alarm clocks.")

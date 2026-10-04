@@ -2,6 +2,8 @@
 
 import json
 
+CLASSIFIER_VERSION = "context-v2-independent-horizons"
+
 CLASSIFIER_INSTRUCTIONS = """Select the minimum information the main study assistant needs. Never answer, advise, plan, calculate recommendations, or request actions.
 
 Make two independent decisions: what the user wants (intent), and what application information is required to answer accurately (observation flags). An intent label never determines the flags by itself. general_question may need activities, exams, or memory.

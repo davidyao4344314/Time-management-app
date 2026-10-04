@@ -23,17 +23,30 @@ def _valid_context_selection(selection):
         return False
 
 
-def select_agent_context(client, user_message, recent_turns, stage_two_model, *, trace=None):
+def select_agent_context(client, user_message, recent_turns, stage_two_model, *, trace=None, evidence=None):
     """Stop at the first confident route; never retry a failed stage."""
     excluded = excluded_context_sources(user_message)
 
+    def candidate(stage, status, selected=None, decision=None):
+        if evidence is not None:
+            parsed = decision.model_dump() if decision is not None else {}
+            confidence = parsed.pop("confidence", None)
+            evidence.setdefault("candidates", []).append({
+                "stage": stage, "status": status, "selection": selected,
+                "classification": parsed or None, "confidence": confidence,
+            })
+
     def finish(selected, stage, status, reason, decision=None):
+        if evidence is not None:
+            evidence["initial_selection"] = apply_context_exclusions(selected, excluded)
         return _record_route(
             trace, apply_context_exclusions(selected, excluded),
             stage, status, reason, decision,
         )
 
     stage_one = assess_stage_one(user_message, recent_turns)
+    candidate("stage_1", "matched" if stage_one["confident"] and _valid_context_selection(stage_one["selection"])
+              else "unresolved", stage_one["selection"] if _valid_context_selection(stage_one["selection"]) else None)
     if stage_one["confident"] and _valid_context_selection(stage_one["selection"]):
         return finish(stage_one["selection"], "stage_1", "matched",
                              "Matched clear keyword/phrase rules.")
@@ -44,6 +57,8 @@ def select_agent_context(client, user_message, recent_turns, stage_two_model, *,
         stage_two = classify_agent_intent(
             client, user_message, recent_turns, stage_two_model,
         )
+        candidate("stage_2", "matched" if stage_two.confidence == "high" else "unresolved",
+                  context_from_classification(stage_two), stage_two)
         if stage_two.confidence == "high":
             selected = context_from_classification(stage_two)
             ContextSelection.model_validate(selected)
@@ -54,6 +69,8 @@ def select_agent_context(client, user_message, recent_turns, stage_two_model, *,
             "reason": "low_confidence",
         }
     except Exception:
+        if evidence is not None and not any(item["stage"] == "stage_2" for item in evidence.get("candidates", [])):
+            candidate("stage_2", "unavailable")
         stage_two_result = {
             "classification": None,
             "reason": "invalid_or_unavailable",
@@ -64,9 +81,12 @@ def select_agent_context(client, user_message, recent_turns, stage_two_model, *,
             client, user_message, recent_turns, stage_one, stage_two_result,
         )
         selected = context_from_classification(decision)
+        candidate("stage_3", "matched", selected, decision)
         return finish(selected, "stage_3", "matched",
                              "Earlier stages were unresolved; Stage 3 returned a valid classification.", decision)
     except Exception:
+        candidate("stage_3", "unavailable")
+        candidate("safe_fallback", "fallback", SAFE_MINIMAL_CONTEXT.copy())
         return finish(SAFE_MINIMAL_CONTEXT.copy(), "safe_fallback", "fallback",
                              "No confident valid route was available; the existing minimal context was selected.")
 

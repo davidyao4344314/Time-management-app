@@ -1,0 +1,33 @@
+"""Turn completed routing telemetry into unconfirmed, bounded evidence."""
+
+import re
+from uuid import NAMESPACE_URL, uuid5
+from backend.app.ai.context.adaptive.contracts import RoutingEvent
+from backend.app.ai.context.adaptive import store
+from backend.app.ai.context.intent import CLASSIFIER_VERSION
+
+
+def normalize_request(text):
+    text = text.casefold().replace("’", "'")
+    return " ".join(re.sub(r"[^\w\s']", " ", text).split())
+
+
+def make_completed_event(owner_id, conversation_id, request_id, message, evidence):
+    """Model disagreement and recovery remain observations, not confirmations."""
+    clean = store.clean_text(message)
+    pattern = normalize_request(clean)
+    return RoutingEvent.model_validate({
+        "event_id": str(uuid5(NAMESPACE_URL, f"{owner_id}:{conversation_id}:{request_id}")),
+        "owner_id": owner_id, "conversation_id": conversation_id, "request_id": request_id,
+        "timestamp": store.now_iso(), "classifier_model": evidence["classifier_model"],
+        "classifier_version": evidence.get("classifier_version", CLASSIFIER_VERSION),
+        "pattern": pattern[:600], "request_excerpt": clean[:600],
+        "context_dependent": bool(evidence.get("context_dependent")) or len(clean) > 600 or clean != message,
+        "candidates": evidence.get("candidates", []),
+        "initial_selection": evidence["initial_selection"], "final_selection": evidence["final_selection"],
+        "initial_status": evidence["initial_status"], "final_status": evidence["final_status"],
+        "excluded_sources": evidence.get("excluded_sources", []),
+        "recovery_requested": evidence.get("recovery_requested", False),
+        "recovery_completed": evidence.get("recovery_completed", False),
+        "audit_selected": evidence.get("audit_selected", False),
+    })

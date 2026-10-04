@@ -29,7 +29,7 @@ from backend.app.ai.agent.context_recovery import (
 PROPOSAL_MODEL = "gpt-6-luna"
 
 
-def get_agent_proposal(connection, user_request, recent_turns=None, *, session_id=None, include_context=False, memory_reader=None, chat_summary=None, routing_evidence=None):
+def get_agent_proposal(connection, user_request, recent_turns=None, *, session_id=None, include_context=False, memory_reader=None, chat_summary=None, routing_evidence=None, adaptive_snapshot=None):
     """Return a validated message and proposed actions; never write to SQLite."""
     if not is_openai_api_key_configured():
         raise RuntimeError("OPENAI_API_KEY is not configured.")
@@ -87,6 +87,7 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
             client, user_request.strip(), recent_turns, PROPOSAL_MODEL,
             **({"trace": routing_trace} if include_context else {}),
             **({"evidence": routing_evidence} if routing_evidence is not None else {}),
+            **({"adaptive_snapshot": adaptive_snapshot} if adaptive_snapshot is not None else {}),
         )
         selection = apply_context_exclusions(selection, excluded_sources)
         if routing_evidence is not None:

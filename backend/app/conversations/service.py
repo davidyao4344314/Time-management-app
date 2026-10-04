@@ -15,7 +15,7 @@ from backend.app.conversations.contracts import ConversationConflict
 from backend.app.conversations.legacy import link_legacy_chat
 from backend.app.ai.context.adaptive import store as routing_store
 from backend.app.ai.context.adaptive.settings import get_adaptive_settings
-from backend.app.ai.context.adaptive.learning import make_completed_event
+from backend.app.ai.context.adaptive.learning import make_completed_event, load_snapshot
 
 
 @contextmanager
@@ -61,7 +61,14 @@ def send_message(owner_id, conversation_id, request_id, message):
             return {'messages': messages, 'status': messages[0]['status']}
         try:
             context = build_chat_context(connection, conversation_id, owner_id)
-            routing_evidence = {} if get_adaptive_settings().mode != 'off' else None
+            adaptive_settings = get_adaptive_settings()
+            routing_evidence = {} if adaptive_settings.mode != 'off' else None
+            adaptive_snapshot = None
+            if adaptive_settings.mode in {'shadow', 'active'}:
+                try:
+                    adaptive_snapshot = load_snapshot(connection, owner_id, conversation_id, adaptive_settings)
+                except (sqlite3.Error, OSError, ValueError, KeyError, TypeError):
+                    pass  # Invalid/missing knowledge uses the original routing pipeline.
             # Model observations use a separate read-only connection.
             observation_connection = sqlite3.connect(f'{database.db_file.resolve().as_uri()}?mode=ro', uri=True)
             try:
@@ -69,7 +76,8 @@ def send_message(owner_id, conversation_id, request_id, message):
                     session_id=conversation_id, include_context=True, chat_summary=context['summary'],
                     memory_reader=lambda selected: retrieve_for_chat(connection, owner_id, conversation_id, selected,
                                                                    recent_turns=context['recent_turns']),
-                    **({'routing_evidence': routing_evidence} if routing_evidence is not None else {}))
+                    **({'routing_evidence': routing_evidence} if routing_evidence is not None else {}),
+                    **({'adaptive_snapshot': adaptive_snapshot} if adaptive_snapshot is not None else {}))
             finally:
                 observation_connection.close()
             validate_agent_proposal({key:value for key,value in proposal.items() if key != 'agent_context'})

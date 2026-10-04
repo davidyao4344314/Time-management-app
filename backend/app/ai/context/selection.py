@@ -5,6 +5,7 @@ from backend.app.ai.context.intent import classify_agent_intent, context_from_cl
 from backend.app.ai.context.fallback import classify_stage_three
 from backend.app.ai.context.contracts import ContextSelection
 from backend.app.ai.context.policy import apply_context_exclusions, excluded_context_sources
+from backend.app.ai.context.adaptive.patterns import match_pattern
 
 
 SAFE_MINIMAL_CONTEXT = {
@@ -23,7 +24,7 @@ def _valid_context_selection(selection):
         return False
 
 
-def select_agent_context(client, user_message, recent_turns, stage_two_model, *, trace=None, evidence=None):
+def select_agent_context(client, user_message, recent_turns, stage_two_model, *, trace=None, evidence=None, adaptive_snapshot=None):
     """Stop at the first confident route; never retry a failed stage."""
     excluded = excluded_context_sources(user_message)
 
@@ -45,6 +46,17 @@ def select_agent_context(client, user_message, recent_turns, stage_two_model, *,
         )
 
     stage_one = assess_stage_one(user_message, recent_turns)
+    if adaptive_snapshot and adaptive_snapshot.get("mode") in {"shadow", "active"}:
+        try:
+            matched = match_pattern(user_message, adaptive_snapshot.get("patterns", []), recent_turns)
+            if evidence is not None:
+                evidence["adaptive"] = {"mode": adaptive_snapshot["mode"],
+                    "pattern_id": matched["pattern_id"] if matched else None,
+                    "confirmed_samples": matched["confirmed_count"] if matched else 0,
+                    "observed_agreement": matched["agreement"] if matched else None,
+                    "shortcut_state": matched["state"] if matched else "no_match"}
+        except (ValueError, KeyError, TypeError):
+            matched = None
     candidate("stage_1", "matched" if stage_one["confident"] and _valid_context_selection(stage_one["selection"])
               else "unresolved", stage_one["selection"] if _valid_context_selection(stage_one["selection"]) else None)
     if stage_one["confident"] and _valid_context_selection(stage_one["selection"]):

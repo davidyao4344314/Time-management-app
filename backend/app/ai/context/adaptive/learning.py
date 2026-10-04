@@ -1,17 +1,22 @@
 """Turn completed routing telemetry into unconfirmed, bounded evidence."""
 
-import re
 from uuid import NAMESPACE_URL, uuid5
 from backend.app.ai.context.adaptive.contracts import RoutingEvent, RoutingLabel
 from backend.app.ai.context.adaptive import store
 from backend.app.ai.context.intent import CLASSIFIER_VERSION, context_from_classification
 from backend.app.ai.context.contracts import ContextSelection
 from backend.app.ai.context.policy import apply_context_exclusions
+from backend.app.ai.context.adaptive.patterns import normalize_request, compile_patterns
 
 
-def normalize_request(text):
-    text = text.casefold().replace("’", "'")
-    return " ".join(re.sub(r"[^\w\s']", " ", text).split())
+def load_snapshot(connection, owner_id, conversation_id, adaptive_settings):
+    records = store.load_eligible_evidence(connection, owner_id, conversation_id)
+    states = store.load_pattern_states(connection, owner_id, conversation_id)
+    return {"mode": adaptive_settings.mode,
+            "patterns": compile_patterns(records, states=states),
+            "examples_enabled": adaptive_settings.examples_enabled,
+            "calibration_enabled": adaptive_settings.calibration_enabled,
+            "audit_due": False}
 
 
 def make_completed_event(owner_id, conversation_id, request_id, message, evidence):

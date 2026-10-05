@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 async function api(path, options = {}) {
   const response = await fetch(`/api/conversations${path}`, { credentials: 'same-origin', ...options })
@@ -14,6 +14,7 @@ export default function useConversation() {
   const [draft, setDraft] = useState('')
   const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(false)
+  const [retryingMessageId, setRetryingMessageId] = useState(null)
   const [error, setError] = useState('')
   const [nextBefore, setNextBefore] = useState(null)
   const [loadingOlder, setLoadingOlder] = useState(false)
@@ -67,11 +68,11 @@ export default function useConversation() {
     }
   }
 
-  async function refreshList() {
+  const refreshList = useCallback(async () => {
     const result = await api('')
     if (mounted.current) setChats(result.conversations)
     return result.conversations
-  }
+  }, [])
 
   async function newChat() {
     setError('')
@@ -105,11 +106,9 @@ export default function useConversation() {
     return () => { mounted.current = false; controller.abort(); load.current?.abort(); olderLoad.current?.abort() }
   }, [])
 
-  async function send(attempt = null) {
-    if (inFlight.current || !chat || (!attempt && !draft.trim())) return
+  const performRequest = useCallback(async request => {
+    if (inFlight.current || !mounted.current) return
     inFlight.current = true
-    const request = attempt || pending.current.get(chat.conversation_id)
-      || { id: chat.conversation_id, request_id: crypto.randomUUID(), message: draft.trim() }
     pending.current.set(request.id, request)
     setSending(true)
     setError('')
@@ -127,7 +126,7 @@ export default function useConversation() {
           setDraft(current => current.trim() === request.message ? '' : current)
           if (result.memory_export_pending) setError('Reply saved. Memory export is pending; it can be retried later.')
         }
-        else setError(result.status === 'pending' ? 'This request is pending. Check the last request to see its result.' : 'This request failed. You can send a new request.')
+        else setError(result.status === 'pending' ? 'This request is pending. Check the last request to see its result.' : 'This request failed. Click Retry to resend it.')
         setRetryAvailable(result.status === 'pending')
       }
       if (result.status !== 'pending') pending.current.delete(request.id)
@@ -139,7 +138,27 @@ export default function useConversation() {
         setRetryAvailable(true)
       }
     } finally { inFlight.current = false; if (mounted.current) setSending(false) }
+  }, [refreshList])
+
+  function send(attempt = null) {
+    if (inFlight.current || !chat || (!attempt && !draft.trim())) return
+    const request = attempt || pending.current.get(chat.conversation_id)
+      || { id: chat.conversation_id, request_id: crypto.randomUUID(), message: draft.trim() }
+    return performRequest(request)
   }
+
+  const retryMessage = useCallback(async messageId => {
+    if (!chat || active.current !== chat.conversation_id || loading || summarizing || inFlight.current || pending.current.has(chat.conversation_id)) return
+    const message = messages.find(item => item.message_id === messageId)
+    if (!message || message.role !== 'user' || message.status !== 'failed') return
+    setRetryingMessageId(messageId)
+    try {
+      // A confirmed failure needs a new request ID; uncertain requests retain their original ID.
+      await performRequest({ id: chat.conversation_id, request_id: crypto.randomUUID(), message: message.content })
+    } finally {
+      if (mounted.current) setRetryingMessageId(null)
+    }
+  }, [chat, messages, loading, summarizing, performRequest])
 
   async function loadOlder() {
     if (!chat || !nextBefore || olderLoad.current || loading) return
@@ -198,6 +217,7 @@ export default function useConversation() {
   }
 
   return { chats, chat, messages, draft, setDraft, loading, sending, error, nextBefore, loadingOlder,
+    retryMessage, retryingMessageId,
     selectChat, newChat, send, loadOlder, setMemorySharing, summarizeChat, summarizing, summaryMessage,
     retryAvailable, checkLast: () => { const request = pending.current.get(active.current); if (request) return send(request) } }
 }

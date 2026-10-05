@@ -55,7 +55,9 @@ function AIAgent() {
       {state.nextBefore && <button className="chat-secondary" onClick={state.loadOlder} disabled={state.loadingOlder || state.loading}>
         {state.loadingOlder ? 'Loading earlier messages…' : 'Load earlier messages'}
       </button>}
-      <MessageList messages={state.messages} sending={state.sending} />
+      <MessageList messages={state.messages} sending={state.sending} onRetry={state.retryMessage}
+        retryingMessageId={state.retryingMessageId}
+        retryDisabled={state.loading || state.sending || state.summarizing || state.retryAvailable} />
       {state.error && <p className="chat-error" role="alert">{state.error}</p>}
       {state.retryAvailable && <button className="chat-secondary" onClick={state.checkLast} disabled={state.sending}>Check last request</button>}
       {state.chat && <button className="chat-secondary" onClick={() => state.selectChat(state.chat.conversation_id)} disabled={state.sending}>Refresh chat</button>}

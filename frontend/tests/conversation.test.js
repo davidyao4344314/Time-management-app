@@ -18,6 +18,7 @@ function harness() {
     },
     useRef(initial) { const index = refCursor++; return refs[index] ||= { current: initial } },
     useEffect(callback) { effect ||= callback },
+    useCallback(callback) { return callback },
     async fetch(path, options) { calls.push([path, options]); return responder(path, options) },
   })
   const source = fs.readFileSync(new URL('../src/hooks/useConversation.js', import.meta.url), 'utf8')
@@ -183,4 +184,120 @@ test('pending response remains resolvable instead of allowing a new request', as
   const ids = h.calls.filter(([, options]) => options.method === 'POST')
     .map(([, options]) => JSON.parse(options.body).request_id)
   assert.deepEqual(ids, ['request-1', 'request-1'])
+})
+
+async function failedChat(h) {
+  h.setResponder(() => h.response({
+    conversation: { conversation_id: 'chat-1' },
+    messages: [{ message_id: 'failed-message', request_id: 'original-request',
+      role: 'user', content: 'When should I go to sleep today?', status: 'failed', sequence_number: 1 }],
+    next_before: null,
+  }))
+  await h.render().selectChat('chat-1')
+}
+
+test('Retry resends a saved failed prompt with a new request ID and preserves an unrelated draft', async () => {
+  const h = harness()
+  await h.start()
+  await failedChat(h)
+  h.render().setDraft('A different unsent question')
+  h.setResponder((path, options) => {
+    if (options.method !== 'POST') return h.response({ conversations: [] })
+    const request = JSON.parse(options.body)
+    return h.response({ status: 'completed', messages: [
+      { message_id: 'retried-user', request_id: request.request_id, role: 'user', content: request.message, status: 'completed', sequence_number: 2 },
+      { message_id: 'retried-assistant', request_id: request.request_id, role: 'assistant', content: 'Here is my reply.', status: 'completed', sequence_number: 3 },
+    ] })
+  })
+  await h.render().retryMessage('failed-message')
+  const [path, options] = h.calls.find(([, options]) => options.method === 'POST')
+  assert.equal(path, '/api/conversations/chat-1/messages')
+  assert.deepEqual(JSON.parse(options.body), { request_id: 'request-1', message: 'When should I go to sleep today?' })
+  const updated = h.render()
+  assert.equal(updated.messages.length, 3)
+  assert.equal(updated.messages[0].message_id, 'failed-message')
+  assert.equal(updated.messages[2].role, 'assistant')
+  assert.equal(updated.draft, 'A different unsent question')
+  assert.equal(updated.retryingMessageId, null)
+  assert.equal(updated.retryAvailable, false)
+})
+
+test('double-clicking Retry starts only one request and exposes the retrying message', async () => {
+  const h = harness()
+  await h.start()
+  await failedChat(h)
+  let finish
+  h.setResponder((path, options) => options.method === 'POST'
+    ? new Promise(resolve => { finish = resolve }) : h.response({ conversations: [] }))
+  const state = h.render()
+  const retry = state.retryMessage('failed-message')
+  await state.retryMessage('failed-message')
+  assert.equal(h.render().sending, true)
+  assert.equal(h.render().retryingMessageId, 'failed-message')
+  assert.equal(h.calls.filter(([, options]) => options.method === 'POST').length, 1)
+  finish(h.response({ status: 'completed', messages: [] }))
+  await retry
+  assert.equal(h.render().sending, false)
+  assert.equal(h.render().retryingMessageId, null)
+})
+
+test('an uncertain retry checks the same request before permitting another paid attempt', async () => {
+  const h = harness()
+  await h.start()
+  await failedChat(h)
+  h.setResponder(() => { throw new Error('Response lost') })
+  await h.render().retryMessage('failed-message')
+  await h.render().retryMessage('failed-message')
+  assert.equal(h.render().retryAvailable, true)
+  assert.equal(h.calls.filter(([, options]) => options.method === 'POST').length, 1)
+  h.setResponder((path, options) => options.method === 'POST'
+    ? h.response({ status: 'completed', messages: [] }) : h.response({ conversations: [] }))
+  await h.render().checkLast()
+  const ids = h.calls.filter(([, options]) => options.method === 'POST')
+    .map(([, options]) => JSON.parse(options.body).request_id)
+  assert.deepEqual(ids, ['request-1', 'request-1'])
+  assert.equal(h.render().retryAvailable, false)
+})
+
+test('Retry ignores completed messages, assistant messages, and messages from another chat', async () => {
+  const h = harness()
+  await h.start()
+  h.setResponder(() => h.response({ conversation: { conversation_id: 'chat-1' }, messages: [
+    { message_id: 'completed', role: 'user', status: 'completed', content: 'Completed question' },
+    { message_id: 'assistant', role: 'assistant', status: 'failed', content: 'Failed assistant' },
+  ], next_before: null }))
+  await h.render().selectChat('chat-1')
+  await h.render().retryMessage('completed')
+  await h.render().retryMessage('assistant')
+  await h.render().retryMessage('unknown')
+  await failedChat(h)
+  const retryInOldChat = h.render().retryMessage
+  h.setResponder(() => h.response({ conversation: { conversation_id: 'chat-2' }, messages: [], next_before: null }))
+  await h.render().selectChat('chat-2')
+  await retryInOldChat('failed-message')
+  await h.render().retryMessage('failed-message')
+  assert.equal(h.calls.filter(([, options]) => options.method === 'POST').length, 0)
+})
+
+test('a retry that fails again stays available for a new manual retry without retrying automatically', async () => {
+  const h = harness()
+  await h.start()
+  await failedChat(h)
+  h.setResponder((path, options) => {
+    if (options.method !== 'POST') return h.response({ conversations: [] })
+    const request = JSON.parse(options.body)
+    return h.response({ status: 'failed', messages: [
+      { message_id: request.request_id, request_id: request.request_id, role: 'user',
+        content: request.message, status: 'failed', sequence_number: 2 },
+    ] })
+  })
+  await h.render().retryMessage('failed-message')
+  assert.equal(h.calls.filter(([, options]) => options.method === 'POST').length, 1)
+  assert.equal(h.render().retryAvailable, false)
+  assert.equal(h.render().retryingMessageId, null)
+  assert.equal(h.render().messages[1].status, 'failed')
+  await h.render().retryMessage('request-1')
+  const ids = h.calls.filter(([, options]) => options.method === 'POST')
+    .map(([, options]) => JSON.parse(options.body).request_id)
+  assert.deepEqual(ids, ['request-1', 'request-2'])
 })

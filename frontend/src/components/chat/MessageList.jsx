@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef } from 'react'
 import MessageBubble from './MessageBubble'
-function MessageList({ messages, sending }) {
+function MessageList({ messages, sending, onRetry, retryDisabled, retryingMessageId }) {
   const latestMessage = useRef(null)
   const lastMessageId = messages.at(-1)?.message_id
 
@@ -9,7 +9,8 @@ function MessageList({ messages, sending }) {
   }, [sending, lastMessageId])
 
   return <div className="chat-message-list" aria-label="Conversation messages" aria-live="polite">
-    {messages.map(message => <MessageBubble key={message.message_id} message={message} />)}
+    {messages.map(message => <MessageBubble key={message.message_id} message={message}
+      onRetry={onRetry} retryDisabled={retryDisabled} retrying={retryingMessageId === message.message_id} />)}
     {sending && <p role="status">AI is responding…</p>}
     <div ref={latestMessage} aria-hidden="true" />
   </div>

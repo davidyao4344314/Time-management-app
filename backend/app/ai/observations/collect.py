@@ -12,6 +12,7 @@ def collect_agent_observations(
     session_id=None,
     memory_builder=None,
     excluded_sources=(),
+    exam_filter="all",
 ):
     """Keep factual app state separate from the current request and recent turns.
 
@@ -26,6 +27,7 @@ def collect_agent_observations(
     if selection["include_exams"] and "exams" not in excluded_sources:
         context["exams"] = exam_builder(
             connection, scope=selection["exam_scope"],
+            **({"assessment_filter": exam_filter} if exam_filter != "all" else {}),
         )
     if selection.get("memory") is not None:
         context["memory"] = (memory_builder(selection['memory']) if memory_builder is not None

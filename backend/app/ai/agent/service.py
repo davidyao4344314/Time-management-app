@@ -14,6 +14,7 @@ from backend.app.ai.config import (
 from backend.app.ai.agent import reasoning
 from backend.app.ai.context.selection import select_agent_context
 from backend.app.ai.context.policy import apply_context_exclusions, excluded_context_sources
+from backend.app.ai.context.exam_policy import choose_exam_filter
 from backend.app.ai.observations.activities import build_activity_observation
 from backend.app.ai.observations.collect import collect_agent_observations
 from backend.app.ai.observations.exams import build_exam_observation
@@ -37,6 +38,7 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
         raise ValueError("A user request is required.")
 
     excluded_sources = excluded_context_sources(user_request)
+    exam_filter = choose_exam_filter(user_request, recent_turns)
 
     agent_settings = get_agent_model_settings()
     output_limit, timeout = reasoning.proposal_request_limits(
@@ -80,6 +82,7 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
             activity_builder=lambda *args, **kwargs: read_observation(build_activity_observation, *args, **kwargs),
             exam_builder=lambda *args, **kwargs: read_observation(build_exam_observation, *args, **kwargs),
             session_id=session_id,
+            **({"exam_filter": exam_filter} if exam_filter != "all" else {}),
             **({'excluded_sources': excluded_sources} if excluded_sources else {}),
             **({'memory_builder': memory_reader} if memory_reader is not None else {}),
         )

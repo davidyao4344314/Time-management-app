@@ -56,6 +56,7 @@ class FolderLayoutTests(unittest.TestCase):
         self.assertIs(fastapi_test.app, app)
         expected_paths = ["/activities","/activities/all","/activities/current","/activities/current-next","/activities/remove-duplicates","/activities/search","/activities/today","/activities/week","/activities/{activity_id}","/activities/{activity_id}/move","/ai/config","/ai/config/status","/ai/memory-config","/ai/model-config","/ai/propose","/ai/test-observation","/canvas/import","/canvas/status","/exams","/exams/search","/exams/{exam_id}","/uoa/import","/uoa/status"]
         self.assertEqual(set(app.openapi()["paths"]), set(expected_paths) | {
+            '/exams/import', '/exams/import/preview',
             '/conversations', '/conversations/{conversation_id}/messages',
             '/conversations/{conversation_id}/settings', '/conversations/{conversation_id}/memory/export',
             '/conversations/{conversation_id}/summary'})

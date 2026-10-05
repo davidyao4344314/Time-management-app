@@ -1,6 +1,7 @@
 """Small read-only guards for explicitly excluded observation sources."""
 
 import re
+from backend.app.ai.context.exam_policy import explicit_exam_filter
 
 
 _EXCLUSION = re.compile(
@@ -15,7 +16,7 @@ _CLAUSE_BOUNDARY = re.compile(
 _NEGATED_EXCLUSION = re.compile(r"\b(?:don't|dont|do not|never)\s+$")
 _SOURCE_OBJECT = re.compile(
     r"\s+(?:(?:me|my|the|any|all|our|your|personal|scheduled|upcoming|"
-    r"current|existing|stored|daily|weekly|of)\s+)*"
+    r"current|existing|stored|daily|weekly|formal|final|of)\s+)*"
     r"(?P<source>calendar|schedule|timetable|activity|activities|exam|exams|"
     r"test|tests|assessment|assessments|deadline|deadlines|quiz|quizzes)\b"
 )
@@ -53,6 +54,10 @@ def excluded_context_sources(user_message):
                     excluded.update(("activities", "exams"))
                 elif source in {"activity", "activities"}:
                     excluded.add("activities")
+                elif source in {"quiz", "quizzes", "test", "tests", "assessment", "assessments"} and explicit_exam_filter(message) == "formal_exams":
+                    # Excluding quizzes while requesting formal exams narrows
+                    # the subset; it must not block the entire exams source.
+                    pass
                 else:
                     excluded.add("exams")
                 targets = targets[source_match.end():]

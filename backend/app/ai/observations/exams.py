@@ -4,6 +4,7 @@ from datetime import date, timedelta
 
 from backend.app.planner.calendar import get_current_date, get_current_time
 from backend.app.planner.exams import get_all_exams
+from backend.app.planner.assessment_types import classify_assessment_name
 from backend.app.ai.observations.formatting import (
     chronological_key, compact_time, observation_date_range, bounded_details,
 )
@@ -19,8 +20,10 @@ def _exam_date(value):
     return parsed if parsed.isoformat() == value.strip() else None
 
 
-def build_exam_observation(connection, scope="upcoming"):
+def build_exam_observation(connection, scope="upcoming", *, assessment_filter="all"):
     """Return relevant exams for the requested period, at most 20 detailed."""
+    if assessment_filter not in {"all", "formal_exams"}:
+        raise ValueError("Unknown assessment filter.")
     today = get_current_date()
     first_date, end_date = ((today, today + timedelta(days=30)) if scope == "upcoming"
                             else observation_date_range(today, scope))
@@ -28,6 +31,7 @@ def build_exam_observation(connection, scope="upcoming"):
     current_time = get_current_time()
     relevant = []
     seen = set()
+    unknown_count = 0
 
     for exam in get_all_exams(connection):
         exam_date = _exam_date(exam[4])
@@ -46,6 +50,10 @@ def build_exam_observation(connection, scope="upcoming"):
         if exam_fields in seen:
             continue
         seen.add(exam_fields)
+        assessment_type = classify_assessment_name(exam[1])
+        unknown_count += assessment_type == "unknown"
+        if assessment_filter == "formal_exams" and assessment_type != "exam":
+            continue
         relevant.append((exam, exam_date))
 
     relevant.sort(key=lambda item: chronological_key(
@@ -60,6 +68,7 @@ def build_exam_observation(connection, scope="upcoming"):
                 "start": compact_time(exam[5]),
                 "end": compact_time(exam[6]),
                 "days_left": (exam_date - today).days,
+                "assessment_type": classify_assessment_name(exam[1]),
             }
             for exam, exam_date in relevant
         )
@@ -68,6 +77,9 @@ def build_exam_observation(connection, scope="upcoming"):
         "count": len(relevant),
         "truncated": len(detailed) < len(relevant),
         "period": {'start':first_date.isoformat(), 'end':end_date.isoformat()},
+        "assessment_filter": assessment_filter,
+        "classification_basis": "explicit assessment labels in names; ambiguous names remain unknown",
+        "unknown_type_count": unknown_count,
     }
 
 

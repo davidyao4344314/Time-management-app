@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import ExamClipboardImport from '../components/ExamClipboardImport'
 import './Activities.css'
 
 const emptyExamForm = {
@@ -106,6 +107,9 @@ function Exams() {
   const [editValue, setEditValue] = useState('')
   const [isSavingEdit, setIsSavingEdit] = useState(false)
   const [editError, setEditError] = useState('')
+  const [isImportOpen, setIsImportOpen] = useState(false)
+  const [isImportBusy, setIsImportBusy] = useState(false)
+  const [importMessage, setImportMessage] = useState('')
 
   useEffect(() => {
     const controller = new AbortController()
@@ -145,12 +149,14 @@ function Exams() {
   }
 
   function openAddForm() {
+    setIsImportOpen(false)
     closeDeleteForm()
     closeSearchForm()
     setIsFormOpen(true)
   }
 
   function openDeleteForm() {
+    setIsImportOpen(false)
     closeForm()
     closeSearchForm()
     setIsDeleteFormOpen(true)
@@ -182,6 +188,7 @@ function Exams() {
   }
 
   function openSearchForm() {
+    setIsImportOpen(false)
     closeForm()
     closeDeleteForm()
     setIsSearchFormOpen(true)
@@ -194,6 +201,25 @@ function Exams() {
     setHasSearched(false)
     setSearchError('')
     closeEditForm()
+  }
+
+  function openImportForm() {
+    closeForm()
+    closeDeleteForm()
+    closeSearchForm()
+    setImportMessage('')
+    setIsImportOpen(true)
+  }
+
+  async function handleImported(result) {
+    setIsImportOpen(false)
+    setImportMessage(`Imported ${result.imported} exam${result.imported === 1 ? '' : 's'}. Skipped ${result.duplicates_skipped} duplicate${result.duplicates_skipped === 1 ? '' : 's'}.`)
+    try {
+      setExams(await fetchExams())
+      setLoadError('')
+    } catch {
+      setLoadError('The import succeeded, but the exam list could not refresh. Refresh the page to see the saved exams.')
+    }
   }
 
   function handleSearchNameChange(event) {
@@ -481,6 +507,7 @@ function Exams() {
           aria-label="Add exam"
           className="add-activity-button"
           onClick={openAddForm}
+          disabled={isImportBusy}
           type="button"
         >
           +
@@ -490,6 +517,7 @@ function Exams() {
           aria-label="Delete exam"
           className="add-activity-button"
           onClick={openDeleteForm}
+          disabled={isImportBusy}
           type="button"
         >
           -
@@ -498,11 +526,20 @@ function Exams() {
           aria-expanded={isSearchFormOpen}
           className="delete-all-activities-button"
           onClick={openSearchForm}
+          disabled={isImportBusy}
           type="button"
         >
           Search
         </button>
+        <button aria-expanded={isImportOpen} className="delete-all-activities-button"
+          disabled={isImportBusy} onClick={openImportForm} type="button">
+          Import Exams from Clipboard
+        </button>
       </div>
+
+      {importMessage && <p role="status">{importMessage}</p>}
+      {isImportOpen && <ExamClipboardImport onClose={() => setIsImportOpen(false)}
+        onImported={handleImported} onBusyChange={setIsImportBusy} />}
 
       {isFormOpen && (
         <form className="add-activity-form" onSubmit={handleSubmit}>

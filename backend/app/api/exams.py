@@ -1,9 +1,11 @@
 """Exams HTTP endpoints; business logic stays in backend services."""
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
+from sqlite3 import Error as SQLiteError
 
 from backend.app.api import common
 from backend.app.planner import exam_service
+from backend.app.integrations import exam_clipboard
 from backend.app.planner.exams import (
     add_exam, delete_exam, edit_exam, get_all_exams, get_exam_by_id,
     get_exam_name_by_id, search_exams_by_name,
@@ -25,6 +27,43 @@ class EditExamRequest(BaseModel):
     exam_id: int
     column_name: str
     new_value: str | None = None
+
+
+class ExamTablePreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    text: str = Field(min_length=1, max_length=50_000)
+
+
+class ReviewedExam(AddExamRequest):
+    model_config = ConfigDict(extra="forbid")
+
+
+class ExamTableImportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    exams: list[ReviewedExam] = Field(min_length=1, max_length=exam_clipboard.MAX_EXAMS)
+
+
+@router.post("/exams/import/preview")
+def preview_exam_table(body: ExamTablePreviewRequest):
+    try:
+        return {"exams": exam_clipboard.parse_exam_table(body.text)}
+    except exam_clipboard.ExamTableError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from None
+
+
+@router.post("/exams/import", status_code=201)
+def import_reviewed_exams(body: ExamTableImportRequest):
+    try:
+        prepared = exam_clipboard.prepare_exam_import([exam.model_dump() for exam in body.exams])
+    except exam_clipboard.ExamTableError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from None
+    connection = common.create_connection()
+    try:
+        return exam_clipboard.save_exam_import(connection, prepared)
+    except SQLiteError:
+        raise HTTPException(status_code=500, detail="Could not import exams. No exams from this batch were saved.") from None
+    finally:
+        connection.close()
 
 
 @router.get("/exams")

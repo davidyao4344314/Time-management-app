@@ -56,7 +56,7 @@ def get_all_exams(connection):
     return cursor.fetchall()
 
 
-def add_exam(connection, columns, values):
+def add_exam(connection, columns, values, *, commit=True):
     column_names = ", ".join(columns)
     placeholders = ", ".join(["?"] * len(columns))
 
@@ -66,7 +66,8 @@ def add_exam(connection, columns, values):
     """
 
     connection.execute(sql, values)
-    connection.commit()
+    if commit:
+        connection.commit()
 
 
 def print_all_exams(connection):

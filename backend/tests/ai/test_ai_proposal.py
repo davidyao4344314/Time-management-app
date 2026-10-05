@@ -172,7 +172,7 @@ class AIProposalTests(unittest.TestCase):
             "confidence": "high",
         }
         self.assertEqual(ai_intent_classifier.validate_intent_classification(valid).model_dump(), {
-            **valid, "memory": None, "exam_scope": None,
+            **valid, "memory": None, "exam_scope": None, "files": None,
         })
         invalid = (
             {**valid, "intent": "career_advice"},
@@ -398,6 +398,7 @@ class AIProposalTests(unittest.TestCase):
             "include_activities": True, "include_exams": False,
             "exam_scope": None,
             "memory": None,
+            "files": None,
         })
 
     def test_stage_three_schema_rejects_invalid_or_action_fields(self):

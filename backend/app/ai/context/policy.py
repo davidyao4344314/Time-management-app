@@ -16,9 +16,9 @@ _CLAUSE_BOUNDARY = re.compile(
 _NEGATED_EXCLUSION = re.compile(r"\b(?:don't|dont|do not|never)\s+$")
 _SOURCE_OBJECT = re.compile(
     r"\s+(?:(?:me|my|the|any|all|our|your|personal|scheduled|upcoming|"
-    r"current|existing|stored|daily|weekly|formal|final|of)\s+)*"
+    r"current|existing|stored|uploaded|imported|daily|weekly|formal|final|of)\s+)*"
     r"(?P<source>calendar|schedule|timetable|activity|activities|exam|exams|"
-    r"test|tests|assessment|assessments|deadline|deadlines|quiz|quizzes)\b"
+    r"test|tests|assessment|assessments|deadline|deadlines|quiz|quizzes|file|files|document|documents)\b"
 )
 _WITHOUT_ACCESS = re.compile(
     r"^\s+(?:using|showing|including|loading|fetching|reading|consulting|"
@@ -54,6 +54,8 @@ def excluded_context_sources(user_message):
                     excluded.update(("activities", "exams"))
                 elif source in {"activity", "activities"}:
                     excluded.add("activities")
+                elif source in {"file", "files", "document", "documents"}:
+                    excluded.add("files")
                 elif source in {"quiz", "quizzes", "test", "tests", "assessment", "assessments"} and explicit_exam_filter(message) == "formal_exams":
                     # Excluding quizzes while requesting formal exams narrows
                     # the subset; it must not block the entire exams source.
@@ -75,4 +77,6 @@ def apply_context_exclusions(selection, excluded_sources):
         selected["activities_scope"] = None
     if "exams" in excluded_sources:
         selected.update(include_exams=False, exam_scope=None)
+    if "files" in excluded_sources:
+        selected.pop("files", None)
     return selected

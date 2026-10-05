@@ -25,4 +25,5 @@ def context_from_classification(value):
         "include_exams": classification.include_exams,
         "exam_scope": exam_scope,
         **({"memory": classification.memory.model_dump()} if classification.memory is not None else {}),
+        **({"files": classification.files.model_dump()} if classification.files is not None else {}),
     }

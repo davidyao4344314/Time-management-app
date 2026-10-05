@@ -17,6 +17,7 @@ from backend.app.ai.context.adaptive import store as routing_store
 from backend.app.ai.context.adaptive.settings import get_adaptive_settings
 from backend.app.ai.context.adaptive.learning import make_completed_event, load_snapshot
 from backend.app.files import storage as file_storage
+from backend.app.files.retrieval import detect_file_reference, retrieve_file_context
 
 
 @contextmanager
@@ -81,6 +82,8 @@ def send_message(owner_id, conversation_id, request_id, message):
                     session_id=conversation_id, include_context=True, chat_summary=context['summary'],
                     memory_reader=lambda selected: retrieve_for_chat(connection, owner_id, conversation_id, selected,
                                                                    recent_turns=context['recent_turns']),
+                    file_reader=lambda selected: retrieve_file_context(observation_connection, owner_id, selected),
+                    file_detector=lambda message: detect_file_reference(observation_connection, owner_id, message, context['file_refs']),
                     **({'routing_evidence': routing_evidence} if routing_evidence is not None else {}),
                     **({'adaptive_snapshot': adaptive_snapshot} if adaptive_snapshot is not None else {}))
             finally:

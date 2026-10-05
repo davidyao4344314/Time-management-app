@@ -1,5 +1,7 @@
 """One-pass Stage 1 → Stage 2 → Stage 3 → safe fallback routing."""
 
+import re
+
 from backend.app.ai.context.keywords import assess_stage_one
 from backend.app.ai.context.intent import classify_agent_intent, context_from_classification, CLASSIFIER_VERSION
 from backend.app.ai.context.fallback import classify_stage_three
@@ -8,6 +10,7 @@ from backend.app.ai.context.policy import apply_context_exclusions, excluded_con
 from backend.app.ai.context.adaptive.patterns import match_pattern, profile_key
 from backend.app.ai.context.adaptive.metrics import high_confidence_reliability
 from backend.app.ai.context.adaptive.examples import validate_examples, example_version_suffix
+from backend.app.files.contracts import FileSelection
 
 
 SAFE_MINIMAL_CONTEXT = {
@@ -26,7 +29,7 @@ def _valid_context_selection(selection):
         return False
 
 
-def select_agent_context(client, user_message, recent_turns, stage_two_model, *, trace=None, evidence=None, adaptive_snapshot=None):
+def select_agent_context(client, user_message, recent_turns, stage_two_model, *, trace=None, evidence=None, adaptive_snapshot=None, file_reference=None):
     """Stop at the first confident route; never retry a failed stage."""
     excluded = excluded_context_sources(user_message)
 
@@ -48,6 +51,23 @@ def select_agent_context(client, user_message, recent_turns, stage_two_model, *,
         )
 
     stage_one = assess_stage_one(user_message, recent_turns)
+    if file_reference is not None and "files" not in excluded:
+        # The explicit reference already answers the file-routing question.
+        # Preserve clear schedule intent, but do not pay for semantic file detection.
+        files = FileSelection.model_validate(file_reference["selection"]).model_dump()
+        selected = stage_one.get("selection") if stage_one.get("confident") else {
+            "activities_scope": None, "include_exams": False, "exam_scope": None,
+        }
+        selected = {**selected, "files": files}
+        candidate("stage_1", "matched", selected)
+        if trace is not None:
+            trace["file_detection"] = file_reference["method"]
+        return finish(selected, "stage_1", "matched", "A managed file reference was resolved deterministically; semantic file routing was not needed.")
+    # Uploaded-document questions must reach the semantic classifier rather than
+    # being mistaken for archive recollection or a generic study keyword.
+    file_intent = re.search(r"\b(?:uploaded|imported|document|pdf|docx|file|files)\b", user_message.casefold())
+    if file_intent and "files" not in excluded:
+        stage_one = {**stage_one, "confident": False, "reason": "requires_file_context_selection"}
     if not isinstance(adaptive_snapshot, dict):
         adaptive_snapshot = None
     matched = None
@@ -67,6 +87,7 @@ def select_agent_context(client, user_message, recent_turns, stage_two_model, *,
                          "independent_exam_horizon", "negated_calendar_reference", "negated_exam_reference"}
     use_learned = (adaptive_snapshot and adaptive_snapshot.get("mode") == "active" and matched
                    and matched["state"] == "active" and not excluded
+                   and not file_intent and not matched["selection"].get("files")
                    and stage_one.get("reason") not in protected_reasons)
     learned_reason = None
     if use_learned:

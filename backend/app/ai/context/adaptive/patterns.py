@@ -54,7 +54,7 @@ def compile_patterns(records, *, states=None, now=None):
         last = max(datetime.fromisoformat(row["event"].timestamp) for row in rows)
         eligible = (count >= settings.MIN_CONFIRMED_SAMPLES and agreement >= settings.PROMOTION_AGREEMENT
                     and days >= settings.MIN_EVIDENCE_DAYS and now - last <= timedelta(days=settings.STALE_AFTER_DAYS)
-                    and selected_profile["memory"] is None)
+                    and selected_profile["memory"] is None and selected_profile.get("files") is None)
         # Memory outcomes are evidence, although V1 cannot activate memory shortcuts.
         identifier = pattern_id(pattern)
         raw_state = (states or {}).get(identifier)

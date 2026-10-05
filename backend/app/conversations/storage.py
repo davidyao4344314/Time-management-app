@@ -160,14 +160,19 @@ def expire_interrupted_requests(connection, conversation_id):
 
 def completed_turns(connection, conversation_id, owner_id, *, limit=100):
     require_conversation(connection, conversation_id, owner_id)
-    rows = list(connection.execute('''SELECT u.content,a.proposal_json,a.sequence_number,a.created_at,u.request_id
+    rows = list(connection.execute('''SELECT u.content,a.proposal_json,a.sequence_number,a.created_at,u.request_id,a.inspector_json
         FROM conversation_messages u JOIN conversation_messages a
         ON u.conversation_id=a.conversation_id AND u.request_id=a.request_id
         WHERE u.conversation_id=? AND u.role='user' AND a.role='assistant'
         AND u.status='completed' AND a.status='completed'
         ORDER BY a.sequence_number DESC LIMIT ?''', (conversation_id, max(1,min(limit,100)))))
-    return [{'user': row[0], 'assistant': json.loads(row[1]), 'sequence_number': row[2],
-             'timestamp': row[3], 'request_id': row[4]} for row in reversed(rows)]
+    result = []
+    for row in reversed(rows):
+        inspector = json.loads(row[5]) if row[5] else {}
+        refs = [ref for ref in (inspector or {}).get('file_refs', []) if isinstance(ref, str)][:3]
+        result.append({'user': row[0], 'assistant': json.loads(row[1]), 'sequence_number': row[2],
+                       'timestamp': row[3], 'request_id': row[4], **({'file_refs': refs} if refs else {})})
+    return result
 
 
 def set_memory_sharing(connection, conversation_id, owner_id, enabled):

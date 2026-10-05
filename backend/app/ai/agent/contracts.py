@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 from backend.app.ai.actions.contracts import AddActivityAction
 from backend.app.ai.memory.contracts import MemoryRequest
+from backend.app.files.contracts import MAX_QUERY_CHARS, validate_query
 
 
 class MissingContextRequest(BaseModel):
@@ -26,13 +27,26 @@ class MissingContextRequest(BaseModel):
         return self
 
 
+class MissingFileContextRequest(BaseModel):
+    """A bounded topic/name query against managed files, not a file-open tool."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    source: Literal["files"]
+    query: str = Field(min_length=1, max_length=MAX_QUERY_CHARS)
+
+    @model_validator(mode="after")
+    def safe_query(self):
+        self.query = validate_query(self.query)
+        return self
+
+
 class AgentProposal(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     message: str | None
     actions: list[AddActivityAction]
     memory_request: MemoryRequest | None = None
-    missing_context: list[MissingContextRequest] = Field(default_factory=list, max_length=2)
+    missing_context: list[MissingContextRequest | MissingFileContextRequest] = Field(default_factory=list, max_length=2)
 
     @model_validator(mode="after")
     def validate_message(self):

@@ -3,6 +3,7 @@
 from backend.app.ai.observations.activities import build_activity_observation
 from backend.app.ai.observations.exams import build_exam_observation
 from backend.app.ai.observations.memory import build_memory_observation
+from backend.app.ai.observations.files import build_file_observation
 
 
 def collect_agent_observations(
@@ -13,6 +14,7 @@ def collect_agent_observations(
     memory_builder=None,
     excluded_sources=(),
     exam_filter="all",
+    file_reader=None,
 ):
     """Keep factual app state separate from the current request and recent turns.
 
@@ -32,4 +34,6 @@ def collect_agent_observations(
     if selection.get("memory") is not None:
         context["memory"] = (memory_builder(selection['memory']) if memory_builder is not None
                              else build_memory_observation(selection["memory"], session_id=session_id))
+    if selection.get("files") is not None and "files" not in excluded_sources:
+        context["files"] = build_file_observation(selection["files"], reader=file_reader)
     return context

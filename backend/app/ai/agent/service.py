@@ -31,7 +31,7 @@ from backend.app.ai.agent.context_recovery import (
 PROPOSAL_MODEL = "gpt-6-luna"
 
 
-def get_agent_proposal(connection, user_request, recent_turns=None, *, session_id=None, include_context=False, memory_reader=None, chat_summary=None, routing_evidence=None, adaptive_snapshot=None):
+def get_agent_proposal(connection, user_request, recent_turns=None, *, session_id=None, include_context=False, memory_reader=None, chat_summary=None, routing_evidence=None, adaptive_snapshot=None, file_reader=None, file_detector=None):
     """Return a validated message and proposed actions; never write to SQLite."""
     if not is_openai_api_key_configured():
         raise RuntimeError("OPENAI_API_KEY is not configured.")
@@ -51,6 +51,11 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
                       "main_agent_attempts": 0, "status": "not_requested", "requests": []}
     followup_count = 0
     memory_requested = False
+    file_reference = None
+    if file_detector is not None and "files" not in excluded_sources:
+        detection = read_observation(file_detector, user_request)
+        if detection and detection.get("selection"):
+            file_reference = detection
 
     def finish(proposal):
         coverage = exam_context_coverage(context.get("exams"))
@@ -60,7 +65,7 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
                 classifier_model=PROPOSAL_MODEL,
                 final_selection=deepcopy(selection), initial_status=initial_status, final_status=context_status,
                 excluded_sources=sorted(excluded_sources),
-                context_dependent=bool(recent_turns and re.search(r"\b(it|that|those|same|earlier|previously)\b", user_request.casefold())),
+                context_dependent=bool(selection.get("files") or (recent_turns and re.search(r"\b(it|that|those|same|earlier|previously)\b", user_request.casefold()))),
                 recovery_requested=bool(recovery_trace["attempts"] or memory_requested),
                 recovery_completed=recovery_trace["status"] == "completed",
             )
@@ -82,6 +87,20 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
                       context_recovery=recovery_trace, excluded_sources=sorted(excluded_sources),
                       model=agent_settings["model"],
                       adaptive_routing=build_adaptive_metadata(routing_evidence, adaptive_snapshot))
+        file_observation = context.get("files", {})
+        # Keep only references and counts in persisted inspector metadata. Never
+        # copy extracted text/chunks into recent/archive/durable conversation memory.
+        public["file_context"] = {
+            "status": context_status["files"],
+            "detection": file_reference["method"] if file_reference else "context_selection",
+            "chunk_count": file_observation.get("count", 0),
+            "truncated": bool(file_observation.get("truncated")),
+            "ambiguous": bool(file_observation.get("ambiguous")),
+            "files": [{key: item.get(key) for key in ("file_id", "filename", "file_type", "created_at", "chunk_count")}
+                      for item in file_observation.get("files", [])],
+        }
+        public["file_refs"] = ([item["file_id"] for item in file_observation.get("files", [])][:3]
+                               if context_status["files"] == "provided" else [])
         return {**proposal, 'agent_context':public}
 
     def collect(selected):
@@ -93,6 +112,7 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
             **({"exam_filter": exam_filter} if exam_filter != "all" else {}),
             **({'excluded_sources': excluded_sources} if excluded_sources else {}),
             **({'memory_builder': memory_reader} if memory_reader is not None else {}),
+            **({'file_reader': file_reader} if file_reader is not None else {}),
         )
 
     with OpenAI(api_key=os.environ["OPENAI_API_KEY"].strip(), timeout=timeout, max_retries=0) as client:
@@ -101,6 +121,7 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
             **({"trace": routing_trace} if include_context else {}),
             **({"evidence": routing_evidence} if routing_evidence is not None else {}),
             **({"adaptive_snapshot": adaptive_snapshot} if adaptive_snapshot is not None else {}),
+            **({"file_reference": file_reference} if file_reference is not None else {}),
         )
         selection = apply_context_exclusions(selection, excluded_sources)
         if routing_evidence is not None:
@@ -148,6 +169,8 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
                 selection["activities_scope"] = selected["activities_scope"]
             if selected["include_exams"]:
                 selection.update(include_exams=True, exam_scope=selected["exam_scope"])
+            if selected.get("files") is not None:
+                selection["files"] = selected["files"]
             context_status = build_context_status(context, memory_available=session_id is not None)
             recovery_trace["status"] = "fetched" if recovered else "unavailable"
 

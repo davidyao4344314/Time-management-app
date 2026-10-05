@@ -3,6 +3,7 @@
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, model_validator
 from backend.app.ai.memory.contracts import MemorySelection
+from backend.app.files.contracts import FileSelection
 
 
 ExamScope = Literal["today", "tomorrow", "week", "this_week", "next_week", "month", "upcoming"]
@@ -24,6 +25,7 @@ class AgentRoutingDecision(BaseModel):
     # preserves compatibility with older classifier results and callers.
     exam_scope: ExamScope | None = None
     memory: MemorySelection | None = None
+    files: FileSelection | None = None
 
     @model_validator(mode="after")
     def consistent_exam_selection(self):
@@ -55,6 +57,7 @@ class ContextSelection(BaseModel):
     include_exams: bool
     exam_scope: ExamScope | None
     memory: MemorySelection | None = None
+    files: FileSelection | None = None
 
     @model_validator(mode="after")
     def consistent_exam_scope(self):

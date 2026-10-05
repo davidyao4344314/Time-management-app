@@ -5,6 +5,7 @@ from backend.app.infrastructure.privacy import redact_secrets
 SOURCE_INFO = {
     "activities": ("Activities", "current"),
     "exams": ("Exams", "current"),
+    "files": ("Imported files", "document_evidence"),
     "recent_memory": ("Recent memory", "historical"),
     "raw_archive": ("Raw archive", "historical"),
     "compressed_archive": ("Compressed archive", "historical_summary"),
@@ -70,6 +71,9 @@ def build_agent_context(routing, selection, recent_count, lookups):
         elif source == "recent_memory":
             selected = recent_count > 0
             reason = f"Included {recent_count} completed recent conversation turns."
+        elif source == "files":
+            selected = selection.get("files") is not None
+            reason = "Selected bounded excerpts from the owner's managed file store; not an action or memory lookup."
         else:
             selected = source in selected_memory
             reason = "Requested for a bounded historical lookup within the authorized memory scope."

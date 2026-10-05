@@ -54,4 +54,5 @@ def build_chat_context(connection, conversation_id, owner_id):
     summary = read_summary(connection,conversation_id)
     if summary and recent and summary['through_sequence_number'] >= recent[0]['sequence_number']:
         summary = None  # Increased recent window: don't send covered messages twice.
-    return {'recent_turns': recent, 'summary': summary}
+    refs = next((turn['file_refs'] for turn in reversed(recent) if turn.get('file_refs')), [])
+    return {'recent_turns': recent, 'summary': summary, 'file_refs': refs}

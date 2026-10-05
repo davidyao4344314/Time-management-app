@@ -35,11 +35,11 @@ class RoutingEvent(StrictRecord):
     candidates: list[RoutingCandidate] = Field(max_length=4)
     initial_selection: ContextSelection
     final_selection: ContextSelection
-    initial_status: dict[Literal["activities", "exams", "current_chat", "global_memory"],
+    initial_status: dict[Literal["activities", "exams", "current_chat", "global_memory", "files"],
                          Literal["provided", "empty", "not_selected", "unavailable"]]
-    final_status: dict[Literal["activities", "exams", "current_chat", "global_memory"],
+    final_status: dict[Literal["activities", "exams", "current_chat", "global_memory", "files"],
                        Literal["provided", "empty", "not_selected", "unavailable"]]
-    excluded_sources: list[Literal["activities", "exams"]] = Field(default_factory=list, max_length=2)
+    excluded_sources: list[Literal["activities", "exams", "files"]] = Field(default_factory=list, max_length=3)
     recovery_requested: bool = False
     recovery_completed: bool = False
     audit_selected: bool = False

@@ -37,6 +37,7 @@ class ContextManifestTests(unittest.TestCase):
         self.assertEqual(build_context_status({}), {
             "current_chat": "provided", "activities": "not_selected",
             "exams": "not_selected", "global_memory": "unavailable",
+            "files": "not_selected",
         })
         result = build_context_status({
             "activities": {"count": 0, "today": []},

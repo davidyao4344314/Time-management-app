@@ -2,12 +2,12 @@
 
 import sqlite3
 
-from backend.app.ai.agent.contracts import MissingContextRequest
+from backend.app.ai.agent.contracts import MissingContextRequest, MissingFileContextRequest
 from backend.app.ai.context.contracts import ContextSelection
 
 
 MAX_CONTEXT_RECOVERY_RETRIES = 1
-ALLOWED_MISSING_CONTEXT_SOURCES = frozenset({"activities", "exams"})
+ALLOWED_MISSING_CONTEXT_SOURCES = frozenset({"activities", "exams", "files"})
 
 
 def read_observation(builder, *args, **kwargs):
@@ -43,7 +43,7 @@ def observation_status(source, observation):
 def build_context_status(observations, *, memory_available=False):
     """The current request and bounded recent chat are always sent separately."""
     result = {"current_chat": "provided"}
-    for source in ("activities", "exams"):
+    for source in ("activities", "exams", "files"):
         result[source] = observation_status(source, observations[source]) \
             if source in observations else "not_selected"
     memory = observations.get("memory")
@@ -61,7 +61,10 @@ def recovery_selection(requests, context_status, *, excluded_sources=()):
     selection = {"activities_scope": None, "include_exams": False, "exam_scope": None}
     seen = set()
     for value in requests:
-        request = MissingContextRequest.model_validate(value)
+        if not isinstance(value, dict):
+            raise ValueError("A missing-context request must be an object.")
+        request = (MissingFileContextRequest.model_validate(value) if value.get("source") == "files"
+                   else MissingContextRequest.model_validate(value))
         if request.source not in ALLOWED_MISSING_CONTEXT_SOURCES or request.source in seen:
             raise ValueError("The observation source is unsupported or duplicated.")
         if request.source in excluded_sources:
@@ -71,7 +74,9 @@ def recovery_selection(requests, context_status, *, excluded_sources=()):
         seen.add(request.source)
         if request.source == "activities":
             selection["activities_scope"] = request.time_scope
-        else:
+        elif request.source == "exams":
             selection.update(include_exams=True, exam_scope=request.time_scope)
+        else:
+            selection["files"] = {"query": request.query}
     ContextSelection.model_validate(selection)
     return selection

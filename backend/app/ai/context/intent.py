@@ -2,7 +2,7 @@
 
 import json
 
-CLASSIFIER_VERSION = "context-v2-independent-horizons"
+CLASSIFIER_VERSION = "context-v3-managed-files"
 
 CLASSIFIER_INSTRUCTIONS = """Select the minimum information the main study assistant needs. Never answer, advise, plan, calculate recommendations, or request actions.
 
@@ -29,6 +29,8 @@ EXAM_SCOPE_INSTRUCTIONS = " Choose exam_scope independently of intent and time_s
 CLASSIFIER_INSTRUCTIONS += MEMORY_ROUTING_INSTRUCTIONS
 CLASSIFIER_INSTRUCTIONS += EXAM_SCOPE_INSTRUCTIONS
 CLASSIFIER_INSTRUCTIONS += " Use this_week for the current Monday-Sunday week, next_week for the next Monday-Sunday week, tomorrow for tomorrow, and week for a rolling seven-day window. These labels are resolved to dates in Python."
+FILE_ROUTING_INSTRUCTIONS = " Return files:null unless answering needs an imported document. For an unnamed uploaded assignment, instructions, notes, or document, select files={file_ids:[],filename:null,query:'short meaningful topic terms'}. Python searches only the owner's managed file store. Never invent file IDs, paths, URLs or document content. Do not select files merely because an exam, activity or study topic was mentioned. File-only questions need no schedule observations unless the request also asks about current commitments or assessments. Files are read-only observations, not memory or actions. Respect explicit requests not to use files."
+CLASSIFIER_INSTRUCTIONS += FILE_ROUTING_INSTRUCTIONS
 
 from backend.app.ai.context.contracts import (
     AgentRoutingDecision, AgentIntentClassification,

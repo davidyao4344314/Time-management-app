@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import useConversation from '../hooks/useConversation'
 import MessageList from '../components/chat/MessageList'
 import ChatComposer from '../components/chat/ChatComposer'
@@ -12,26 +13,50 @@ const suggestions = [
 
 function AIAgent() {
   const state = useConversation()
+  const [model, setModel] = useState('Loading model…')
+
+  useEffect(() => {
+    const controller = new AbortController()
+    async function loadModel() {
+      try {
+        const response = await fetch('/api/ai/model-config', { signal: controller.signal, cache: 'no-store' })
+        if (!response.ok) throw new Error()
+        const settings = await response.json()
+        if (typeof settings.model !== 'string' || !settings.model.trim()) throw new Error()
+        if (!controller.signal.aborted) setModel(settings.model)
+      } catch (error) {
+        if (error.name !== 'AbortError') setModel('Unavailable')
+      }
+    }
+    loadModel()
+    return () => controller.abort()
+  }, [])
+
   return <main className="page ai-agent-page">
     <section className="ai-agent-content" aria-labelledby="ai-agent-heading">
       <p className="ai-agent-label">AI Agent</p>
       <div className="chat-toolbar">
         <button className="ai-agent-ask" onClick={state.newChat} disabled={state.loading || state.sending}>New Chat</button>
-        <label htmlFor="active-chat">Conversation</label>
-        <select id="active-chat" value={state.chat?.conversation_id || ''} disabled={state.loading || state.sending}
-          onChange={event => state.selectChat(event.target.value)}>
-          <option value="" disabled>Choose a chat</option>
-          {state.chats.map(chat => <option key={chat.conversation_id} value={chat.conversation_id}>{chat.title || 'New conversation'}</option>)}
-        </select>
+        <div className="chat-picker">
+          <label htmlFor="active-chat">Conversation</label>
+          <select id="active-chat" value={state.chat?.conversation_id || ''} disabled={state.loading || state.sending}
+            onChange={event => state.selectChat(event.target.value)}>
+            <option value="" disabled>Choose a chat</option>
+            {state.chats.map(chat => <option key={chat.conversation_id} value={chat.conversation_id}>{chat.title || 'New conversation'}</option>)}
+          </select>
+        </div>
       </div>
       <h2 id="ai-agent-heading">{state.chat?.title || 'What do you want help with?'}</h2>
-      {state.chat && <label><input type="checkbox" checked={state.chat.memory_sharing_enabled} disabled={state.sending || state.loading}
+      <p className="agent-context-note chat-model-label">Model for new replies: {model}</p>
+      {state.chat && <label className="chat-memory-setting"><input type="checkbox" checked={state.chat.memory_sharing_enabled} disabled={state.sending || state.loading}
         onChange={event => state.setMemorySharing(event.target.checked)} /> Allow older completed turns from this chat to be used as global memory</label>}
       {state.loading && <p role="status">Loading conversation…</p>}
       {!state.chat && !state.loading && <p>Start a New Chat to begin.</p>}
-      {state.nextBefore && <button className="chat-secondary" onClick={state.loadOlder}>Load earlier messages</button>}
+      {state.nextBefore && <button className="chat-secondary" onClick={state.loadOlder} disabled={state.loadingOlder || state.loading}>
+        {state.loadingOlder ? 'Loading earlier messages…' : 'Load earlier messages'}
+      </button>}
       <MessageList messages={state.messages} sending={state.sending} />
-      {state.error && <p role="alert">{state.error}</p>}
+      {state.error && <p className="chat-error" role="alert">{state.error}</p>}
       {state.retryAvailable && <button className="chat-secondary" onClick={state.checkLast} disabled={state.sending}>Check last request</button>}
       {state.chat && <button className="chat-secondary" onClick={() => state.selectChat(state.chat.conversation_id)} disabled={state.sending}>Refresh chat</button>}
       {state.chat && <div>

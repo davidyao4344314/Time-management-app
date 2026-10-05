@@ -16,9 +16,11 @@ export default function useConversation() {
   const [sending, setSending] = useState(false)
   const [error, setError] = useState('')
   const [nextBefore, setNextBefore] = useState(null)
+  const [loadingOlder, setLoadingOlder] = useState(false)
   const active = useRef(null)
   const pending = useRef(new Map())
   const load = useRef(null)
+  const olderLoad = useRef(null)
   const mounted = useRef(false)
   const inFlight = useRef(false)
   const [retryAvailable, setRetryAvailable] = useState(false)
@@ -27,19 +29,23 @@ export default function useConversation() {
 
   async function selectChat(id) {
     load.current?.abort()
+    olderLoad.current?.abort()
+    olderLoad.current = null
     const controller = new AbortController()
     load.current = controller
     active.current = id
     setLoading(true)
     setChat(null)
     setMessages([])
+    setNextBefore(null)
+    setLoadingOlder(false)
     setDraft('')
     setError('')
     setSummaryMessage('')
     setRetryAvailable(pending.current.has(id))
     try {
       const result = await api(`/${id}/messages`, { signal: controller.signal })
-      if (!mounted.current || active.current !== id) return
+      if (controller.signal.aborted || !mounted.current || active.current !== id) return
       setChat(result.conversation)
       setMessages(result.messages)
       setNextBefore(result.next_before)
@@ -96,7 +102,7 @@ export default function useConversation() {
       }
     }
     initialize()
-    return () => { mounted.current = false; controller.abort(); load.current?.abort() }
+    return () => { mounted.current = false; controller.abort(); load.current?.abort(); olderLoad.current?.abort() }
   }, [])
 
   async function send(attempt = null) {
@@ -136,15 +142,35 @@ export default function useConversation() {
   }
 
   async function loadOlder() {
-    if (!chat || !nextBefore) return
+    if (!chat || !nextBefore || olderLoad.current || loading) return
     const id = chat.conversation_id
+    const controller = new AbortController()
+    olderLoad.current = controller
+    setLoadingOlder(true)
+    setError('')
     try {
-      const result = await api(`/${id}/messages?before=${nextBefore}`)
-      if (mounted.current && active.current === id) {
-        setMessages((current) => [...result.messages, ...current.filter(item => !result.messages.some(old => old.message_id === item.message_id))])
+      const result = await api(`/${id}/messages?before=${nextBefore}`, { signal: controller.signal })
+      if (!controller.signal.aborted && mounted.current && active.current === id) {
+        setMessages(current => {
+          // Keep current messages if pages overlap; use a Set for a linear-time merge.
+          const knownIds = new Set(current.map(item => item.message_id))
+          const earlier = result.messages.filter(item => {
+            if (knownIds.has(item.message_id)) return false
+            knownIds.add(item.message_id)
+            return true
+          })
+          return [...earlier, ...current]
+        })
         setNextBefore(result.next_before)
       }
-    } catch (failure) { if (mounted.current && active.current === id) setError(failure.message) }
+    } catch (failure) {
+      if (!controller.signal.aborted && mounted.current && active.current === id) setError(failure.message)
+    } finally {
+      if (olderLoad.current === controller) {
+        olderLoad.current = null
+        if (mounted.current) setLoadingOlder(false)
+      }
+    }
   }
 
   async function setMemorySharing(enabled) {
@@ -171,7 +197,7 @@ export default function useConversation() {
     finally { if (mounted.current) setSummarizing(false) }
   }
 
-  return { chats, chat, messages, draft, setDraft, loading, sending, error, nextBefore,
+  return { chats, chat, messages, draft, setDraft, loading, sending, error, nextBefore, loadingOlder,
     selectChat, newChat, send, loadOlder, setMemorySharing, summarizeChat, summarizing, summaryMessage,
     retryAvailable, checkLast: () => { const request = pending.current.get(active.current); if (request) return send(request) } }
 }

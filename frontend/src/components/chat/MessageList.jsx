@@ -1,6 +1,6 @@
-import { useEffect, useRef } from 'react'
+import { memo, useEffect, useRef } from 'react'
 import MessageBubble from './MessageBubble'
-export default function MessageList({ messages, sending }) {
+function MessageList({ messages, sending }) {
   const latestMessage = useRef(null)
   const lastMessageId = messages.at(-1)?.message_id
 
@@ -14,3 +14,6 @@ export default function MessageList({ messages, sending }) {
     <div ref={latestMessage} aria-hidden="true" />
   </div>
 }
+
+// Typing in the composer should not re-render the entire conversation.
+export default memo(MessageList)

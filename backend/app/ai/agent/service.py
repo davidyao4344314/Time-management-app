@@ -70,6 +70,7 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
                 'selected':True,'authority':'historical_summary','reason':'Bounded summary of older completed messages in this chat.'})
         public.update(initial_context_status=initial_status, context_status=context_status,
                       context_recovery=recovery_trace, excluded_sources=sorted(excluded_sources),
+                      model=agent_settings["model"],
                       adaptive_routing=build_adaptive_metadata(routing_evidence, adaptive_snapshot))
         return {**proposal, 'agent_context':public}
 

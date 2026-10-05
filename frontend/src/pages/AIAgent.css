@@ -20,6 +20,7 @@
   font-size: clamp(1.8rem, 4.5vw, 3rem);
   line-height: 1.15;
   text-align: center;
+  overflow-wrap: anywhere;
 }
 
 .ai-agent-request {
@@ -84,6 +85,8 @@
 }
 
 .ai-agent-content button:focus-visible,
+.chat-toolbar select:focus-visible,
+.chat-memory-setting input:focus-visible,
 .ai-agent-request textarea:focus-visible {
   outline: 2px solid #11104f;
   outline-offset: 3px;
@@ -95,7 +98,7 @@
 }
 
 .ai-agent-content button:disabled {
-  cursor: wait;
+  cursor: not-allowed;
   opacity: 0.65;
 }
 
@@ -103,8 +106,14 @@
   margin-top: 1.5rem;
 }
 
-.chat-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 0.75rem; }
-.chat-toolbar select { max-width: 100%; min-width: 0; padding: 0.6rem; font: inherit; }
+.chat-toolbar { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.5rem; }
+.chat-picker { display: grid; gap: 0.4rem; flex: 1 1 14rem; min-width: 0; }
+.chat-picker label { color: #555; font-size: 0.9rem; }
+.chat-toolbar select { width: 100%; min-width: 0; min-height: 2.75rem; padding: 0.6rem; border: 1px solid #ddd; border-radius: 0.5rem; background: white; color: #111; font: inherit; }
+.chat-model-label { text-align: center; overflow-wrap: anywhere; }
+.chat-memory-setting { display: flex; align-items: flex-start; gap: 0.5rem; line-height: 1.5; margin-block: 1rem; }
+.chat-memory-setting input { flex-shrink: 0; margin-top: 0.3rem; }
+.chat-error { padding: 0.75rem 1rem; border: 1px solid #b42318; border-radius: 0.5rem; color: #9b1c13; background: #fff6f5; overflow-wrap: anywhere; }
 .chat-secondary { padding: 0.5rem 0.75rem; margin-block: 0.25rem; border: 1px solid #ddd; border-radius: 0.5rem; background: white; color: #11104f; font: inherit; cursor: pointer; }
 .chat-message-list { display: grid; gap: 1rem; margin-block: 1.5rem; }
 .chat-bubble { padding: 1rem; border-radius: 0.75rem; max-width: 95%; min-width: 0; overflow-wrap: anywhere; }

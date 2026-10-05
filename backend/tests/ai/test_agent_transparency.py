@@ -108,6 +108,7 @@ class ServiceTransparencyTests(unittest.TestCase):
         self.assertEqual(before, after)
         self.assertEqual(plain, {key: value for key, value in traced.items() if key != "agent_context"})
         self.assertEqual(traced["agent_context"]["routing"]["stage"], "stage_1")
+        self.assertEqual(traced["agent_context"]["model"], "existing-model")
         self.assertEqual(model.call_count, 2)  # One per request, no extra inspector call.
 
     def test_failed_followup_is_visible_but_not_claimed_as_model_input(self):

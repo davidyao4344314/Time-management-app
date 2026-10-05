@@ -43,6 +43,9 @@ class FileRetrievalTests(unittest.TestCase):
         selected = retrieve_file_context(self.connection, "owner", {"file_ids": [second["file_id"]]})
         self.assertEqual(selected["count"], 1)
         self.assertIn("different", selected["chunks"][0]["text"])
+        explicit = detect_file_reference(self.connection, "owner", f'Read assignment2.txt, ID {second["file_id"]}')
+        self.assertEqual(explicit["method"], "explicit_id")
+        self.assertEqual(explicit["selection"]["file_ids"], [second["file_id"]])
 
     def test_large_file_ranks_relevant_later_chunk_and_bounds_payload(self):
         large = ingest_file(self.connection, "owner", "large.txt", ("Other material. " * 8000 + "\nQuestion 4 recursion answer.").encode())
@@ -65,6 +68,7 @@ class FileRetrievalTests(unittest.TestCase):
 
     def test_paths_urls_unbounded_or_extra_requests_rejected(self):
         for value in ({"query": "/etc/passwd"}, {"query": "read ../secret"}, {"query": "https://example.test"},
+                      {"query": "backend/private.txt"}, {"query": "C:private.txt"},
                       {"filename": "../file.txt"}, {"file_ids": ["/etc/passwd"]}, {"query": "x" * 301},
                       {"query": "recursion", "path": "/tmp/file"}, {}):
             with self.subTest(value=value), self.assertRaises(ValidationError):

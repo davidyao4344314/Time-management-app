@@ -13,6 +13,23 @@ See [Conversations and memory](CONVERSATIONS.md) for the API, storage boundaries
 migration details and no-charge tests. The older `/ai/propose` route remains a
 compatibility path with its original recent-memory behavior.
 
+## Imported files as AI context (V1)
+
+The AI Agent page has a small **Files for AI context** panel. Import UTF-8 TXT,
+text-based PDF or DOCX files there, then mention a filename in a question or
+choose **Use in question** to use its stable ID. Importing and the diagnostic
+file APIs are local and make **no OpenAI request**. Sending an AI question still
+uses your configured API key and may incur charges.
+
+Files are a separate read-only observation source, not an agent action or
+conversation/global memory. Exact file references bypass semantic file routing;
+unnamed documents can be selected by Stage 2/3. Retrieval sends at most five
+chunks and 8,000 excerpt characters. It shares the existing one-shot context
+recovery budget. Duplicate names require a specific ID, not an arbitrary choice.
+
+See [File ingestion, storage, retrieval and tests A–I](FILES.md) for the exact
+schemas, endpoints, privacy boundaries, limitations and no-charge test commands.
+
 ## Run the API
 
 From the project root, install dependencies into the existing backend virtual
@@ -55,6 +72,7 @@ backend/
 │   ├── cli.py                # Existing interactive planner program
 │   ├── database.py           # Existing SQLite connection/schema setup
 │   ├── conversations/        # Persistent chats, local context, summaries, export receipts
+│   ├── files/                # Local TXT/PDF/DOCX parsing, SQLite storage, bounded reads
 │   ├── ai/
 │   │   ├── config.py         # Local API key/model/memory-limit settings
 │   │   ├── agent/            # Agent coordination, reasoning and contracts

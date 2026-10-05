@@ -75,13 +75,26 @@ function AgentContextInspector({ context, actions = [] }) {
                   </p>
                   {context.context_recovery.requests.map((request) => (
                     <p key={request.source}>
-                      {request.source} / {request.time_scope}: {request.status_before} → {request.status_after}
+                      {request.source} / {request.query || request.time_scope}: {request.status_before} → {request.status_after}
                     </p>
                   ))}
                 </>
               )}
             </section>
           )}
+
+          {context.file_context && <section aria-label="Retrieved files">
+            <h3>File Context</h3>
+            <p>{context.file_context.status} · {context.file_context.chunk_count} chunks
+              {context.file_context.truncated ? ' · Excerpts limited' : ''}</p>
+            <p className="agent-context-note">Detection: {context.file_context.detection.replaceAll('_', ' ')}. Private document text is not shown in this inspector.</p>
+            {context.file_context.ambiguous && <p>Multiple files share that filename. Choose a specific file ID.</p>}
+            <ul className="agent-context-list">
+              {context.file_context.files.map(file => <li key={file.file_id}>
+                <strong>{file.filename}</strong><p>{file.file_id} · {file.file_type}</p>
+              </li>)}
+            </ul>
+          </section>}
 
           <section aria-label="Retrieved memory">
             <h3>Retrieved Memory</h3>

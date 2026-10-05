@@ -33,8 +33,8 @@ def validate_query(query):
     if not isinstance(query, str) or not query.strip() or len(query) > MAX_QUERY_CHARS:
         raise ValueError("File search needs 1–300 characters.")
     query = query.strip()
-    if (re.search(r"(?:^|\s)(?:[/\\~]|[a-zA-Z]:[/\\])", query)
-            or "../" in query or "..\\" in query or "://" in query
+    if (re.search(r"(?:^|\s)(?:~|[a-zA-Z]:)", query)
+            or "/" in query or "\\" in query or "://" in query
             or "\x00" in query or any(ord(c) < 32 for c in query)):
         raise ValueError("Search managed files by topic or filename, not paths or URLs.")
     return query

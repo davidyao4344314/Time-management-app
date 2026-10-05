@@ -20,12 +20,16 @@ def search_terms(query):
 def detect_file_reference(connection, owner_id, message, recent_refs=()):
     """Metadata-only detection before routing. Duplicate names require clarification."""
     folded = message.casefold()
+    query = " ".join(search_terms(message))[:300] or None
+    # A specific ID disambiguates even when the user also types a duplicate name.
+    ids = list(dict.fromkeys(re.findall(r"(?<!\w)file_[a-f0-9]{32}(?!\w)", message)))
+    if ids:
+        return {"selection": FileSelection(file_ids=ids[:MAX_FILE_REFS], query=query).model_dump(), "method": "explicit_id"}
     matches = []
     for item in storage.iter_metadata(connection, owner_id):
         name = item["filename"].casefold()
         if re.search(rf"(?<![\w/\\.-]){re.escape(name)}(?![\w.-])", folded):
             matches.append(item)
-    query = " ".join(search_terms(message))[:300] or None
     if matches:
         names = [item["filename"].casefold() for item in matches]
         if len(names) != len(set(names)):
@@ -34,9 +38,6 @@ def detect_file_reference(connection, owner_id, message, recent_refs=()):
                     "method": "ambiguous_filename"}
         return {"selection": FileSelection(file_ids=[item["file_id"] for item in matches[:MAX_FILE_REFS]], query=query).model_dump(),
                 "method": "exact_filename"}
-    ids = list(dict.fromkeys(re.findall(r"(?<!\w)file_[a-f0-9]{32}(?!\w)", message)))
-    if ids:
-        return {"selection": FileSelection(file_ids=ids[:MAX_FILE_REFS], query=query).model_dump(), "method": "explicit_id"}
     # Preserve safe no-match behavior for an explicitly named but unknown file.
     unknown = re.search(r"(?<![\w/\\.-])([\w-][\w.-]*\.(?:txt|pdf|docx))(?![\w.-])", message, re.I)
     if unknown:

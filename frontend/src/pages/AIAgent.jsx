@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import useConversation from '../hooks/useConversation'
 import MessageList from '../components/chat/MessageList'
 import ChatComposer from '../components/chat/ChatComposer'
+import FileImportPanel from '../components/FileImportPanel'
 import './AIAgent.css'
 
 const suggestions = [
@@ -48,6 +49,8 @@ function AIAgent() {
       </div>
       <h2 id="ai-agent-heading">{state.chat?.title || 'What do you want help with?'}</h2>
       <p className="agent-context-note chat-model-label">Model for new replies: {model}</p>
+      {!state.loading && <FileImportPanel disabled={state.sending || state.summarizing || state.retryAvailable} canAsk={Boolean(state.chat)}
+        onUseFile={file => state.setDraft(`What does ${file.file_id} say?`)} />}
       {state.chat && <label className="chat-memory-setting"><input type="checkbox" checked={state.chat.memory_sharing_enabled} disabled={state.sending || state.loading}
         onChange={event => state.setMemorySharing(event.target.checked)} /> Allow older completed turns from this chat to be used as global memory</label>}
       {state.loading && <p role="status">Loading conversation…</p>}

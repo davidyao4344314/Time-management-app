@@ -1,0 +1,10 @@
+.file-import-panel { margin-block: 1rem; padding: 1rem; border: 1px solid #ddd; border-radius: 0.75rem; }
+.file-import-panel summary { color: #11104f; font-weight: 600; cursor: pointer; }
+.file-import-form { display: flex; align-items: center; flex-wrap: wrap; gap: 0.75rem; }
+.file-import-form label { font-weight: 600; }
+.file-import-form input { max-width: 100%; min-width: 0; font: inherit; }
+.file-import-list { display: grid; gap: 0.75rem; max-height: 18rem; overflow-y: auto; padding: 0; list-style: none; }
+.file-import-list li { display: grid; gap: 0.4rem; padding: 0.75rem; background: #f7f7fb; border-radius: 0.5rem; overflow-wrap: anywhere; }
+.file-import-list span, .file-import-list code { font-size: 0.85rem; }
+.file-import-list button { justify-self: start; }
+.file-import-panel summary:focus-visible, .file-import-form input:focus-visible { outline: 2px solid #11104f; outline-offset: 3px; }

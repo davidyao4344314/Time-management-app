@@ -137,6 +137,14 @@ class FileAgentTests(unittest.TestCase):
         self.assertEqual(self.client.responses.parse.call_count, 2)
         self.assertEqual(result["agent_context"]["context_recovery"]["attempts"], 1)
 
+    def test_unrelated_exam_request_does_not_retrieve_file_content(self):
+        self.client.responses.parse.return_value = response({"message": "Here is the exam context.", "actions": []})
+        with patch.object(service, "build_exam_observation", return_value={"count": 0, "upcoming": []}):
+            self.run_agent("What exams do I have this week?", file_detector=lambda message: detect_file_reference(self.connection, "owner", message))
+        self.reader.assert_not_called()
+        self.assertEqual(set(self.input(0)["observations"]), {"exams"})
+        self.assertEqual(self.client.responses.parse.call_count, 1)
+
     def test_file_recovery_cannot_then_request_schedule_or_memory(self):
         self.client.responses.parse.side_effect = [response(NEED_FILE), response({"message": None, "actions": [],
             "missing_context": [{"source": "activities", "time_scope": "today"}]})]

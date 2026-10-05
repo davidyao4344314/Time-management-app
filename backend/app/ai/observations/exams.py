@@ -9,6 +9,8 @@ from backend.app.ai.observations.formatting import (
     chronological_key, compact_time, observation_date_range, bounded_details,
 )
 
+UPCOMING_LOOKAHEAD_DAYS = 90
+
 
 def _exam_date(value):
     if not isinstance(value, str):
@@ -25,7 +27,7 @@ def build_exam_observation(connection, scope="upcoming", *, assessment_filter="a
     if assessment_filter not in {"all", "formal_exams"}:
         raise ValueError("Unknown assessment filter.")
     today = get_current_date()
-    first_date, end_date = ((today, today + timedelta(days=30)) if scope == "upcoming"
+    first_date, end_date = ((today, today + timedelta(days=UPCOMING_LOOKAHEAD_DAYS)) if scope == "upcoming"
                             else observation_date_range(today, scope))
     first_date = max(first_date, today)
     current_time = get_current_time()

@@ -3,7 +3,7 @@
 import json
 import unittest
 from contextlib import ExitStack
-from datetime import date
+from datetime import date, timedelta
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -124,6 +124,53 @@ class AgentExamSubsetTests(unittest.TestCase):
         context = json.loads(self.client.responses.parse.call_args_list[1].kwargs["input"][-1]["content"])
         self.assertEqual(context["observations"]["exams"]["upcoming"][0]["assessment_type"], "exam")
         self.assertEqual(self.client.responses.parse.call_count, 2)
+
+
+class ExamHorizonTests(unittest.TestCase):
+    def setUp(self):
+        ExamSubsetTests.setUp(self)
+
+    def test_upcoming_contains_all_four_formal_exams_beyond_original_cutoff(self):
+        result = exams.build_exam_observation(None, assessment_filter="formal_exams")
+        self.assertEqual([item["name"] for item in result["upcoming"]], [
+            "PHYSICS 140 Exam", "ECON 151G Exam", "MATHS 102 Exam", "COMPSCI 130 Exam",
+        ])
+        self.assertEqual(result["count"], 4)
+        self.assertFalse(result["truncated"])
+        self.assertEqual(result["period"], {"start": "2026-10-06", "end": "2027-01-04"})
+        self.assertEqual(result["upcoming"][-1]["days_left"], 35)
+
+    def test_explicit_month_and_week_scopes_do_not_expand_to_ninety_days(self):
+        for scope, end in (("month", "2026-10-31"), ("this_week", "2026-10-11")):
+            with self.subTest(scope=scope):
+                result = exams.build_exam_observation(None, scope=scope, assessment_filter="formal_exams")
+                self.assertEqual(result["period"]["end"], end)
+                self.assertEqual(result["upcoming"], [])
+                self.assertEqual(result["count"], 0)
+
+    def test_horizon_boundaries_past_exams_and_untimed_exams(self):
+        rows = [
+            (1, "Past Exam", "University", None, "2026-10-05", None, None),
+            (2, "Ended Exam", "University", None, "2026-10-06", "06:00", "07:00"),
+            (3, "Today's Exam", "University", None, "2026-10-06", None, None),
+            (4, "Boundary Exam", "University", None, "2027-01-04", None, None),
+            (5, "Beyond Exam", "University", None, "2027-01-05", None, None),
+        ]
+        with patch.object(exams, "get_all_exams", return_value=rows):
+            result = exams.build_exam_observation(None, assessment_filter="formal_exams")
+        self.assertEqual([item["name"] for item in result["upcoming"]], ["Today's Exam", "Boundary Exam"])
+        self.assertIsNone(result["upcoming"][0]["start"])
+        self.assertEqual(result["upcoming"][-1]["days_left"], 90)
+
+    def test_larger_horizon_keeps_detail_limit_and_full_count(self):
+        rows = [(index, f"Exam {index}", "University", None,
+                 (date(2026, 10, 6) + timedelta(days=index)).isoformat(), None, None)
+                for index in range(1, 26)]
+        with patch.object(exams, "get_all_exams", return_value=rows):
+            result = exams.build_exam_observation(None, assessment_filter="formal_exams")
+        self.assertEqual(len(result["upcoming"]), 20)
+        self.assertEqual(result["count"], 25)
+        self.assertTrue(result["truncated"])
 
 
 if __name__ == "__main__":

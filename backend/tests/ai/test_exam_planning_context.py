@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from backend.app.ai.agent import service, reasoning
+from backend.app.ai.agent.coverage import exam_context_coverage, add_exam_coverage_notice
 from backend.app.ai.context.exam_policy import choose_exam_filter
 from backend.app.ai.context.policy import excluded_context_sources
 from backend.app.ai.observations.collect import collect_agent_observations
@@ -91,7 +92,7 @@ class ExamSubsetTests(unittest.TestCase):
         activity.assert_called_once_with(None, scope="week")
 
 
-class AgentExamSubsetTests(unittest.TestCase):
+class _AgentFixture(unittest.TestCase):
     def setUp(self):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
@@ -108,6 +109,8 @@ class AgentExamSubsetTests(unittest.TestCase):
     def respond(self, *proposals):
         self.client.responses.parse.side_effect = [SimpleNamespace(status="completed", output_parsed=value) for value in proposals]
 
+
+class AgentExamSubsetTests(_AgentFixture):
     def test_initial_exam_context_honors_only_exams_without_extra_model_calls(self):
         self.router.return_value = {"activities_scope": None, "include_exams": True, "exam_scope": "upcoming"}
         self.respond({"message": "Prepare Physics", "actions": []})
@@ -171,6 +174,87 @@ class ExamHorizonTests(unittest.TestCase):
         self.assertEqual(len(result["upcoming"]), 20)
         self.assertEqual(result["count"], 25)
         self.assertTrue(result["truncated"])
+
+
+class ExamCoverageTests(unittest.TestCase):
+    def observation(self, **overrides):
+        return {"period": {"start": "2026-10-06", "end": "2027-01-04"},
+                "count": 4, "upcoming": [{"name": row[1]} for row in ROWS[3:7]],
+                "assessment_filter": "formal_exams", "unknown_type_count": 0,
+                "truncated": False, **overrides}
+
+    def test_complete_detail_still_discloses_bounded_period_and_subset(self):
+        coverage = exam_context_coverage(self.observation())
+        self.assertIn("6 Oct 2026–4 Jan 2027", coverage["notice"])
+        self.assertIn("formal exams identified by explicit names", coverage["notice"])
+        self.assertIn("outside this period are not included", coverage["notice"])
+        self.assertFalse(coverage["truncated"])
+        self.assertEqual(coverage["matching_count"], 4)
+
+    def test_truncated_details_and_unknown_labels_are_explicit(self):
+        coverage = exam_context_coverage(self.observation(count=25, upcoming=[{}] * 20,
+                                                        truncated=True, unknown_type_count=1))
+        self.assertIn("Showing 20 of 25", coverage["notice"])
+        self.assertIn("detailed list is incomplete", coverage["notice"])
+        self.assertIn("1 ambiguously named assessment was not included", coverage["notice"])
+
+    def test_empty_results_do_not_claim_no_exams_exist_outside_period(self):
+        coverage = exam_context_coverage(self.observation(count=0, upcoming=[]))
+        self.assertEqual(coverage["matching_count"], 0)
+        self.assertIn("outside this period are not included", coverage["notice"])
+        self.assertNotIn("no exams", coverage["notice"])
+
+    def test_invalid_or_unavailable_coverage_is_never_invented(self):
+        for observation in (None, {"status": "unavailable"}, {}, self.observation(count=-1),
+                            self.observation(period={"start": "invalid", "end": "2027-01-04"}),
+                            self.observation(period={"start": "2027-01-04", "end": "2026-10-06"})):
+            with self.subTest(observation=observation):
+                self.assertIsNone(exam_context_coverage(observation))
+
+    def test_notice_is_idempotent_and_preserves_actions(self):
+        proposal = {"message": "Here is a study suggestion.", "actions": [{"tool": "add_activity"}],
+                    "memory_request": None, "missing_context": []}
+        coverage = exam_context_coverage(self.observation())
+        result = add_exam_coverage_notice(proposal, coverage)
+        self.assertEqual(result["actions"], proposal["actions"])
+        self.assertEqual(result, add_exam_coverage_notice(result, coverage))
+        self.assertEqual(proposal["message"], "Here is a study suggestion.")
+        self.assertEqual(add_exam_coverage_notice(proposal, None), proposal)
+
+    def test_model_input_separates_current_coverage_from_older_chat(self):
+        observed = self.observation()
+        messages = reasoning.build_agent_messages("Only the exams", {"exams": observed},
+                                                   [turn("There are no upcoming exams")])
+        payload = json.loads(messages[-1]["content"])
+        self.assertEqual(payload["observation_coverage"]["exams"]["matching_count"], 4)
+        self.assertEqual(payload["observations"]["exams"], observed)
+        self.assertIn("not the source of truth", reasoning.STUDY_PLANNING_INSTRUCTIONS)
+        self.assertIn("never say it is the user's complete exam timetable", reasoning.STUDY_PLANNING_INSTRUCTIONS)
+
+
+class AgentCoverageTests(_AgentFixture):
+    def test_reply_and_inspector_use_the_same_backend_coverage_without_extra_call(self):
+        self.router.return_value = {"activities_scope": None, "include_exams": True, "exam_scope": "upcoming"}
+        self.builder.return_value = ExamCoverageTests().observation()
+        self.respond({"message": "Prepare for your four formal exams.", "actions": []})
+        result = service.get_agent_proposal(None, ONLY_EXAMS, include_context=True)
+        coverage = result["agent_context"]["exam_coverage"]
+        self.assertIn(coverage["notice"], result["message"])
+        source = next(source for source in result["agent_context"]["context_sources"] if source["source"] == "exams")
+        self.assertIn(coverage["notice"], source["reason"])
+        self.assertEqual(self.client.responses.parse.call_count, 1)
+
+    def test_recovered_exam_period_is_not_reported_before_it_is_observed(self):
+        self.router.return_value = {"activities_scope": None, "include_exams": False, "exam_scope": None}
+        self.builder.return_value = ExamCoverageTests().observation()
+        self.respond({"message": None, "actions": [], "missing_context": [{"source": "exams", "time_scope": "upcoming"}]},
+                     {"message": "Prepare for your exams.", "actions": []})
+        result = service.get_agent_proposal(None, ONLY_EXAMS, include_context=True)
+        first = json.loads(self.client.responses.parse.call_args_list[0].kwargs["input"][-1]["content"])
+        second = json.loads(self.client.responses.parse.call_args_list[1].kwargs["input"][-1]["content"])
+        self.assertNotIn("observation_coverage", first)
+        self.assertEqual(second["observation_coverage"]["exams"], result["agent_context"]["exam_coverage"])
+        self.assertIn("6 Oct 2026–4 Jan 2027", result["message"])
 
 
 if __name__ == "__main__":

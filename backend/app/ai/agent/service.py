@@ -12,6 +12,7 @@ from backend.app.ai.config import (
     get_max_recent_turns,
 )
 from backend.app.ai.agent import reasoning
+from backend.app.ai.agent.coverage import exam_context_coverage, add_exam_coverage_notice
 from backend.app.ai.context.selection import select_agent_context
 from backend.app.ai.context.policy import apply_context_exclusions, excluded_context_sources
 from backend.app.ai.context.exam_policy import choose_exam_filter
@@ -52,6 +53,8 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
     memory_requested = False
 
     def finish(proposal):
+        coverage = exam_context_coverage(context.get("exams"))
+        proposal = add_exam_coverage_notice(proposal, coverage)
         if routing_evidence is not None:
             routing_evidence.update(
                 classifier_model=PROPOSAL_MODEL,
@@ -67,6 +70,11 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
         public = build_agent_context(
             routing_trace, selection, recent_count, lookups,
         )
+        if coverage is not None:
+            public["exam_coverage"] = coverage
+            for source in public["context_sources"]:
+                if source["source"] == "exams" and source["selected"]:
+                    source["reason"] += " " + coverage["notice"]
         if chat_summary:
             public['context_sources'].append({'source':'chat_summary','label':'Current-chat summary',
                 'selected':True,'authority':'historical_summary','reason':'Bounded summary of older completed messages in this chat.'})

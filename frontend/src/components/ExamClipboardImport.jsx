@@ -63,11 +63,12 @@ export default function ExamClipboardImport({ onClose, onImported, onBusyChange 
     <h3 id="exam-import-heading">Import Exams from Clipboard</h3>
     {preview === null ? <>
       <label htmlFor="exam-table-text">Paste your exam timetable</label>
-      <p>Copy the Markdown table, including the header and separator row, then paste it here with ⌘V (Mac) or Ctrl+V.</p>
+      <p>Copy the full exam table from the website, then paste it here with ⌘V (Mac) or Ctrl+V. Tab-separated tables, one cell per line, and Markdown tables are supported.</p>
       <textarea id="exam-table-text" value={text} rows={8} maxLength={50000} required disabled={busy}
-        placeholder="Paste the table with Course (Class Number), Exam Date, and Time columns…"
+        placeholder="Paste the complete exam table, from Course (Class Number) through Book…"
         onChange={event => { setText(event.target.value); setError('') }} />
       <p>No exams are saved until you review the preview and click Import Exams.</p>
+      <p>For a website copy, include all seven columns: Course (Class Number), Course Title, Exam Date, Time, Campus, Room, and Book. Headers are optional.</p>
     </> : <>
       <p>Review {preview.length} exam{preview.length === 1 ? '' : 's'} below. You can correct any field before importing.</p>
       <p>Source: Manual. Course title, campus, room, and book rules are ignored. Identical existing exams will be skipped.</p>

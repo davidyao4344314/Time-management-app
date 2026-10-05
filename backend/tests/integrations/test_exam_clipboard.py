@@ -20,6 +20,12 @@ TABLE = """| Course (Class Number) | Course Title | Exam Date | Time | Campus | 
 | MATHS 102 (53497) | Functioning in Mathematics | Fri 06 Nov 2026 | 14:00 - 16:30 | City | TBA | Restricted Book - Written upon |
 | COMPSCI 130 (56456) | Intro to Software Fundamentals | Tue 10 Nov 2026 | 14:00 - 16:30 | City | TBA | Restricted Book - Written upon |"""
 
+# A browser copy may use tabs per row or one line per cell, with no Markdown.
+COPIED_ROWS = [[cell.strip() for cell in line.strip("|").split("|")]
+               for line in TABLE.splitlines() if not line.startswith("| :---")]
+TABBED_TABLE = "\n".join("\t".join(row) for row in COPIED_ROWS)
+LINE_TABLE = "\n".join(cell for row in COPIED_ROWS for cell in row)
+
 
 class ExamClipboardTests(unittest.TestCase):
     def setUp(self):
@@ -52,6 +58,51 @@ class ExamClipboardTests(unittest.TestCase):
     def test_code_fence_escaped_pipe_and_unicode_time_dash(self):
         table = TABLE.replace("Digital Fundamentals", r"Digital \| Fundamentals").replace("09:00 - 11:15", "09:00 – 11:15")
         self.assertEqual(importer.parse_exam_table(f"```markdown\n{table}\n```"), importer.parse_exam_table(TABLE))
+
+    def test_browser_copies_with_and_without_headers_match_markdown_preview(self):
+        expected = importer.parse_exam_table(TABLE)
+        for text in (TABBED_TABLE, LINE_TABLE,
+                     "\n".join(TABBED_TABLE.splitlines()[1:]),
+                     "\n".join(LINE_TABLE.splitlines()[7:]),
+                     LINE_TABLE.replace("\n", "\n\n")):
+            with self.subTest(text=text):
+                self.assertEqual(importer.parse_exam_table(text), expected)
+        self.assertEqual(exams.get_all_exams(self.connection), [])
+
+    def test_tabbed_rows_preserve_empty_cells_and_reordered_headers(self):
+        text = "Time\tCourse (Class Number)\tExam Date\tBook\n\tPHYSICS 140 (55267)\t2026-11-02\t"
+        row = importer.parse_exam_table(text)[0]
+        self.assertIsNone(row["start_time"])
+        self.assertIsNone(row["end_time"])
+        self.assertEqual(row["subject"], "PHYSICS 140")
+        with self.subTest(format="date-only lines"):
+            row = importer.parse_exam_table(LINE_TABLE.replace("09:00 - 11:15", "TBA"))[0]
+            self.assertIsNone(row["start_time"])
+            self.assertIsNone(row["end_time"])
+
+    def test_incomplete_or_misaligned_website_copies_are_rejected(self):
+        invalid_tables = (
+            "\n".join(LINE_TABLE.splitlines()[:-1]),
+            LINE_TABLE.replace("Digital Fundamentals\n", ""),
+            LINE_TABLE.replace("PHYSICS 140 (55267)", "TBA"),
+            LINE_TABLE.replace("Mon 02 Nov 2026", "Tue 02 Nov 2026"),
+            LINE_TABLE.replace("Course Title", "Wrong header"),
+            TABBED_TABLE.replace("Digital Fundamentals\t", ""),
+            TABBED_TABLE.splitlines()[0],
+            "Course (Class Number)\nCourse Title\nExam Date\nTime\nCampus\nRoom\nBook",
+        )
+        for text in invalid_tables:
+            with self.subTest(text=text), self.assertRaises(importer.ExamTableError):
+                importer.parse_exam_table(text)
+
+    def test_website_copy_limits_and_storage_use_existing_pipeline(self):
+        with self.assertRaises(importer.ExamTableError):
+            importer.parse_exam_table("\n".join(["\n".join(LINE_TABLE.splitlines()[7:14])] * 101))
+        prepared = importer.prepare_exam_import(importer.parse_exam_table(LINE_TABLE))
+        self.assertEqual(importer.save_exam_import(self.connection, prepared),
+                         {"imported": 4, "duplicates_skipped": 0})
+        self.assertEqual(importer.save_exam_import(self.connection, prepared),
+                         {"imported": 0, "duplicates_skipped": 4})
 
     def test_invalid_rows_are_not_silently_dropped(self):
         for table in (
@@ -125,6 +176,17 @@ class ExamClipboardAPITests(unittest.TestCase):
         self.assertEqual(invalid.status_code, 400)
         self.assertEqual(metadata.status_code, 422)
         self.assertEqual(empty.status_code, 422)
+
+    def test_website_copies_are_supported_by_existing_read_only_preview_endpoint(self):
+        with patch.object(common, "create_connection") as connect:
+            for text in (TABBED_TABLE, LINE_TABLE):
+                response = self.client.post("/exams/import/preview", json={"text": text})
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.json(), {"exams": importer.parse_exam_table(TABLE)})
+            invalid = self.client.post("/exams/import/preview", json={"text": "\n".join(LINE_TABLE.splitlines()[:-1])})
+            self.assertEqual(invalid.status_code, 400)
+            self.assertIn("incomplete", invalid.json()["detail"])
+        connect.assert_not_called()
 
     def test_reviewed_correction_is_saved_and_returned_by_existing_list_endpoint(self):
         rows = importer.parse_exam_table(TABLE)

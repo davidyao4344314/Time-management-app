@@ -9,6 +9,9 @@ MONTHS = {name.lower(): index for index, name in enumerate(
     ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"), 1
 )}
 WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+TABLE_HEADERS = ("course (class number)", "course title", "exam date", "time", "campus", "room", "book")
+REQUIRED_HEADERS = ("course (class number)", "exam date", "time")
+COURSE_CELL = re.compile(r"[A-Za-z][A-Za-z &/\-]*\s+\d{3}[A-Za-z]?\s*\(\d+\)")
 
 
 class ExamTableError(ValueError):
@@ -48,35 +51,75 @@ def _time_range(value):
     return match[1], match[2]
 
 
-def parse_exam_table(text):
-    """Preview only: parse a Markdown table without opening or writing SQLite."""
-    if not text.strip() or len(text) > 50_000:
-        raise ExamTableError("Paste an exam table of no more than 50,000 characters.")
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    if lines and lines[0].startswith("```") and lines[-1] == "```":
-        lines = lines[1:-1]
-    if len(lines) < 3 or "|" not in lines[0]:
+def _validate_headers(headers):
+    if len(set(headers)) != len(headers) or any(name not in headers for name in REQUIRED_HEADERS):
+        raise ExamTableError("The table needs Course (Class Number), Exam Date, and Time columns.")
+
+
+def _markdown_rows(lines):
+    if len(lines) < 3:
         raise ExamTableError("Paste the Markdown table, including its header and separator row.")
     # Follow the header's outer-pipe convention so empty edge cells survive.
     pipe_style = {"leading_pipe": lines[0].startswith("|"),
                   "trailing_pipe": lines[0].endswith("|")}
     headers = [cell.casefold() for cell in _cells(lines[0], **pipe_style)]
-    required = ("course (class number)", "exam date", "time")
-    if len(set(headers)) != len(headers) or any(name not in headers for name in required):
-        raise ExamTableError("The table needs Course (Class Number), Exam Date, and Time columns.")
+    _validate_headers(headers)
     separator = _cells(lines[1], **pipe_style)
     if len(separator) != len(headers) or not all(re.fullmatch(r":?-{3,}:?", cell) for cell in separator):
         raise ExamTableError("The second row must be the Markdown separator row (---).")
-    if len(lines) - 2 > MAX_EXAMS:
+    return headers, [_cells(line, **pipe_style) for line in lines[2:]]
+
+
+def _copied_rows(lines):
+    """Read website/ spreadsheet copies without guessing missing cell boundaries."""
+    if "\t" in lines[0]:
+        rows = [[cell.strip() for cell in line.split("\t")] for line in lines]
+        if TABLE_HEADERS[0] in [cell.casefold() for cell in rows[0]]:
+            headers = [cell.casefold() for cell in rows.pop(0)]
+            _validate_headers(headers)
+        else:
+            headers = list(TABLE_HEADERS)
+    else:
+        cells = [line.strip() for line in lines]
+        if cells[0].casefold() == TABLE_HEADERS[0]:
+            if tuple(cell.casefold() for cell in cells[:7]) != TABLE_HEADERS:
+                raise ExamTableError("Copy all seven timetable columns, including the complete header.")
+            cells = cells[7:]
+        if not cells or len(cells) % len(TABLE_HEADERS):
+            raise ExamTableError("The copied table is incomplete. Copy all seven columns from Course through Book, then preview again.")
+        headers = list(TABLE_HEADERS)
+        rows = [cells[index:index + 7] for index in range(0, len(cells), 7)]
+
+    if not rows:
+        raise ExamTableError("The copied table contains no exams.")
+    course_index = headers.index(TABLE_HEADERS[0])
+    for index, row in enumerate(rows, 1):
+        if len(row) != len(headers) or not COURSE_CELL.fullmatch(row[course_index]):
+            raise ExamTableError(f"Exam row {index}: copy the complete timetable row, including its course and class number. Do not paste only part of a row.")
+    return headers, rows
+
+
+def parse_exam_table(text):
+    """Preview only: parse Markdown or copied table text without writing SQLite."""
+    if not text.strip() or len(text) > 50_000:
+        raise ExamTableError("Paste an exam table of no more than 50,000 characters.")
+    # Keep tabs at the edges of TSV rows: they can represent empty cells.
+    lines = [line.strip(" \r") for line in text.splitlines() if line.strip()]
+    if lines and lines[0].startswith("```") and lines[-1] == "```":
+        lines = lines[1:-1]
+    if not lines:
+        raise ExamTableError("Paste an exam timetable before previewing.")
+    headers, rows = (_markdown_rows(lines) if "|" in lines[0] and "\t" not in lines[0]
+                     else _copied_rows(lines))
+    if len(rows) > MAX_EXAMS:
         raise ExamTableError(f"Import at most {MAX_EXAMS} exams at a time.")
 
     result = []
-    for row_number, line in enumerate(lines[2:], 1):
-        cells = _cells(line, **pipe_style)
+    for row_number, cells in enumerate(rows, 1):
         if len(cells) != len(headers):
             raise ExamTableError(f"Exam row {row_number}: the number of columns does not match the header.")
         row = dict(zip(headers, cells))
-        subject = re.sub(r"\s*\(\d+\)\s*$", "", row[required[0]]).strip()
+        subject = re.sub(r"\s*\(\d+\)\s*$", "", row[REQUIRED_HEADERS[0]]).strip()
         if not subject:
             raise ExamTableError(f"Exam row {row_number}: the course is missing.")
         try:

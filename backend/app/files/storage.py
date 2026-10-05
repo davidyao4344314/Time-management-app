@@ -66,3 +66,31 @@ def get_file(connection, owner_id, file_id, *, include_content=True):
                             for chunk in connection.execute('''SELECT chunk_id,position,text,page,section
                                 FROM imported_file_chunks WHERE file_id=? ORDER BY position''', (file_id,))]
     return result
+
+
+def iter_metadata(connection, owner_id):
+    """Stream names/IDs only for deterministic detection; never load document text."""
+    for row in connection.execute('''SELECT file_id,filename,file_type,created_at,chunk_count
+        FROM imported_files WHERE owner_id=? ORDER BY created_at DESC,file_id''', (owner_id,)):
+        yield _metadata(row)
+
+
+def matching_chunks(connection, owner_id, *, file_ids=(), terms=()):
+    """Read candidates only, parameterized and always scoped to the trusted owner."""
+    parameters = [owner_id]
+    condition = ""
+    if file_ids:
+        condition = " AND f.file_id IN (" + ",".join("?" for _ in file_ids) + ")"
+        parameters.extend(file_ids)
+    elif terms:
+        condition = " AND (" + " OR ".join(
+            "(instr(lower(f.filename),?)>0 OR instr(lower(c.text),?)>0)" for _ in terms) + ")"
+        parameters.extend(term for term in terms for _ in range(2))
+    else:
+        return
+    for row in connection.execute('''SELECT f.file_id,f.filename,f.file_type,f.created_at,f.chunk_count,
+        c.chunk_id,c.position,c.text,c.page,c.section FROM imported_files f
+        JOIN imported_file_chunks c ON c.file_id=f.file_id WHERE f.owner_id=?''' + condition +
+        ' ORDER BY f.file_id,c.position', parameters):
+        yield dict(zip(("file_id", "filename", "file_type", "created_at", "chunk_count",
+                        "chunk_id", "position", "text", "page", "section"), row))

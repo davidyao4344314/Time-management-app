@@ -6,7 +6,7 @@ function isProposalView(value) {
     && typeof value.requires_approval === 'boolean'
 }
 
-export default function useActionProposals() {
+export default function useActionProposals(refreshKey) {
   const [proposals, setProposals] = useState([])
   const [devEnabled, setDevEnabled] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -18,6 +18,8 @@ export default function useActionProposals() {
   const inFlight = useRef(false)
   const uncertain = useRef(false)
   const latest = useRef([])
+  const previousRefreshKey = useRef(refreshKey)
+  const refreshQueued = useRef(false)
 
   async function run(path, mode, options = {}) {
     if (!mounted.current || inFlight.current) return false
@@ -63,6 +65,10 @@ export default function useActionProposals() {
         inFlight.current = false
         request.current = null
         if (mounted.current) { setLoading(false); setBusyId(null) }
+        if (mounted.current && refreshQueued.current) {
+          refreshQueued.current = false
+          void run('/proposals', 'load')
+        }
       }
     }
   }
@@ -95,6 +101,15 @@ export default function useActionProposals() {
       inFlight.current = false
     }
   }, [])
+
+  useEffect(() => {
+    if (previousRefreshKey.current === refreshKey) return
+    previousRefreshKey.current = refreshKey
+    // A new assistant reply refreshes pending proposals, never confirms them.
+    // Do not abort/retry an in-flight decision; queue a read after it completes.
+    if (inFlight.current) refreshQueued.current = true
+    else void run('/proposals', 'load')
+  }, [refreshKey])
 
   return { proposals, devEnabled, loading, busyId, error, needsRefresh, refresh, createTestProposal, decide }
 }

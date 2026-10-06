@@ -280,7 +280,11 @@ class ContextRecoveryTests(unittest.TestCase):
             "activity_type": "one_time", "date": "2026-10-05", "weekday": None,
             "start_time": "18:00", "end_time": "19:00",
         }}
-        self.respond(answer("This is a proposal only.", actions=[action]))
+        self.client.responses.parse.return_value = SimpleNamespace(
+            status="completed", output_parsed=answer("This is a proposal only."),
+            output=[SimpleNamespace(type="function_call", status="completed", call_id="call-1",
+                                    name=action["tool"], arguments=json.dumps(action["arguments"]))],
+        )
         result = self.run_agent("Suggest a revision session.")
         self.assertEqual(result["actions"], [action])
         self.assertEqual(self.client.responses.parse.call_count, 1)

@@ -28,7 +28,9 @@ Compatibility only: api/ai.py -> ai/memory/recent.py -> archive_store.py
 Observations are current factual application data. Recent memory is conversation
 context. They stay separate. Archived and durable memory are retrieved only when
 selected by routing or a bounded missing-context request, never sent wholesale.
-Proposed actions are not executed.
+Proposal generation does not execute actions. Stage 8.4 normalizes native model
+function calls into pending proposals. A separate user Confirm uses the existing
+approval-gated executor; Cancel changes no planner data.
 
 ## File tree and responsibilities
 
@@ -77,6 +79,7 @@ backend/
     │   ├── agent/
     │   │   ├── contracts.py    # AgentProposal and validation
     │   │   ├── service.py      # Coordinate a proposal request
+    │   │   ├── tool_calls.py   # Native Responses calls -> schema-validated requests; no execution
     │   │   └── reasoning.py    # Prompt, model messages and response
     │   ├── context/
     │   │   ├── keywords.py     # Stage 1 routing
@@ -131,6 +134,7 @@ backend/
     │   ├── calendar.py        # Today/current/week/move HTTP endpoints
     │   ├── imports.py         # Canvas/UoA status/import HTTP endpoints
     │   ├── actions.py         # Generic proposal list/decision APIs; opt-in sample source
+    │   ├── action_runtime.py  # Shared proposal service and explicit-confirm execution resources
     │   └── common.py          # Existing row formatting/time adapters
     ├── infrastructure/
     │   ├── paths.py           # Stable project/backend locations
@@ -266,7 +270,9 @@ review gates and no-charge evaluation.
   adapters may import their matching `planner/activity_service.py` or `exam_service.py`.
   The exception does not allow raw CRUD/database imports or reverse planner-to-AI imports,
   and does not connect tool execution to the agent reasoner. The HTTP action adapter
-  supplies execution resources to the owner-scoped service; only explicit Confirm executes.
+  shares `api/action_runtime.py` with the conversation adapter. Chat receives a
+  registration callback for newly completed requests; only explicit Confirm
+  opens execution resources. The reasoner imports schema-only contracts, not handlers.
 - The explicit `/ai/test-observation` diagnostic uses the receipt-test utility;
   normal proposals do not run the developer memory trace.
 
@@ -294,8 +300,10 @@ Steps 2–3 were already committed before this batch.
 
 The original refactor created no action executor. Stage 8 now provides an
 approval-gated executor and an explicitly registered real `AddActivityTool`,
-with generic owner-scoped HTTP/UI confirmation for manually created proposals;
-the normal agent still only proposes `add_activity`. Activity edits still call `edit_activity` in the same sequence,
+with generic owner-scoped HTTP/UI confirmation for native model and development
+proposals. The normal agent only requests `add_activity`, never approves/executes
+it. Proposal state remains temporary and is not reconstructed from saved chat
+after restart. Activity edits still call `edit_activity` in the same sequence,
 now within one savepoint so a failed logical edit rolls back all its fields.
 Standalone `edit_activity` callers still commit by default. Create returns the ID from the
 existing `add_activity` and reads the row through `get_activity_by_id` rather than

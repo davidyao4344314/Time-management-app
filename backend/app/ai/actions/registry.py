@@ -34,7 +34,7 @@ def create_proposal_tool_registry():
     registry = ToolRegistry()
     registry.register(Tool(
         name="add_activity",
-        description="Propose a new activity for user review. Execution is not connected yet.",
+        description="Propose a new activity for user confirmation. This request never saves it automatically.",
         arguments_model=AddActivityArguments,
     ))
     return registry

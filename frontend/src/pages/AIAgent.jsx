@@ -16,6 +16,7 @@ const suggestions = [
 function AIAgent() {
   const state = useConversation()
   const [model, setModel] = useState('Loading model…')
+  const proposalRefreshKey = state.messages.findLast(message => message.role === 'assistant')?.message_id
 
   useEffect(() => {
     const controller = new AbortController()
@@ -56,7 +57,7 @@ function AIAgent() {
         onChange={event => state.setMemorySharing(event.target.checked)} /> Allow older completed turns from this chat to be used as global memory</label>}
       {state.loading && <p role="status">Loading conversation…</p>}
       {!state.chat && !state.loading && <p>Start a New Chat to begin.</p>}
-      {!state.loading && <ActionProposalPanel disabled={state.sending || state.summarizing} />}
+      {!state.loading && <ActionProposalPanel disabled={state.sending || state.summarizing} refreshKey={proposalRefreshKey} />}
       {state.nextBefore && <button className="chat-secondary" onClick={state.loadOlder} disabled={state.loadingOlder || state.loading}>
         {state.loadingOlder ? 'Loading earlier messages…' : 'Load earlier messages'}
       </button>}

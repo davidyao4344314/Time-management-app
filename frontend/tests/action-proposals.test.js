@@ -11,7 +11,7 @@ const pending = {
 
 function harness(dev = true) {
   const values = [], refs = [], calls = []
-  let cursor = 0, refCursor = 0, effect, cleanup, responder
+  let cursor = 0, refCursor = 0, effect, cleanup, responder, keyEffect, refreshKey
   const context = vm.createContext({
     AbortController, encodeURIComponent,
     useState(initial) {
@@ -20,16 +20,19 @@ function harness(dev = true) {
       return [values[index], value => { values[index] = typeof value === 'function' ? value(values[index]) : value }]
     },
     useRef(initial) { const index = refCursor++; return refs[index] ||= { current: initial } },
-    useEffect(callback) { effect ||= callback },
+    useEffect(callback, dependencies) {
+      if (dependencies.length === 0) effect ||= callback
+      else keyEffect = callback
+    },
     async fetch(path, options) { calls.push([path, options]); return responder(path, options) },
   })
   const source = fs.readFileSync(new URL('../src/hooks/useActionProposals.js', import.meta.url), 'utf8')
     .replace(/^import .*\n/, '').replace('export default function', 'function')
   vm.runInContext(source, context)
-  const render = () => { cursor = refCursor = 0; return context.useActionProposals() }
+  const render = (key = refreshKey) => { refreshKey = key; cursor = refCursor = 0; return context.useActionProposals(key) }
   const response = data => ({ ok: true, json: async () => data })
   responder = () => response({ proposals: [pending], dev_enabled: dev })
-  return { render, calls, response, setResponder(fn) { responder = fn }, stop() { cleanup?.() },
+  return { render, calls, response, runKeyEffect() { keyEffect() }, setResponder(fn) { responder = fn }, stop() { cleanup?.() },
     async start() { render(); cleanup = effect(); await new Promise(resolve => setImmediate(resolve)); return render() } }
 }
 
@@ -124,4 +127,40 @@ test('unmount aborts the browser request and ignores late results without retryi
   assert.equal(await request, false)
   assert.equal(h.render().proposals[0].status, 'pending_approval')
   assert.equal(h.calls.length, 2)
+})
+
+test('a new assistant reply reloads backend proposals without approving or creating them', async () => {
+  const h = harness(false)
+  await h.start()
+  h.setResponder(() => h.response({ proposals: [pending, { ...pending, id: 'from-model' }], dev_enabled: false }))
+  h.render('assistant-1')
+  h.runKeyEffect()
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(h.render().proposals.length, 2)
+  assert.equal(h.calls.length, 2)
+  assert.equal(h.calls[1][0], '/api/actions/proposals')
+  assert.equal(h.calls[1][1].method, undefined)
+  h.runKeyEffect()
+  assert.equal(h.calls.length, 2)
+})
+
+test('a reply during a decision queues a read and never aborts or retries confirmation', async () => {
+  const h = harness(false)
+  await h.start()
+  let finish, signal
+  h.setResponder((path, options) => path.endsWith('/decision')
+    ? new Promise(resolve => { finish = resolve; signal = options.signal })
+    : h.response({ proposals: [{ ...pending, status: 'completed' }, { ...pending, id: 'from-model' }], dev_enabled: false }))
+  const decision = h.render().decide(pending.id, 'confirm')
+  h.render('assistant-2')
+  h.runKeyEffect()
+  assert.equal(h.calls.length, 2)
+  assert.equal(signal.aborted, false)
+  finish(h.response({ ...pending, status: 'completed' }))
+  await decision
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(h.calls.length, 3)
+  assert.equal(h.calls[2][0], '/api/actions/proposals')
+  assert.equal(h.calls.filter(([, options]) => options.method === 'POST').length, 1)
+  assert.equal(h.render().proposals.length, 2)
 })

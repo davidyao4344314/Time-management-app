@@ -30,8 +30,8 @@ class ActionApprovalAPITests(unittest.TestCase):
         self.addCleanup(patch.stopall)
         patch.object(identity, "IDENTITY_KEY_FILE", Path(directory.name) / "key").start()
         patch.dict(os.environ, {"ACTION_LAYER_DEV_MODE": "1"}).start()
-        patch.object(api, "service", ActionProposalService(api._execution_resources)).start()
-        self.connect = patch.object(api.common, "create_connection", side_effect=lambda: sqlite3.connect(self.path)).start()
+        patch.object(api.action_runtime, "service", ActionProposalService(api.action_runtime.execution_resources)).start()
+        self.connect = patch.object(api.action_runtime.common, "create_connection", side_effect=lambda: sqlite3.connect(self.path)).start()
         app = FastAPI()
         app.include_router(api.router)
         self.client = TestClient(app)
@@ -164,12 +164,12 @@ class ActionApprovalAPITests(unittest.TestCase):
         with patch.dict(os.environ, {"ACTION_LAYER_DEV_MODE": "0"}):
             self.assertEqual(self.client.post("/actions/dev/proposals", json={}).status_code, 404)
             self.assertFalse(self.client.get("/actions/proposals").json()["dev_enabled"])
-        self.assertEqual(api.service.list_proposals(self.client.cookies.get("ai_owner")), [])
+        self.assertEqual(api.action_runtime.service.list_proposals(self.client.cookies.get("ai_owner")), [])
         self.connect.assert_not_called()
 
     def test_restart_drops_ephemeral_proposals_without_executing(self):
         proposal = self.create_proposal()
-        with patch.object(api, "service", ActionProposalService(api._execution_resources)):
+        with patch.object(api.action_runtime, "service", ActionProposalService(api.action_runtime.execution_resources)):
             self.assertEqual(self.decide(proposal).status_code, 404)
             self.assertEqual(self.client.get("/actions/proposals").json()["proposals"], [])
         self.connect.assert_not_called()
@@ -177,7 +177,7 @@ class ActionApprovalAPITests(unittest.TestCase):
     def test_generic_card_payload_is_not_specific_to_add_activity(self):
         self.client.get("/actions/proposals")
         owner = self.client.cookies.get("ai_owner")
-        view = api.service.register(owner, ActionProposal(
+        view = api.action_runtime.service.register(owner, ActionProposal(
             tool_name="future_tool", arguments={}, display_title="Another proposed change",
             display_description="Generic display fields only.",
         ))

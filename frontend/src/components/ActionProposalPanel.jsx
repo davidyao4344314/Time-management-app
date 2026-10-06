@@ -1,8 +1,8 @@
 import useActionProposals from '../hooks/useActionProposals'
 import ActionProposalCard from './ActionProposalCard'
 
-export default function ActionProposalPanel({ disabled = false }) {
-  const state = useActionProposals()
+export default function ActionProposalPanel({ disabled = false, refreshKey }) {
+  const state = useActionProposals(refreshKey)
   const busy = state.loading || state.busyId !== null
   return <section className="action-proposal-panel" aria-labelledby="action-proposal-heading">
     <h3 id="action-proposal-heading">Proposed changes</h3>

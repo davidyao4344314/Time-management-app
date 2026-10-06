@@ -1,8 +1,8 @@
 # Study Planning App
 
 This README explains how to run the project and describes the backend as it
-currently works. The AI agent can **propose** an activity, but cannot yet save
-an AI-proposed activity.
+currently works. The AI agent can **propose** an activity. It is saved only when
+the user separately clicks **Confirm** on its pending proposal, never automatically.
 
 ## Stage 8: Action Layer and first approved tool
 
@@ -10,14 +10,16 @@ an AI-proposed activity.
 a minimal router, temporary approve/reject lifecycle, an approval-gated executor
 and a response-planning interface. The default
 `add_activity` registration reuses the existing schema but has no executable
-handler. Normal chat/API responses are unchanged. Commit 8.2 adds an opt-in `AddActivityTool` and
+handler. Commit 8.2 adds an opt-in `AddActivityTool` and
 `create_activity_tool_registry(connection)` for explicitly approved backend
 execution through the existing Activity service. Normal chat does not call it.
 Tests verify saved creation using disposable SQLite databases only.
 Commit 8.3 adds a generic Proposed changes panel with Confirm/Cancel on AI Agent,
 and owner-scoped `/actions/proposals` APIs. It uses backend-held arguments and
-the existing executor, not direct frontend activity creation. Chat/LLM actions
-are **not connected yet**. The sample proposal source is opt-in via
+the existing executor, not direct frontend activity creation. Commit 8.4 connects
+native model `add_activity` requests to pending proposals in this same panel.
+Ordinary replies need no tool; unknown/invalid calls fail safely. Model requests
+never approve or execute. The sample proposal source remains opt-in via
 `ACTION_LAYER_DEV_MODE=1`; confirming it saves a real local test activity.
 See ACTIONS.md for the test command and temporary-state/restart limitations.
 
@@ -98,7 +100,7 @@ backend/
 │   │   ├── agent/            # Agent coordination, reasoning and contracts
 │   │   ├── context/          # Stage 1/2/3 routing + opt-in adaptive evidence
 │   │   ├── observations/     # Compact activity/exam/Screen Time formatters
-│   │   ├── actions/          # Proposal/approval/execution skeleton; no real tool handlers
+│   │   ├── actions/          # Pending proposals, explicit approval and trusted add_activity
 │   │   ├── memory/           # Recent, archive, compaction and durable memory
 │   │   └── compat/           # Temporary multi-owner legacy adapters
 │   ├── planner/              # Activities, exams, calendar and activity service
@@ -1133,19 +1135,20 @@ verify orchestration and validation, not the live model's detection accuracy.
 
 The React AI Agent now sends conversation messages through FastAPI and displays
 saved replies, proposals and context inspectors. AI Settings configures the key
-locally without returning it to React. There is still no Accept/Reject UI, no
-approval/execution endpoint, and no automatic call to `add_activity` for an
-AI-proposed action. A normal activity can still be added through the existing
-manual app workflow.
+locally without returning it to React. Native `add_activity` tool requests now
+become pending proposals in the existing Confirm/Cancel panel. The separate
+owner-scoped approval endpoint saves only explicitly confirmed activities.
+There is no automatic execution, exam/edit/delete agent tool, durable proposal
+storage or post-execution model continuation. Manual activity creation is unchanged.
 
 Automatic archive-compaction runs, automatic durable-memory extraction, Screen
 Time context routing, goals and study-history
 observations, and observation hash/change caching are not part of the normal
 AI request flow. They should not be assumed to affect a current AI response.
 
-The intended later workflow is: show a validated proposal to the user, ask for
-approval, then use a separate backend action to save an approved activity and
-refresh the calendar. That approval and execution flow has not been built.
+See [Stage 8 native tool proposals and tests](ACTIONS.md) for this workflow,
+offline tests and the single-process/restart limitations. Open or refresh the
+Calendar/Activities page after confirmation to inspect the saved activity.
 
 ## Test without an OpenAI charge
 

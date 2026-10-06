@@ -1,10 +1,10 @@
-# Stage 8: Action Layer, approved creation and user confirmation
+# Stage 8: Action Layer, native tool proposals and user confirmation
 
 This stage establishes contracts and trusted backend boundaries. Commit 8.2 adds
 an explicitly opted-in real `add_activity` tool using the existing service. The normal
-AI request still returns its existing message/actions proposal format and never
-executes a planner tool. Commit 8.3 adds a generic approval UI/API for manually
-created backend proposals; chat/model output is still not connected to it.
+AI request never executes a planner tool. Commit 8.3 adds the generic approval
+UI/API. Commit 8.4 connects native LLM function requests to pending proposals
+in that same UI; only a separate explicit user confirmation saves an activity.
 
 ## Structure and responsibility
 
@@ -45,9 +45,10 @@ and never executes tools. Extra action fields such as `status`, `id` or
 `requires_approval` are rejected. Tool selection is registry-driven, not an
 add/edit/delete conditional chain.
 
-The current agent/API/SDK schema is intentionally unchanged. A future service
-adapter can pass its validated result to this router in a later step.
-No new layer is automatically invoked by today's chat path.
+The internal message/actions contract remains unchanged. Commit 8.4 changes
+how the provider supplies actions: native function calls, not a text actions list.
+The chat service reuses `prepare_tool_proposals()` from this router before
+registering fresh completed requests with the existing owner-scoped service.
 
 ## Commit 8.2: approved activity creation
 
@@ -60,7 +61,8 @@ registry creates no database rows and opens no connection.
 The public input remains `AddActivityArguments`: `name`, `category`, `subject`,
 `activity_type`, `date`, `weekday`, `start_time`, `end_time`. All keys are required;
 unused/optional values are null. It does not expose source/external IDs, active
-date ranges, SQL, paths or persistence objects. No schema is sent to an LLM.
+date ranges, SQL, paths or persistence objects. Commit 8.4 exposes this public
+schema to the LLM; the executable handler is never exposed.
 
 ```text
 backend-held approved proposal ID
@@ -85,8 +87,8 @@ approval mechanism. Pending/rejected proposals never reach the service; complete
 or failed proposals cannot execute again within the same boundary.
 
 Commit 8.2 establishes this deterministic backend path. Commit 8.3 adds manual
-confirmation below, but no chat/LLM integration, exam/edit/delete tool or durable
-approval storage is added.
+confirmation below, and Commit 8.4 connects chat requests to pending review.
+There are still no exam/edit/delete tools or durable approval storage.
 Handler/service failures use the existing sanitized unconfirmed-outcome behavior;
 a failed post-insert read must not be reported as proof that no row was created.
 
@@ -94,8 +96,8 @@ a failed post-insert read must not be reported as proof that no row was created.
 
 The AI Agent page has a **Proposed changes** panel. `ActionProposalCard` displays
 the backend's title, description and status without inspecting tool names. It
-never calls the activity API to create data. Existing AI response actions remain
-proposal text in the context inspector; they do not become executable proposals yet.
+never calls the activity API to create data. Commit 8.4 now supplies pending
+proposals from validated native calls as well as the optional development sample.
 
 `ActionProposalService` owns one process-local `ApprovalBoundary`, owner links and
 result receipts. It reuses the existing signed browser-profile identity; no owner
@@ -162,6 +164,83 @@ Start the backend without `ACTION_LAYER_DEV_MODE=1` to hide/disable the sample s
 Restart/reload discards pending proposals and receipts; saved activities remain.
 Use a single backend process for this local stage. This is not durable workflow
 storage, multi-worker coordination or a restart-safe exactly-once guarantee.
+
+## Commit 8.4: native model requests become pending proposals
+
+```text
+existing observations + recent chat + user request
+    -> existing Responses request + schema-only add_activity definition
+    -> native function_call (or ordinary structured advice)
+    -> agent/tool_calls.py: normalize and validate against ToolRegistry
+    -> existing internal {message, actions, memory_request, missing_context}
+    -> conversations/service.py: prepare pending proposals, save completed chat
+    -> API-injected registration in the SAME ActionProposalService
+    -> Proposed changes panel -> explicit Confirm / Cancel
+```
+
+`public_agent_tools()` derives the one function definition from the existing
+schema-only registry: name, description, strict input schema, no handler or
+approval authority. `tool_choice="auto"` allows ordinary answers;
+`parallel_tool_calls=False` limits the request to zero/one call. The adapter
+reads Responses `function_call` items (`name`, JSON `arguments`, `call_id`,
+completed status), not free-form text. This follows the
+[OpenAI function-calling format](https://developers.openai.com/api/docs/guides/function-calling).
+
+Registry lookup and existing `AddActivityArguments` validation reject unknown
+tools, missing/extra fields, invalid recurrence/date/time values and forged
+approval/metadata fields. SDK JSON parsing errors become sanitized response
+errors. Tool calls cannot coexist with unresolved context/memory requests.
+Incomplete/invalid replies fail the chat request (502), creating no proposal
+or activity. Text `actions` must be empty; a fake tool call in text is not executed.
+
+**Mixed response policy:** retain a valid structured user-facing message and
+display the native request separately for review. A tool-only reply gets a small
+backend message explaining that nothing is saved until confirmation. No second
+model call is made to acknowledge execution. The internal actions list is retained
+for existing inspectors/history as proposal evidence, never proof of execution.
+
+`api/action_runtime.py` is the single composition root shared by the chat and
+approval adapters. The chat service receives a registration callback; it imports
+no HTTP layer, executable handler or executor. It prepares all requests before
+saving chat and registers only newly completed requests. Replaying a request ID,
+refreshing chat, or reading old replies never creates another proposal. The UI
+refreshes proposals when a new assistant reply appears. It queues a read rather
+than aborting/retrying an in-flight confirmation.
+
+Proposals remain process-local. A restart (or interruption after chat persistence
+but before registration) can lose pending review state; old saved chat is **not**
+rehydrated into executable authority. Ask again to create a fresh proposal and
+check the calendar first if an earlier execution outcome was uncertain. Nothing
+automatically approves, retries or executes during generation or recovery.
+The compatibility `/ai/propose` preview path returns the internal proposal only;
+the current `/conversations/{id}/messages` chat path registers reviewable proposals.
+
+### Test the model-connected flow
+
+No-charge tests from the project root:
+
+```bash
+backend/.venv/bin/python -B -m unittest backend.tests.ai.test_llm_action_proposals -v
+```
+
+They cover schema exposure, real SDK function-call parsing, ordinary/mixed/tool-only
+responses, invalid/unknown requests, pending/no-write behavior, owner isolation,
+retry/restart safety, cancellation and exactly one saved activity after Confirm.
+All model calls are mocked and all databases/identity keys are disposable.
+
+Optional live test (uses your configured key and may incur charges):
+
+1. Run backend/frontend normally; no development flag is needed.
+2. In AI Agent, ask a normal question. It should not force an activity proposal.
+3. Ask to add a named one-time study activity with a specific date/start/end.
+4. Review the pending card. Check Activities: it must not exist yet.
+5. Cancel one proposal. No row should be saved.
+6. Request another and Confirm once. Check Activities/Calendar for one saved row.
+7. Refresh/replay the chat request: no second proposal or saved copy is created.
+
+Only `add_activity` is exposed. Additional tools, durable proposals, action editing,
+post-execution model continuation, sequential execution loops and a date engine
+remain deferred. Context routing, observations, imports and database schemas are unchanged.
 
 ## Proposal and result contracts
 
@@ -236,7 +315,8 @@ pending_approval -> approved -> executing -> completed / failed
 - Approval state is temporary and instance-scoped, not persistent or global. A
   restart loses it. The generic HTTP adapter enforces signed profile ownership,
   never accepts client-supplied approved objects, and only executes through the
-  existing boundary. Persistent proposals and chat/model integration remain deferred.
+  existing boundary. Persistent proposals remain deferred; chat integration only
+  creates pending proposals and grants no execution authority.
   This is not a durable exactly-once guarantee or a multi-user permissions framework.
 
 Tools expose only name, description and input schema. Handlers are trusted
@@ -245,7 +325,9 @@ explicit backend registrations, never supplied by the LLM or dynamically importe
 ## Dependency direction
 
 ```text
-future agent/service adapter -> routing -> registry/tools + approval -> contracts
+agent/tool_calls -> schema-only registry + pure routing preparation -> contracts
+conversations/service -> pure routing preparation; receives registration callback
+api/conversations + api/actions -> api/action_runtime -> SAME owner-scoped service
 api/actions -> owner-scoped service -> approval -> contracts
 api/actions supplies execution resources -> executor -> approval + registry/tools -> contracts
 activity_tool -> planner/activity_service -> existing CRUD
@@ -272,6 +354,7 @@ backend/.venv/bin/python -B -m unittest backend.tests.ai.test_action_contracts -
 backend/.venv/bin/python -B -m unittest backend.tests.ai.test_action_layer -v
 backend/.venv/bin/python -B -m unittest backend.tests.ai.test_add_activity_tool -v
 backend/.venv/bin/python -B -m unittest backend.tests.ai.test_action_approval_api -v
+backend/.venv/bin/python -B -m unittest backend.tests.ai.test_llm_action_proposals -v
 backend/.venv/bin/python -B -m unittest discover -s backend/tests -t . -q
 ```
 
@@ -285,5 +368,5 @@ compatibility, approved creation/persistence, domain validation, refused pending
 creation and no duplicate replay, owner isolation, argument tampering, status refresh,
 concurrent confirmations and the opt-in sample source. Frontend `npm test` covers
 the actual generic card and hook; `npm run build` and `npm run lint` check integration.
-LLM wiring, exam/edit/delete tools, persistent proposals, complex planning and loops
+Exam/edit/delete tools, persistent proposals, complex planning and loops
 are intentionally left for later stages.

@@ -30,6 +30,18 @@ def route_agent_output(output: Mapping, registry: ToolRegistry, approval: Approv
             route=ActionRoute.RESPONSE_PLAN if response_plan_requested else ActionRoute.NONE,
         )
 
+    proposals = prepare_tool_proposals(actions, registry)
+
+    # Validate the whole batch before registering any pending proposals.
+    for proposal in proposals:
+        approval.register(proposal)
+    return ActionRoutingResult(route=ActionRoute.TOOL_ACTION, proposals=proposals)
+
+
+def prepare_tool_proposals(actions, registry: ToolRegistry):
+    """Pure preparation: no approval, execution, registration or persistence."""
+    if not isinstance(actions, list):
+        raise ActionLayerError("Tool requests must be a list.")
     proposals = []
     for action in actions:
         try:
@@ -48,7 +60,4 @@ def route_agent_output(output: Mapping, registry: ToolRegistry, approval: Approv
             display_description=description,
         ))
 
-    # Validate the whole batch before registering any pending proposals.
-    for proposal in proposals:
-        approval.register(proposal)
-    return ActionRoutingResult(route=ActionRoute.TOOL_ACTION, proposals=proposals)
+    return proposals

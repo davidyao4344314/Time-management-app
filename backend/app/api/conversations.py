@@ -5,6 +5,7 @@ from sqlite3 import Error as SQLiteError
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 
 from backend.app.conversations import service
+from backend.app.api import action_runtime
 from backend.app.conversations.contracts import CreateConversation, SendMessage, ConversationSettings, ConversationNotFound, ConversationConflict
 from backend.app.ai.agent.contracts import InvalidProposalError
 from openai import OpenAIError
@@ -64,7 +65,11 @@ def read_conversation(conversation_id: str, request: Request, response: Response
 
 @router.post('/{conversation_id}/messages')
 def send_message(conversation_id: str, body: SendMessage, request: Request, response: Response):
-    return call_service(service.send_message, resolve_owner(request, response), conversation_id, body.request_id, body.message)
+    owner = resolve_owner(request, response)
+    response.headers["Cache-Control"] = "no-store"
+    return call_service(service.send_message, owner, conversation_id, body.request_id, body.message,
+                        register_actions=lambda proposals: [action_runtime.service.register(owner, proposal)
+                                                           for proposal in proposals])
 
 
 @router.patch('/{conversation_id}/settings')

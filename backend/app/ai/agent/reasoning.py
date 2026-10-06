@@ -10,6 +10,7 @@ from backend.app.ai.agent.contracts import (
 )
 from backend.app.ai.agent.context_recovery import build_context_status, MAX_CONTEXT_RECOVERY_RETRIES
 from backend.app.ai.agent.coverage import exam_context_coverage
+from backend.app.ai.agent.tool_calls import public_agent_tools, normalize_tool_calls
 
 
 STUDY_PLANNING_INSTRUCTIONS = """You are a study planning assistant. Help the user make better decisions about study time, upcoming activities, exams and deadlines, free time, and basic future planning.
@@ -18,7 +19,7 @@ Use the structured activity and exam observations supplied by the backend as the
 
 Recent user and assistant messages are conversation context for follow-up requests, not the source of truth about the current schedule. If conversation history conflicts with the latest activity or exam observations, trust the latest observations. Past actions in conversation history were only proposed; never assume they were executed unless the current backend observations confirm the change.
 
-Keep normal advice in the user-facing message. Put proposed app changes only in the separate actions list. Propose an action only when a calendar change would help; otherwise return an empty actions list. The only allowed tool is add_activity. Never execute a tool, generate SQL, or claim an action was completed or saved without backend confirmation.
+Keep normal advice in the user-facing message. The only allowed tool is add_activity. Request a proposed app change using the native add_activity function tool, only when a calendar change would help. The backend builds the separate actions list from validated native calls; keep actions:[] in structured text. Never write tool requests in free-form text or the text actions list. Normal advice needs no tool call. Never execute a tool, generate SQL, or claim an action was completed or saved without backend confirmation. A tool request becomes a pending proposal: the user must separately Confirm or Cancel. Do not request a mutation alongside missing_context or memory_request; obtain needed context first.
 
 Return the required structure: {"message": "response for the user", "actions": [], "memory_request": null, "missing_context": []}. For an add_activity proposal, use the existing name, category, subject, activity_type, date, weekday, start_time, and end_time fields. Activity type must be one_time, daily, or weekly. Use YYYY-MM-DD dates, Monday-Sunday weekdays, HH:MM times, and null for fields that do not apply. Do not present proposed activities as already scheduled.
 
@@ -87,20 +88,41 @@ def request_agent_response(client, user_request, observations, recent_turns, set
                            chat_summary=None, context_status=None,
                            context_recovery_remaining=MAX_CONTEXT_RECOVERY_RETRIES):
     """Request structured advice/proposals only; never call an activity tool."""
-    return client.responses.parse(
-        model=settings["model"],
-        instructions=STUDY_PLANNING_INSTRUCTIONS,
-        input=build_agent_messages(user_request, observations, recent_turns, chat_summary=chat_summary,
-                                   context_status=context_status,
-                                   context_recovery_remaining=context_recovery_remaining),
-        text_format=AgentProposal,
-        reasoning={"effort": settings["reasoning_effort"]},
-        max_output_tokens=output_limit,
-        store=False,
-    )
+    try:
+        return client.responses.parse(
+            model=settings["model"],
+            instructions=STUDY_PLANNING_INSTRUCTIONS,
+            input=build_agent_messages(user_request, observations, recent_turns, chat_summary=chat_summary,
+                                       context_status=context_status,
+                                       context_recovery_remaining=context_recovery_remaining),
+            text_format=AgentProposal,
+            tools=public_agent_tools(),
+            tool_choice="auto",
+            parallel_tool_calls=False,
+            reasoning={"effort": settings["reasoning_effort"]},
+            max_output_tokens=output_limit,
+            store=False,
+        )
+    except ValueError:
+        # The SDK also parses native arguments; malformed JSON must remain a
+        # controlled response failure without echoing the model's raw payload.
+        raise InvalidProposalError("The model returned an invalid response.") from None
 
 
 def parse_agent_response(response):
-    if response.status != "completed" or response.output_parsed is None:
+    if response.status != "completed":
         raise InvalidProposalError("The model did not return a complete proposal.")
-    return validate_agent_proposal(response.output_parsed).model_dump()
+    requests = normalize_tool_calls(response)
+    if response.output_parsed is None:
+        if not requests:
+            raise InvalidProposalError("The model did not return a complete proposal.")
+        proposal = {"message": "Please review this proposed activity. Nothing is saved until you confirm.",
+                    "actions": [], "memory_request": None, "missing_context": []}
+    else:
+        proposal = validate_agent_proposal(response.output_parsed).model_dump()
+    if proposal["actions"]:
+        raise InvalidProposalError("Activity requests must use the native function tool.")
+    if requests and (proposal.get("missing_context") or proposal.get("memory_request")):
+        raise InvalidProposalError("Resolve missing context before proposing an activity.")
+    # Mixed structured advice + native call: keep the advice and review separately.
+    return validate_agent_proposal({**proposal, "actions": requests}).model_dump()

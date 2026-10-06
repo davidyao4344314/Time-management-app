@@ -18,6 +18,8 @@ from backend.app.ai.context.adaptive.settings import get_adaptive_settings
 from backend.app.ai.context.adaptive.learning import make_completed_event, load_snapshot
 from backend.app.files import storage as file_storage
 from backend.app.files.retrieval import detect_file_reference, retrieve_file_context
+from backend.app.ai.actions.registry import create_proposal_tool_registry
+from backend.app.ai.actions.routing import prepare_tool_proposals
 
 
 @contextmanager
@@ -52,7 +54,7 @@ def read_chat(owner_id, conversation_id, *, before=None, limit=50):
                 **storage.get_messages(connection, conversation_id, owner_id, before=before, limit=limit)}
 
 
-def send_message(owner_id, conversation_id, request_id, message):
+def send_message(owner_id, conversation_id, request_id, message, *, register_actions=None):
     with open_store() as connection:
         storage.require_conversation(connection, conversation_id, owner_id)
         storage.expire_interrupted_requests(connection,conversation_id)
@@ -89,7 +91,12 @@ def send_message(owner_id, conversation_id, request_id, message):
             finally:
                 observation_connection.close()
             validate_agent_proposal({key:value for key,value in proposal.items() if key != 'agent_context'})
+            pending = prepare_tool_proposals(proposal['actions'], create_proposal_tool_registry())
             messages = storage.complete_request(connection, conversation_id, request_id, proposal)
+            # Only a newly completed request registers proposals. Replaying an
+            # existing request or reading saved chat never recreates authority.
+            if register_actions is not None and pending:
+                register_actions(pending)
             learning_pending = False
             if routing_evidence is not None:
                 try:

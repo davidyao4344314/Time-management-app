@@ -211,6 +211,25 @@ class ActionLayerTests(unittest.TestCase):
         self.assertEqual(result.error, "The requested tool is not registered.")
         self.assertEqual(self.approval.get(proposal.id).status, ActionStatus.FAILED)
 
+    def test_malformed_proposal_ids_are_rejected_before_state_lookup(self):
+        proposal = self.propose()
+        for proposal_id in ("", " ", "\t\n", None, {}, [], 42, True, object()):
+            with self.subTest(proposal_id=proposal_id):
+                with patch.object(self.approval, "begin_execution") as begin_execution:
+                    with self.assertRaisesRegex(ActionLayerError, "A nonempty proposal ID is required"):
+                        self.executor.execute(proposal_id)
+                    begin_execution.assert_not_called()
+        self.handler.assert_not_called()
+        self.assertEqual(self.approval.get(proposal.id).status, ActionStatus.PENDING_APPROVAL)
+
+    def test_well_formed_unknown_id_keeps_controlled_result_contract(self):
+        result = self.executor.execute("missing-proposal")
+        self.assertFalse(result.success)
+        self.assertEqual(result.proposal_id, "missing-proposal")
+        self.assertEqual(result.error, "The proposal was not found.")
+        json.dumps(result.model_dump(mode="json"))
+        self.handler.assert_not_called()
+
     def test_tool_failure_is_safe_and_cannot_be_retried_automatically(self):
         proposal = self.propose()
         self.approve(proposal)

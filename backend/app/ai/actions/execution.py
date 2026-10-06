@@ -12,6 +12,8 @@ class ActionExecutor:
         self.approval = approval
 
     def execute(self, proposal_id: str) -> ActionResult:
+        if not isinstance(proposal_id, str) or not proposal_id.strip():
+            raise ActionLayerError("A nonempty proposal ID is required.")
         # Resolve authoritative backend state, NOT an LLM/browser proposal object.
         try:
             proposal = self.approval.begin_execution(proposal_id)

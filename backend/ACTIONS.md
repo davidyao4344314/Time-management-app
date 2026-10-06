@@ -100,6 +100,8 @@ pending_approval -> approved -> executing -> completed / failed
   `ApprovalDecision.APPROVE` or `REJECT`; creating/routing a proposal is not approval.
 - The executor receives only a proposal ID and looks up authoritative state in
   the same `ApprovalBoundary`. Browser/model status fields never grant approval.
+  Non-string, empty or whitespace-only IDs raise a controlled `ActionLayerError`
+  before state lookup. A valid-looking but unknown ID returns a failure result.
 - The boundary claims execution under a lock before invoking the handler. Pending,
   rejected, executing, completed and failed proposals cannot execute. Concurrent
   submissions cannot execute the same proposal twice within this boundary.

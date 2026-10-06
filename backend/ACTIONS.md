@@ -137,6 +137,13 @@ Nothing in `ai/actions` imports the agent reasoner, context selection, observati
 memory, HTTP, SQLite, planner CRUD or OpenAI. No reverse imports/cycles were added.
 Later trusted tool handlers can delegate to existing planner services without
 putting SQL, approval decisions or model reasoning into the tools' public contracts.
+Architecture tests reserve two exact future adapter-module exceptions:
+`ai/actions/activity_tool.py` may import `planner/activity_service.py`, and
+`ai/actions/exam_tool.py` may import `planner/exam_service.py`. Neither adapter is
+implemented or registered yet. Other action modules remain unable to import
+planner services; even these adapters cannot import raw CRUD/database, HTTP,
+reasoning, context, observation or memory modules. Planner services must not import
+the action layer. This keeps the future delegation direction explicit and acyclic.
 
 ## Offline tests
 

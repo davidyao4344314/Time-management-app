@@ -257,6 +257,11 @@ review gates and no-charge evaluation.
 - Pure compaction planning imports record helpers/contracts/category policy, not persistence.
 - Durable extraction imports storage; storage does not import the extractor or SDK.
 - Contracts and infrastructure do not import model callers or HTTP modules.
+- Action contracts, registry, routing, approval and execution do not import planner
+  services. Only the reserved future `ai/actions/activity_tool.py` and `exam_tool.py`
+  adapters may import their matching `planner/activity_service.py` or `exam_service.py`.
+  The exception does not allow raw CRUD/database imports or reverse planner-to-AI imports,
+  and does not implement or enable tool execution.
 - The explicit `/ai/test-observation` diagnostic uses the receipt-test utility;
   normal proposals do not run the developer memory trace.
 

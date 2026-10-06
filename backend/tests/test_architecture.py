@@ -9,6 +9,22 @@ from backend.tests.paths import BACKEND_DIRECTORY, PROJECT_DIRECTORY
 APP_DIRECTORY = BACKEND_DIRECTORY / "app"
 
 
+# Reserved adapter modules only; this does not register executable tools.
+ACTION_SERVICE_IMPORTS = {
+    "backend.app.ai.actions.activity_tool": {"backend.app.planner.activity_service"},
+    "backend.app.ai.actions.exam_tool": {"backend.app.planner.exam_service"},
+}
+
+
+def forbidden_action_imports(module, dependencies):
+    allowed = ACTION_SERVICE_IMPORTS.get(module, set())
+    forbidden = ("backend.app.ai.agent", "backend.app.ai.context", "backend.app.ai.observations",
+                 "backend.app.ai.memory", "backend.app.ai.compat", "backend.app.api",
+                 "backend.app.planner", "backend.app.integrations", "backend.app.database")
+    return {dependency for dependency in dependencies
+            if dependency.startswith(forbidden) and dependency not in allowed}
+
+
 def local_import_graph():
     sources = {}
     for path in APP_DIRECTORY.rglob("*.py"):
@@ -63,9 +79,9 @@ class ArchitectureTests(unittest.TestCase):
                 forbidden = ("backend.app.ai.agent", "backend.app.api", "backend.app.ai.memory",
                              "backend.app.ai.context", "backend.app.ai.compat")
             elif module.startswith("backend.app.ai.actions."):
-                forbidden = ("backend.app.ai.agent", "backend.app.ai.context", "backend.app.ai.observations",
-                             "backend.app.ai.memory", "backend.app.ai.compat", "backend.app.api",
-                             "backend.app.planner", "backend.app.integrations", "backend.app.database")
+                with self.subTest(module=module):
+                    self.assertFalse(forbidden_action_imports(module, dependencies))
+                continue
             elif module.startswith("backend.app.infrastructure."):
                 forbidden = ("backend.app.ai", "backend.app.api", "backend.app.planner",
                              "backend.app.integrations", "backend.app.screen_time")
@@ -85,6 +101,33 @@ class ArchitectureTests(unittest.TestCase):
             with self.subTest(module=module):
                 self.assertFalse({dependency for dependency in dependencies
                                   if dependency.startswith(forbidden) and dependency not in allowed})
+
+    def test_only_named_tool_adapters_may_import_their_matching_service(self):
+        for adapter, service in (
+            ("activity_tool", "activity_service"), ("exam_tool", "exam_service"),
+        ):
+            module = f"backend.app.ai.actions.{adapter}"
+            with self.subTest(adapter=adapter):
+                self.assertFalse(forbidden_action_imports(module, {
+                    f"backend.app.planner.{service}", "backend.app.ai.actions.contracts",
+                }))
+                other_service = "exam_service" if service == "activity_service" else "activity_service"
+                forbidden = {
+                    f"backend.app.planner.{other_service}", "backend.app.planner.activities",
+                    "backend.app.planner.exams", "backend.app.database", "backend.app.api.activities",
+                    "backend.app.ai.agent.service", "backend.app.ai.context.selection",
+                    "backend.app.ai.observations.activities", "backend.app.ai.memory.recent",
+                    "backend.app.ai.compat.contracts", "backend.app.integrations.canvas_import",
+                }
+                self.assertEqual(forbidden_action_imports(module, forbidden), forbidden)
+
+    def test_core_action_modules_and_unnamed_adapters_cannot_import_services(self):
+        services = {"backend.app.planner.activity_service", "backend.app.planner.exam_service"}
+        for name in ("contracts", "tools", "registry", "routing", "approval", "execution", "planning",
+                     "other_tool", "activity_tool.extra"):
+            with self.subTest(module=name):
+                self.assertEqual(forbidden_action_imports(f"backend.app.ai.actions.{name}", services),
+                                 services)
 
     def test_storage_and_planning_have_no_reverse_dependency(self):
         graph = local_import_graph()

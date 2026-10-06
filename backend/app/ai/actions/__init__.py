@@ -1,1 +1,1 @@
-"""Contracts for proposed app actions."""
+"""Proposal, approval and execution boundaries; no real tool handlers yet."""

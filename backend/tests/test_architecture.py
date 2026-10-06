@@ -62,6 +62,10 @@ class ArchitectureTests(unittest.TestCase):
                     allowed = {"backend.app.ai.memory.search"}
                 forbidden = ("backend.app.ai.agent", "backend.app.api", "backend.app.ai.memory",
                              "backend.app.ai.context", "backend.app.ai.compat")
+            elif module.startswith("backend.app.ai.actions."):
+                forbidden = ("backend.app.ai.agent", "backend.app.ai.context", "backend.app.ai.observations",
+                             "backend.app.ai.memory", "backend.app.ai.compat", "backend.app.api",
+                             "backend.app.planner", "backend.app.integrations", "backend.app.database")
             elif module.startswith("backend.app.infrastructure."):
                 forbidden = ("backend.app.ai", "backend.app.api", "backend.app.planner",
                              "backend.app.integrations", "backend.app.screen_time")

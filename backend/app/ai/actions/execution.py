@@ -32,8 +32,14 @@ class ActionExecutor:
         except ToolExecutionUnavailableError:
             result = self._failure(proposal.id, "Execution is not available for this tool.")
         except Exception:
+            # The handler may have changed state before raising, or its return
+            # value may have failed result validation. Neither proves rollback.
             # Do not expose tool internals, arguments, SQL or raw exception text.
-            result = self._failure(proposal.id, "The tool could not complete the action.")
+            result = ActionResult(
+                proposal_id=proposal.id, success=False,
+                error="The tool outcome could not be confirmed.",
+                message="The action's outcome is unconfirmed. Check the app before trying again.",
+            )
 
         self.approval.finish_execution(result)
         return result
@@ -42,5 +48,5 @@ class ActionExecutor:
     def _failure(proposal_id, error):
         return ActionResult(
             proposal_id=proposal_id, success=False, error=error,
-            message="The action was not completed.",
+            message="This execution attempt did not run the action.",
         )

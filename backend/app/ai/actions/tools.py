@@ -17,6 +17,10 @@ class ToolExecutionUnavailableError(ActionLayerError):
     pass
 
 
+class ToolOutcomeUnconfirmedError(ActionLayerError):
+    """The handler started; an exception does not prove its changes were undone."""
+
+
 @dataclass(frozen=True)
 class Tool:
     name: str
@@ -53,4 +57,10 @@ class Tool:
     def execute(self, arguments):
         if self.handler is None:
             raise ToolExecutionUnavailableError("Execution is not available for this tool.")
-        return self.handler(self.validate(arguments))
+        validated_arguments = self.validate(arguments)
+        try:
+            return self.handler(validated_arguments)
+        except Exception:
+            # Even a validation-style exception raised INSIDE the handler may
+            # follow a state change. Do not misreport it as a preflight refusal.
+            raise ToolOutcomeUnconfirmedError("The tool outcome could not be confirmed.") from None

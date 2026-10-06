@@ -103,9 +103,13 @@ pending_approval -> approved -> executing -> completed / failed
 - The boundary claims execution under a lock before invoking the handler. Pending,
   rejected, executing, completed and failed proposals cannot execute. Concurrent
   submissions cannot execute the same proposal twice within this boundary.
-- Execution validates tool arguments again. Unknown tools, unavailable execution,
-  invalid inputs and handler errors return controlled failures. Raw exception
-  details are not exposed.
+- Execution validates tool arguments again. Unknown tools, unavailable execution
+  and invalid inputs are preflight refusals: this attempt did not run the action.
+  If a handler raises after starting, or its returned result is not JSON-compatible,
+  the outcome is reported as **unconfirmed**, not as proof that nothing changed.
+  Check application state before proposing another attempt. `success: false` and
+  terminal `failed` mean success was not confirmed; they do not promise rollback.
+  The same proposal cannot be retried. Raw exception details are not exposed.
 - `create_proposal_tool_registry()` reuses `AddActivityArguments` but registers
   **no executable handler**. Even an approved `add_activity` fails safely with
   `Execution is not available for this tool.` No exam/edit/delete tools exist.

@@ -18,7 +18,7 @@ from backend.app.ai.actions.execution import ActionExecutor
 from backend.app.ai.actions.planning import ResponsePlanner
 from backend.app.ai.actions.registry import ToolRegistry, UnknownToolError, create_proposal_tool_registry
 from backend.app.ai.actions.routing import route_agent_output
-from backend.app.ai.actions.tools import Tool
+from backend.app.ai.actions.tools import InvalidToolArgumentsError, Tool, ToolExecutionUnavailableError
 from backend.app.ai.agent.contracts import validate_agent_proposal
 from backend.tests.paths import PROJECT_DIRECTORY
 
@@ -234,6 +234,59 @@ class ActionLayerTests(unittest.TestCase):
         self.handler.return_value = {"not_json": object()}
         self.assertFalse(self.executor.execute(valid.id).success)
         self.assertEqual(self.approval.get(valid.id).status, ActionStatus.FAILED)
+
+    def test_state_change_with_invalid_result_is_reported_as_unconfirmed(self):
+        fake_rows = []
+
+        def handler(arguments):
+            fake_rows.append(arguments)
+            return {"created": object()}
+
+        self.handler.side_effect = handler
+        proposal = self.propose()
+        self.approve(proposal)
+        result = self.executor.execute(proposal.id)
+        self.assertEqual(len(fake_rows), 1)
+        self.assertFalse(result.success)
+        self.assertIsNone(result.result)
+        self.assertIn("unconfirmed", result.message)
+        self.assertIn("Check the app", result.message)
+        self.assertEqual(self.approval.get(proposal.id).status, ActionStatus.FAILED)
+        self.assertFalse(self.executor.execute(proposal.id).success)
+        self.assertEqual(len(fake_rows), 1)
+        json.dumps(result.model_dump(mode="json"))
+
+    def test_handler_errors_after_state_change_are_never_preflight_refusals(self):
+        for error_type in (RuntimeError, UnknownToolError, InvalidToolArgumentsError,
+                           ToolExecutionUnavailableError):
+            with self.subTest(error_type=error_type):
+                fake_rows = []
+
+                def handler(arguments):
+                    fake_rows.append(arguments)
+                    raise error_type("private details")
+
+                self.handler.side_effect = handler
+                proposal = self.propose()
+                self.approve(proposal)
+                result = self.executor.execute(proposal.id)
+                self.assertFalse(result.success)
+                self.assertEqual(result.error, "The tool outcome could not be confirmed.")
+                self.assertIn("unconfirmed", result.message)
+                self.assertNotIn("private details", result.model_dump_json())
+                self.assertEqual(self.approval.get(proposal.id).status, ActionStatus.FAILED)
+                self.assertFalse(self.executor.execute(proposal.id).success)
+                self.assertEqual(len(fake_rows), 1)
+
+    def test_preflight_refusal_reports_that_this_attempt_did_not_run(self):
+        proposal = self.approval.register(ActionProposal(
+            tool_name="fake_action", arguments={"label": 42}, display_title="Fake", display_description="",
+        ))
+        self.approve(proposal)
+        result = self.executor.execute(proposal.id)
+        self.assertEqual(result.error, "The tool arguments are invalid.")
+        self.assertEqual(result.message, "This execution attempt did not run the action.")
+        self.handler.assert_not_called()
 
     def test_existing_add_activity_contract_routes_but_cannot_execute(self):
         arguments = {

@@ -4,17 +4,20 @@ This README explains how to run the project and describes the backend as it
 currently works. The AI agent can **propose** an activity, but cannot yet save
 an AI-proposed activity.
 
-## Stage 8: Action Layer structure
+## Stage 8: Action Layer and first approved tool
 
 `ai/actions` now contains generic proposal/result contracts, explicit tool discovery,
 a minimal router, temporary approve/reject lifecycle, an approval-gated executor
-and a response-planning interface. This is **structure only**: the default
+and a response-planning interface. The default
 `add_activity` registration reuses the existing schema but has no executable
 handler. Normal chat/API responses are unchanged; no approval UI or execution
-endpoint is connected, and no planner data is written by this layer.
+endpoint is connected. Commit 8.2 adds an opt-in `AddActivityTool` and
+`create_activity_tool_registry(connection)` for explicitly approved backend
+execution through the existing Activity service. Normal chat does not call it.
+Tests verify saved creation using disposable SQLite databases only.
 
 See [Action Layer contracts, boundaries and offline tests](ACTIONS.md) for the
-file tree, lifecycle, dependency direction and fake-tool test commands.
+file tree, lifecycle, dependency direction and offline test commands.
 
 ## Multi-conversation AI chat
 

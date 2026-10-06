@@ -1,4 +1,4 @@
-"""Execute only a trusted approved proposal ID; no real planner tools yet."""
+"""Execute only a trusted approved proposal ID using explicitly registered tools."""
 
 from backend.app.ai.actions.approval import ApprovalBoundary
 from backend.app.ai.actions.contracts import ActionLayerError, ActionResult

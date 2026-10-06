@@ -70,7 +70,8 @@ backend/
     │   │   ├── registry.py     # Explicit discovery; default tools are proposal-only
     │   │   ├── routing.py      # Validated agent output -> pending proposal(s); no execution
     │   │   ├── approval.py     # Temporary authoritative approve/reject lifecycle
-    │   │   ├── execution.py    # Approved ID -> registry -> result; fake tools only for now
+    │   │   ├── execution.py    # Approved ID -> trusted registry -> result
+    │   │   ├── activity_tool.py # Opt-in AddActivityTool -> existing Activity service
     │   │   └── planning.py     # ResponsePlanner interface, not implemented
     │   ├── agent/
     │   │   ├── contracts.py    # AgentProposal and validation
@@ -258,10 +259,10 @@ review gates and no-charge evaluation.
 - Durable extraction imports storage; storage does not import the extractor or SDK.
 - Contracts and infrastructure do not import model callers or HTTP modules.
 - Action contracts, registry, routing, approval and execution do not import planner
-  services. Only the reserved future `ai/actions/activity_tool.py` and `exam_tool.py`
+  services. Only `ai/actions/activity_tool.py` and the reserved future `exam_tool.py`
   adapters may import their matching `planner/activity_service.py` or `exam_service.py`.
   The exception does not allow raw CRUD/database imports or reverse planner-to-AI imports,
-  and does not implement or enable tool execution.
+  and does not connect tool execution to the agent or HTTP/UI.
 - The explicit `/ai/test-observation` diagnostic uses the receipt-test utility;
   normal proposals do not run the developer memory trace.
 
@@ -288,7 +289,8 @@ Steps 2–3 were already committed before this batch.
 | 12 | Documentation, compatibility and dependency checks | Make ownership visible and prevent regressions |
 
 The original refactor created no action executor. Stage 8 now provides a
-structural approval-gated executor, with no real handlers or HTTP/UI wiring;
+approval-gated executor and an explicitly registered real `AddActivityTool`,
+with no HTTP/UI wiring;
 the normal agent still only proposes `add_activity`. Activity edits still call `edit_activity` in the same sequence,
 now within one savepoint so a failed logical edit rolls back all its fields.
 Standalone `edit_activity` callers still commit by default. Create returns the ID from the

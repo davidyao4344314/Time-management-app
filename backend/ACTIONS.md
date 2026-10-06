@@ -1,6 +1,7 @@
-# Stage 8: Action Layer structure
+# Stage 8: Action Layer and first approved creation tool
 
-This stage establishes contracts and trusted backend boundaries only. The normal
+This stage establishes contracts and trusted backend boundaries. Commit 8.2 adds
+an explicitly opted-in real `add_activity` tool using the existing service. The normal
 AI request still returns its existing message/actions proposal format and never
 executes a planner tool. There are no approval HTTP routes or confirmation UI yet.
 
@@ -15,6 +16,7 @@ backend/app/ai/actions/
 ├── routing.py        # Existing agent output -> validated pending proposals or reserved route
 ├── approval.py       # Backend-held temporary lifecycle; explicit approve/reject decisions
 ├── execution.py      # Approved ID -> trusted tool -> ActionResult
+├── activity_tool.py  # Opt-in AddActivityTool -> existing Activity service
 └── planning.py       # ResponsePlanner interface only; no implementation or model call
 ```
 
@@ -44,6 +46,46 @@ add/edit/delete conditional chain.
 The current agent/API/SDK schema is intentionally unchanged. A future service
 adapter can pass its validated result to this router after the real confirmation
 workflow is added. No new layer is automatically invoked by today's chat path.
+
+## Commit 8.2: approved activity creation
+
+`AddActivityTool(connection)` is a trusted `Tool` adapter. The caller owns the
+SQLite connection and explicitly opts in using `create_activity_tool_registry(connection)`.
+It registers only `add_activity` through the existing `ToolRegistry`. The default
+`create_proposal_tool_registry()` remains non-executable. Constructing either
+registry creates no database rows and opens no connection.
+
+The public input remains `AddActivityArguments`: `name`, `category`, `subject`,
+`activity_type`, `date`, `weekday`, `start_time`, `end_time`. All keys are required;
+unused/optional values are null. It does not expose source/external IDs, active
+date ranges, SQL, paths or persistence objects. No schema is sent to an LLM.
+
+```text
+backend-held approved proposal ID
+    -> ActionExecutor
+    -> ToolRegistry resolves AddActivityTool
+    -> existing AddActivityArguments validates the contract
+    -> activity_service.prepare_new_activity validates/prepares domain fields
+    -> activity_service.create_activity_record
+    -> existing add_activity + get_activity_by_id
+    -> ActionResult(success=true, result={"activity_id": new_id})
+```
+
+Contract validation rejects missing/extra fields, invalid recurrence/date/time
+values, and an end time not later than a start time. The existing service remains
+responsible for domain preparation and validation; the adapter contains no SQL
+or copied business rules. Creation uses the existing commit behavior and schema
+defaults (`source="Manual"`, `external_id=NULL`). Date-only activities retain null times.
+
+Tests register a pending proposal, explicitly approve it through `ApprovalBoundary`,
+then execute only its ID. Supplying an object with `status="approved"` is not an
+approval mechanism. Pending/rejected proposals never reach the service; completed
+or failed proposals cannot execute again within the same boundary.
+
+This is a backend-only deterministic path. No chat/LLM integration, HTTP execution
+route, confirmation UI, exam/edit/delete tool, or durable approval storage is added.
+Handler/service failures use the existing sanitized unconfirmed-outcome behavior;
+a failed post-insert read must not be reported as proof that no row was created.
 
 ## Proposal and result contracts
 
@@ -133,14 +175,13 @@ future execution adapter -> executor -> approval + registry/tools -> contracts
 future response-planning implementation -> ResponsePlanner interface
 ```
 
-Nothing in `ai/actions` imports the agent reasoner, context selection, observations,
-memory, HTTP, SQLite, planner CRUD or OpenAI. No reverse imports/cycles were added.
-Later trusted tool handlers can delegate to existing planner services without
-putting SQL, approval decisions or model reasoning into the tools' public contracts.
-Architecture tests reserve two exact future adapter-module exceptions:
+Core `ai/actions` modules do not import the agent reasoner, context selection,
+observations, memory, HTTP, SQLite, planner CRUD or OpenAI. The activity adapter
+delegates to an existing planner service; no reverse imports/cycles were added.
+Architecture tests allow only two exact adapter-module exceptions:
 `ai/actions/activity_tool.py` may import `planner/activity_service.py`, and
-`ai/actions/exam_tool.py` may import `planner/exam_service.py`. Neither adapter is
-implemented or registered yet. Other action modules remain unable to import
+future `ai/actions/exam_tool.py` may import `planner/exam_service.py`. The activity
+adapter is implemented; the exam adapter is not. Other action modules remain unable to import
 planner services; even these adapters cannot import raw CRUD/database, HTTP,
 reasoning, context, observation or memory modules. Planner services must not import
 the action layer. This keeps the future delegation direction explicit and acyclic.
@@ -152,12 +193,16 @@ From the project root:
 ```bash
 backend/.venv/bin/python -B -m unittest backend.tests.ai.test_action_contracts -v
 backend/.venv/bin/python -B -m unittest backend.tests.ai.test_action_layer -v
+backend/.venv/bin/python -B -m unittest backend.tests.ai.test_add_activity_tool -v
 backend/.venv/bin/python -B -m unittest discover -s backend/tests -t . -q
 ```
 
-These checks use fake tools, not real planner writes or paid OpenAI calls. They
+Core checks use fake tools. The add-activity tests also exercise the real service
+and CRUD using in-memory/temporary SQLite databases, never the project database.
+There are no paid OpenAI calls. They
 cover pending/approved/rejected lifecycle, no automatic execution, forged snapshots,
 strict tool/schema validation, unknown tools, concurrent/repeated execution,
 safe failures, JSON results, response-plan placeholders and existing schema/import
-compatibility. Real Activity/Exam tool execution, persistent proposals, approval
+compatibility, approved creation/persistence, domain validation, refused pending/rejected
+creation and no duplicate replay. Exam/edit/delete tool execution, persistent proposals, approval
 endpoints/UI, complex planning and loops are intentionally left for later stages.

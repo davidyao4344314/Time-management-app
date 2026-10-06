@@ -10,11 +10,16 @@ an AI-proposed activity.
 a minimal router, temporary approve/reject lifecycle, an approval-gated executor
 and a response-planning interface. The default
 `add_activity` registration reuses the existing schema but has no executable
-handler. Normal chat/API responses are unchanged; no approval UI or execution
-endpoint is connected. Commit 8.2 adds an opt-in `AddActivityTool` and
+handler. Normal chat/API responses are unchanged. Commit 8.2 adds an opt-in `AddActivityTool` and
 `create_activity_tool_registry(connection)` for explicitly approved backend
 execution through the existing Activity service. Normal chat does not call it.
 Tests verify saved creation using disposable SQLite databases only.
+Commit 8.3 adds a generic Proposed changes panel with Confirm/Cancel on AI Agent,
+and owner-scoped `/actions/proposals` APIs. It uses backend-held arguments and
+the existing executor, not direct frontend activity creation. Chat/LLM actions
+are **not connected yet**. The sample proposal source is opt-in via
+`ACTION_LAYER_DEV_MODE=1`; confirming it saves a real local test activity.
+See ACTIONS.md for the test command and temporary-state/restart limitations.
 
 See [Action Layer contracts, boundaries and offline tests](ACTIONS.md) for the
 file tree, lifecycle, dependency direction and offline test commands.

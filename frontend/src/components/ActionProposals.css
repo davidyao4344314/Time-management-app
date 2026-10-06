@@ -1,0 +1,32 @@
+.action-proposal-panel {
+  margin-block: 1.5rem;
+  padding: 1rem;
+  border: 1px solid #dddddd;
+  border-radius: 0.75rem;
+}
+
+.action-proposal-card {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid #dddddd;
+  border-radius: 0.5rem;
+  background: #f7f7fb;
+  overflow-wrap: anywhere;
+}
+
+.action-proposal-card h4 {
+  margin-block: 0 0.75rem;
+  color: #11104f;
+}
+
+.action-proposal-description {
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+.action-proposal-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}

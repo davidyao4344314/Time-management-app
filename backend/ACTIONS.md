@@ -1,9 +1,10 @@
-# Stage 8: Action Layer and first approved creation tool
+# Stage 8: Action Layer, approved creation and user confirmation
 
 This stage establishes contracts and trusted backend boundaries. Commit 8.2 adds
 an explicitly opted-in real `add_activity` tool using the existing service. The normal
 AI request still returns its existing message/actions proposal format and never
-executes a planner tool. There are no approval HTTP routes or confirmation UI yet.
+executes a planner tool. Commit 8.3 adds a generic approval UI/API for manually
+created backend proposals; chat/model output is still not connected to it.
 
 ## Structure and responsibility
 
@@ -17,6 +18,7 @@ backend/app/ai/actions/
 ├── approval.py       # Backend-held temporary lifecycle; explicit approve/reject decisions
 ├── execution.py      # Approved ID -> trusted tool -> ActionResult
 ├── activity_tool.py  # Opt-in AddActivityTool -> existing Activity service
+├── service.py        # Owner-scoped presentation and decisions; temporary state
 └── planning.py       # ResponsePlanner interface only; no implementation or model call
 ```
 
@@ -30,7 +32,7 @@ validated agent result
              -> none: normal response
              -> response_plan: interface reserved for later
              -> tool_action: pending ActionProposal(s)
-                                  -> explicit user decision (future HTTP/UI adapter)
+                                  -> explicit user decision
                                        -> reject: no execution
                                        -> approve: ActionExecutor.execute(proposal_id)
                                             -> trusted registry handler -> ActionResult
@@ -44,8 +46,8 @@ and never executes tools. Extra action fields such as `status`, `id` or
 add/edit/delete conditional chain.
 
 The current agent/API/SDK schema is intentionally unchanged. A future service
-adapter can pass its validated result to this router after the real confirmation
-workflow is added. No new layer is automatically invoked by today's chat path.
+adapter can pass its validated result to this router in a later step.
+No new layer is automatically invoked by today's chat path.
 
 ## Commit 8.2: approved activity creation
 
@@ -82,10 +84,84 @@ then execute only its ID. Supplying an object with `status="approved"` is not an
 approval mechanism. Pending/rejected proposals never reach the service; completed
 or failed proposals cannot execute again within the same boundary.
 
-This is a backend-only deterministic path. No chat/LLM integration, HTTP execution
-route, confirmation UI, exam/edit/delete tool, or durable approval storage is added.
+Commit 8.2 establishes this deterministic backend path. Commit 8.3 adds manual
+confirmation below, but no chat/LLM integration, exam/edit/delete tool or durable
+approval storage is added.
 Handler/service failures use the existing sanitized unconfirmed-outcome behavior;
 a failed post-insert read must not be reported as proof that no row was created.
+
+## Commit 8.3: generic Confirm / Cancel flow
+
+The AI Agent page has a **Proposed changes** panel. `ActionProposalCard` displays
+the backend's title, description and status without inspecting tool names. It
+never calls the activity API to create data. Existing AI response actions remain
+proposal text in the context inspector; they do not become executable proposals yet.
+
+`ActionProposalService` owns one process-local `ApprovalBoundary`, owner links and
+result receipts. It reuses the existing signed browser-profile identity; no owner
+ID is accepted in request bodies. Proposals belong to that profile, not a chat.
+Unknown and foreign IDs both return 404. Public views contain only:
+
+```json
+{
+  "id": "backend-generated-uuid",
+  "display_title": "Add Activity",
+  "display_description": "The exact proposed change",
+  "status": "pending_approval",
+  "requires_approval": true,
+  "result": null
+}
+```
+
+The backend keeps tool arguments private and immutable behind the boundary.
+The `result` field becomes the existing `ActionResult` after execution, not a
+second result schema. Responses are not cached by the browser.
+
+| Endpoint | Behavior |
+| --- | --- |
+| `GET /actions/proposals` | List the verified owner's display views and `dev_enabled` |
+| `GET /actions/proposals/{id}` | Read one owned proposal/status/result |
+| `POST /actions/proposals/{id}/decision` | Accept only `{"decision":"confirm"}` or `{"decision":"cancel"}` |
+| `POST /actions/dev/proposals` | Accept only `{}`; create a pending sample if `ACTION_LAYER_DEV_MODE=1` |
+
+Confirm verifies owner and pending status, opens the existing database connection,
+approves through `ApprovalBoundary`, then invokes `ActionExecutor` with the trusted
+activity registry. Cancel marks it rejected without opening an activity connection.
+Extra body fields (arguments, tool name, approved status, owner, etc.) are rejected.
+The service serializes decisions; repeat or concurrent confirmations return 409
+instead of inserting again. Completed/failed result receipts remain available on
+refresh during this process lifetime. Connection-open failure leaves the proposal pending.
+
+The UI disables both controls during a decision and never retries automatically.
+If a network/API error makes the outcome uncertain, refresh authoritative status
+before making another decision. Failed tool results retain the existing warning
+that state might have changed; a failure does not promise rollback.
+
+### Manual testing without an LLM
+
+Stop the existing backend before restarting it from the project root:
+
+```bash
+ACTION_LAYER_DEV_MODE=1 backend/.venv/bin/python -m uvicorn backend.app.server:app --reload --port 8001
+```
+
+Run the frontend normally (`cd frontend`, then `npm run dev`). Open **AI Agent**:
+
+1. Under Proposed changes, click **Create test proposal**. No activity is saved.
+2. Click **Cancel**; status becomes rejected and nothing is created.
+3. Create another test proposal and click **Confirm**. One real test activity named
+   `Study Maths (approval test)` is saved; the card shows the executor result.
+4. Refresh proposals/the page. The completed card must not offer Confirm again.
+5. Open Activities/Calendar to verify the saved test activity on today's date at
+   19:00–20:00. Remove it through the existing activity controls when finished.
+6. A separate browser profile must not see/confirm the first profile's proposals.
+
+This test uses your actual local database **only when you Confirm**. It makes no
+OpenAI request. Automated tests instead use disposable databases and identities.
+Start the backend without `ACTION_LAYER_DEV_MODE=1` to hide/disable the sample source.
+Restart/reload discards pending proposals and receipts; saved activities remain.
+Use a single backend process for this local stage. This is not durable workflow
+storage, multi-worker coordination or a restart-safe exactly-once guarantee.
 
 ## Proposal and result contracts
 
@@ -158,10 +234,10 @@ pending_approval -> approved -> executing -> completed / failed
   **no executable handler**. Even an approved `add_activity` fails safely with
   `Execution is not available for this tool.` No exam/edit/delete tools exist.
 - Approval state is temporary and instance-scoped, not persistent or global. A
-  restart loses it. No UI/API can approve or execute it in this stage. A future
-  HTTP adapter must enforce authenticated owner/conversation access, persist
-  proposals/decisions as needed, and never accept client-supplied approved objects.
-  This is not a production execution endpoint or a durable exactly-once guarantee.
+  restart loses it. The generic HTTP adapter enforces signed profile ownership,
+  never accepts client-supplied approved objects, and only executes through the
+  existing boundary. Persistent proposals and chat/model integration remain deferred.
+  This is not a durable exactly-once guarantee or a multi-user permissions framework.
 
 Tools expose only name, description and input schema. Handlers are trusted
 explicit backend registrations, never supplied by the LLM or dynamically imported.
@@ -170,8 +246,9 @@ explicit backend registrations, never supplied by the LLM or dynamically importe
 
 ```text
 future agent/service adapter -> routing -> registry/tools + approval -> contracts
-future explicit approval adapter -> approval -> contracts
-future execution adapter -> executor -> approval + registry/tools -> contracts
+api/actions -> owner-scoped service -> approval -> contracts
+api/actions supplies execution resources -> executor -> approval + registry/tools -> contracts
+activity_tool -> planner/activity_service -> existing CRUD
 future response-planning implementation -> ResponsePlanner interface
 ```
 
@@ -194,6 +271,7 @@ From the project root:
 backend/.venv/bin/python -B -m unittest backend.tests.ai.test_action_contracts -v
 backend/.venv/bin/python -B -m unittest backend.tests.ai.test_action_layer -v
 backend/.venv/bin/python -B -m unittest backend.tests.ai.test_add_activity_tool -v
+backend/.venv/bin/python -B -m unittest backend.tests.ai.test_action_approval_api -v
 backend/.venv/bin/python -B -m unittest discover -s backend/tests -t . -q
 ```
 
@@ -204,5 +282,8 @@ cover pending/approved/rejected lifecycle, no automatic execution, forged snapsh
 strict tool/schema validation, unknown tools, concurrent/repeated execution,
 safe failures, JSON results, response-plan placeholders and existing schema/import
 compatibility, approved creation/persistence, domain validation, refused pending/rejected
-creation and no duplicate replay. Exam/edit/delete tool execution, persistent proposals, approval
-endpoints/UI, complex planning and loops are intentionally left for later stages.
+creation and no duplicate replay, owner isolation, argument tampering, status refresh,
+concurrent confirmations and the opt-in sample source. Frontend `npm test` covers
+the actual generic card and hook; `npm run build` and `npm run lint` check integration.
+LLM wiring, exam/edit/delete tools, persistent proposals, complex planning and loops
+are intentionally left for later stages.

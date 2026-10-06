@@ -72,6 +72,7 @@ backend/
     │   │   ├── approval.py     # Temporary authoritative approve/reject lifecycle
     │   │   ├── execution.py    # Approved ID -> trusted registry -> result
     │   │   ├── activity_tool.py # Opt-in AddActivityTool -> existing Activity service
+    │   │   ├── service.py      # Owner-scoped views/decisions; temporary approval state
     │   │   └── planning.py     # ResponsePlanner interface, not implemented
     │   ├── agent/
     │   │   ├── contracts.py    # AgentProposal and validation
@@ -129,6 +130,7 @@ backend/
     │   ├── exams.py           # Exam CRUD HTTP endpoints
     │   ├── calendar.py        # Today/current/week/move HTTP endpoints
     │   ├── imports.py         # Canvas/UoA status/import HTTP endpoints
+    │   ├── actions.py         # Generic proposal list/decision APIs; opt-in sample source
     │   └── common.py          # Existing row formatting/time adapters
     ├── infrastructure/
     │   ├── paths.py           # Stable project/backend locations
@@ -139,6 +141,7 @@ backend/
     │   └── module_compat.py   # Temporary legacy-name forwarding
     └── dev/
         ├── memory_debug.py    # Explicit disposable fake-data trace
+        ├── action_proposals.py # Opt-in pending sample, never automatic execution
         └── observation_smoke.py # Explicit observation receipt test
 ```
 
@@ -262,7 +265,8 @@ review gates and no-charge evaluation.
   services. Only `ai/actions/activity_tool.py` and the reserved future `exam_tool.py`
   adapters may import their matching `planner/activity_service.py` or `exam_service.py`.
   The exception does not allow raw CRUD/database imports or reverse planner-to-AI imports,
-  and does not connect tool execution to the agent or HTTP/UI.
+  and does not connect tool execution to the agent reasoner. The HTTP action adapter
+  supplies execution resources to the owner-scoped service; only explicit Confirm executes.
 - The explicit `/ai/test-observation` diagnostic uses the receipt-test utility;
   normal proposals do not run the developer memory trace.
 
@@ -288,9 +292,9 @@ Steps 2–3 were already committed before this batch.
 | 11 | Existing activity validation/use cases extracted | Future approved tools can reuse validation and CRUD without copying HTTP code |
 | 12 | Documentation, compatibility and dependency checks | Make ownership visible and prevent regressions |
 
-The original refactor created no action executor. Stage 8 now provides a
+The original refactor created no action executor. Stage 8 now provides an
 approval-gated executor and an explicitly registered real `AddActivityTool`,
-with no HTTP/UI wiring;
+with generic owner-scoped HTTP/UI confirmation for manually created proposals;
 the normal agent still only proposes `add_activity`. Activity edits still call `edit_activity` in the same sequence,
 now within one savepoint so a failed logical edit rolls back all its fields.
 Standalone `edit_activity` callers still commit by default. Create returns the ID from the

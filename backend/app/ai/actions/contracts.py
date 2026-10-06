@@ -1,10 +1,12 @@
-"""Validate proposed activity actions; no execution or database access."""
+"""Action/proposal contracts; no execution, storage or provider dependencies."""
 
 import re
 from datetime import date, datetime
+from enum import Enum
 from typing import Literal
+from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 
 WEEKDAYS = {"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"}
@@ -66,3 +68,78 @@ class AddActivityAction(BaseModel):
 
     tool: Literal["add_activity"]
     arguments: AddActivityArguments
+
+
+class ActionRoute(str, Enum):
+    NONE = "none"
+    TOOL_ACTION = "tool_action"
+    RESPONSE_PLAN = "response_plan"
+
+
+class ActionStatus(str, Enum):
+    PENDING_APPROVAL = "pending_approval"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    EXECUTING = "executing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class ApprovalDecision(str, Enum):
+    APPROVE = "approve"
+    REJECT = "reject"
+
+
+class ToolActionRequest(BaseModel):
+    """Public tool request only: the model cannot supply approval or identity."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    tool: str = Field(min_length=1)
+    arguments: dict[str, JsonValue]
+
+
+class ActionProposal(BaseModel):
+    """Backend-created display snapshot, not proof of a user's approval."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+    id: str = Field(default_factory=lambda: str(uuid4()), min_length=1)
+    action_type: Literal["tool_action"] = "tool_action"
+    tool_name: str = Field(min_length=1)
+    arguments: dict[str, JsonValue]
+    display_title: str = Field(min_length=1)
+    display_description: str
+    status: ActionStatus = ActionStatus.PENDING_APPROVAL
+    requires_approval: Literal[True] = True
+
+
+class ActionResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+    proposal_id: str = Field(min_length=1)
+    success: bool
+    result: dict[str, JsonValue] | None = None
+    error: str | None = None
+    message: str
+
+    @model_validator(mode="after")
+    def consistent_outcome(self):
+        if self.success and self.error is not None:
+            raise ValueError("Successful actions cannot also have an error.")
+        if not self.success and (not self.error or self.result is not None):
+            raise ValueError("Failed actions need an error and no success result.")
+        return self
+
+
+class ActionRoutingResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+    route: ActionRoute
+    proposals: list[ActionProposal] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def consistent_route(self):
+        if (self.route == ActionRoute.TOOL_ACTION) != bool(self.proposals):
+            raise ValueError("Only the tool-action route contains proposals.")
+        return self
+
+
+class ActionLayerError(ValueError):
+    """Controlled boundary error; never contains raw model/provider exceptions."""

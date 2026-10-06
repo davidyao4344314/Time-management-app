@@ -25,6 +25,7 @@ from backend.app.ai.agent.contracts import AgentProposal, InvalidProposalError
 from backend.app.ai.agent.tool_calls import public_agent_tools
 from backend.app.conversations import service as chats
 from backend.app.infrastructure import identity
+from backend.app.planner import activities
 
 
 ARGUMENTS = {"name": "COMPSCI revision", "category": "Study", "subject": "COMPSCI 130",
@@ -44,7 +45,7 @@ def native_response(*, name="add_activity", arguments=None, text=None, **call_fi
 class NativeToolRequestTests(unittest.TestCase):
     def test_only_schema_is_public_and_tool_choice_is_optional(self):
         tools = public_agent_tools()
-        self.assertEqual(len(tools), 1)
+        self.assertEqual(len(tools), 2)
         tool = tools[0]
         self.assertEqual(tool["name"], "add_activity")
         self.assertEqual(set(tool), {"type", "name", "description", "parameters", "strict"})
@@ -53,6 +54,13 @@ class NativeToolRequestTests(unittest.TestCase):
         self.assertFalse(tool["parameters"]["additionalProperties"])
         self.assertTrue(tool["strict"])
         self.assertIsNone(create_proposal_tool_registry().resolve("add_activity").handler)
+        delete_tool = tools[1]
+        self.assertEqual(delete_tool["name"], "delete_activity")
+        self.assertEqual(set(delete_tool["parameters"]["properties"]), {"activity_id", "expected_name"})
+        self.assertEqual(set(delete_tool["parameters"]["required"]), {"activity_id", "expected_name"})
+        self.assertFalse(delete_tool["parameters"]["additionalProperties"])
+        self.assertTrue(delete_tool["strict"])
+        self.assertIsNone(create_proposal_tool_registry().resolve("delete_activity").handler)
         client = Mock()
         reasoning.request_agent_response(client, "Hello", {}, [],
                                          {"model": "test-model", "reasoning_effort": "none"}, 1200)
@@ -74,7 +82,7 @@ class NativeToolRequestTests(unittest.TestCase):
         self.assertEqual(mixed["actions"], tool_only["actions"])
 
     def test_invalid_unknown_or_tampered_calls_are_controlled(self):
-        invalid = [native_response(name="delete_activity"), native_response(arguments={}),
+        invalid = [native_response(name="delete_exam"), native_response(arguments={}),
                    native_response(arguments={**ARGUMENTS, "status": "approved"}),
                    native_response(arguments={**ARGUMENTS, "external_id": "model-controlled"}),
                    native_response(arguments={**ARGUMENTS, "date": "2026-02-30"}),
@@ -122,6 +130,24 @@ class NativeToolRequestTests(unittest.TestCase):
                                              {"model": "test-model", "reasoning_effort": "none"}, 1200)
         self.assertNotIn("private raw", str(raised.exception))
 
+    def test_native_delete_request_is_only_a_proposal(self):
+        arguments = {"activity_id": 12, "expected_name": "Study"}
+        result = reasoning.parse_agent_response(native_response(name="delete_activity", arguments=arguments))
+        self.assertEqual(result["actions"], [{"tool": "delete_activity", "arguments": arguments}])
+        self.assertIn("Nothing is deleted until you confirm", result["message"])
+        for bad in ({"activity_id": 12}, {**arguments, "activity_id": True},
+                    {**arguments, "activity_id": "12"}, {**arguments, "approved": True}):
+            with self.subTest(arguments=bad), self.assertRaises(InvalidProposalError):
+                reasoning.parse_agent_response(native_response(name="delete_activity", arguments=bad))
+
+    def test_sdk_parses_delete_native_call_without_running_a_handler(self):
+        arguments = {"activity_id": 12, "expected_name": "Study"}
+        raw = Response.model_construct(status="completed", output=[ResponseFunctionToolCall(
+            type="function_call", name="delete_activity", arguments=json.dumps(arguments),
+            call_id="delete-sdk-call", status="completed")])
+        parsed = parse_response(response=raw, input_tools=public_agent_tools(), text_format=AgentProposal)
+        self.assertEqual(reasoning.parse_agent_response(parsed)["actions"][0]["arguments"], arguments)
+
 
 class ModelChatApprovalTests(unittest.TestCase):
     def setUp(self):
@@ -160,6 +186,15 @@ class ModelChatApprovalTests(unittest.TestCase):
     def rows(self):
         with closing(sqlite3.connect(self.path)) as connection:
             return connection.execute("SELECT * FROM activities").fetchall()
+
+    def seed_delete_target(self, **changes):
+        fields = {**ARGUMENTS, "name": "Study", **changes}
+        with closing(sqlite3.connect(self.path)) as connection:
+            identifier = activities.add_activity(connection, list(fields), list(fields.values()))
+        self.model.return_value = native_response(name="delete_activity", arguments={
+            "activity_id": identifier, "expected_name": "Study"})
+        self.request["message"] = f"Delete activity ID {identifier}: Study."
+        return identifier
 
     def test_model_request_waits_for_confirmation_then_creates_once(self):
         self.assertEqual(self.send().status_code, 200)
@@ -226,7 +261,7 @@ class ModelChatApprovalTests(unittest.TestCase):
         self.connect.assert_not_called()
 
     def test_invalid_model_request_is_502_without_proposals_or_activity_writes(self):
-        for response in (native_response(name="delete_activity"), native_response(arguments={}),
+        for response in (native_response(name="delete_exam"), native_response(arguments={}),
                          native_response(arguments={**ARGUMENTS, "approved": True})):
             with self.subTest(response=response):
                 self.request["request_id"] = str(uuid4())
@@ -246,6 +281,88 @@ class ModelChatApprovalTests(unittest.TestCase):
         self.assertEqual(self.rows(), [])
         self.model.assert_called_once()
         self.connect.assert_not_called()
+
+    def test_native_deletion_waits_for_owned_confirmation_and_deletes_exactly_one(self):
+        identifier = self.seed_delete_target()
+        with closing(sqlite3.connect(self.path)) as connection:
+            other_id = activities.add_activity(connection, list(ARGUMENTS), list({**ARGUMENTS, "name": "Study"}.values()))
+        response = self.send()
+        self.assertEqual(response.status_code, 200)
+        view = self.proposals()[0]
+        self.assertEqual(view["display_title"], "Delete Activity")
+        self.assertEqual(view["status"], "pending_approval")
+        self.assertIn(f"Id: {identifier}", view["display_description"])
+        self.assertIn("Subject: COMPSCI 130", view["display_description"])
+        self.assertIn("cannot be undone", view["display_description"])
+        self.assertEqual(len(self.rows()), 2)
+        self.connect.assert_not_called()
+        # Saved transcript refresh/replay does not recreate executable authority.
+        self.assertEqual(self.send().status_code, 200)
+        self.assertEqual(self.proposals(), [view])
+        path = f"/actions/proposals/{view['id']}/decision"
+        self.assertEqual(self.other.post(path, json={"decision": "confirm"}).status_code, 404)
+        confirmed = self.client.post(path, json={"decision": "confirm"})
+        self.assertEqual(confirmed.status_code, 200)
+        self.assertTrue(confirmed.json()["result"]["success"])
+        self.assertEqual(confirmed.json()["result"]["result"], {"activity_id": identifier, "deleted": True})
+        self.assertEqual([row[0] for row in self.rows()], [other_id])
+        self.assertEqual(self.client.post(path, json={"decision": "confirm"}).status_code, 409)
+        self.model.assert_called_once()
+        self.connect.assert_called_once()
+
+    def test_native_deletion_cancel_leaves_activity_unchanged(self):
+        self.seed_delete_target()
+        before = self.rows()
+        self.assertEqual(self.send().status_code, 200)
+        view = self.proposals()[0]
+        cancelled = self.client.post(f"/actions/proposals/{view['id']}/decision", json={"decision": "cancel"})
+        self.assertEqual(cancelled.json()["status"], "rejected")
+        self.assertEqual(self.rows(), before)
+        self.connect.assert_not_called()
+
+    def test_ghost_or_incorrect_name_does_not_create_a_deletion_proposal(self):
+        identifier = self.seed_delete_target()
+        for arguments in ({"activity_id": 999, "expected_name": "Study"},
+                          {"activity_id": identifier, "expected_name": "Wrong activity"}):
+            with self.subTest(arguments=arguments):
+                self.request["request_id"] = str(uuid4())
+                self.model.return_value = native_response(name="delete_activity", arguments=arguments)
+                self.assertEqual(self.send().status_code, 502)
+                self.assertEqual(self.proposals(), [])
+                self.assertEqual(len(self.rows()), 1)
+        self.connect.assert_not_called()
+
+    def test_renamed_activity_after_proposal_is_not_deleted(self):
+        identifier = self.seed_delete_target()
+        self.assertEqual(self.send().status_code, 200)
+        view = self.proposals()[0]
+        with closing(sqlite3.connect(self.path)) as connection:
+            activities.edit_activity(connection, identifier, "name", "Renamed Study")
+        confirmed = self.client.post(f"/actions/proposals/{view['id']}/decision", json={"decision": "confirm"})
+        self.assertEqual(confirmed.status_code, 200)
+        self.assertEqual(confirmed.json()["status"], "failed")
+        self.assertFalse(confirmed.json()["result"]["success"])
+        self.assertIn("name no longer matches", confirmed.json()["result"]["error"])
+        self.assertEqual(self.rows()[0][1], "Renamed Study")
+
+    def test_recovery_can_supply_ids_before_a_delete_proposal_without_writing(self):
+        identifier = self.seed_delete_target(activity_type="weekly", date=None, weekday="Monday", source="UoA",
+                                           external_id="not-for-the-model")
+        deletion = self.model.return_value
+        self.model.side_effect = [SimpleNamespace(status="completed", output=[], output_parsed={
+            "message": None, "actions": [], "missing_context": [{"source": "activities", "time_scope": "all"}]}), deletion]
+        self.assertEqual(self.send().status_code, 200)
+        final_input = json.loads(self.model.call_args_list[-1].kwargs["input"][-1]["content"])
+        observed = final_input["observations"]["activities"]["all_activities"][0]
+        self.assertEqual(observed["id"], identifier)
+        self.assertEqual(observed["activity_type"], "weekly")
+        self.assertNotIn("external_id", observed)
+        self.assertEqual(len(self.rows()), 1)
+        self.connect.assert_not_called()
+        view = self.proposals()[0]
+        self.assertIn("entire recurring activity", view["display_description"])
+        self.assertIn("Source: UoA", view["display_description"])
+        self.assertNotIn("not-for-the-model", view["display_description"])
 
 
 if __name__ == "__main__":

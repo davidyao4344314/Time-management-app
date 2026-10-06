@@ -16,7 +16,7 @@ import json
 class ContextCorrectnessTests(unittest.TestCase):
     def test_limited_details_keep_all_busy_dates(self):
         def occurrences(connection, start):
-            return [{'id':number, 'name':f'Class {number}',
+            return [{'id':number, 'name':f'Class {number}', 'activity_type':'weekly',
                      'calendar_date':(start + timedelta(days=day)).isoformat(),
                      'start_time':f'{number+9:02}:00', 'end_time':f'{number+10:02}:00'}
                     for day in range(7) for number in range(4)]

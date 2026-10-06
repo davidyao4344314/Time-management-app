@@ -3,7 +3,7 @@
 from backend.app.ai.actions.approval import ApprovalBoundary
 from backend.app.ai.actions.contracts import ActionLayerError, ActionResult
 from backend.app.ai.actions.registry import ToolRegistry, UnknownToolError
-from backend.app.ai.actions.tools import InvalidToolArgumentsError, ToolExecutionUnavailableError
+from backend.app.ai.actions.tools import InvalidToolArgumentsError, ToolExecutionUnavailableError, ToolPreconditionError
 
 
 class ActionExecutor:
@@ -33,6 +33,8 @@ class ActionExecutor:
             result = self._failure(proposal.id, "The tool arguments are invalid.")
         except ToolExecutionUnavailableError:
             result = self._failure(proposal.id, "Execution is not available for this tool.")
+        except ToolPreconditionError as error:
+            result = self._failure(proposal.id, str(error))
         except Exception:
             # The handler may have changed state before raising, or its return
             # value may have failed result validation. Neither proves rollback.

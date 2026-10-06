@@ -1,6 +1,6 @@
 """Explicit tool discovery; no dynamic imports or planner tool handlers."""
 
-from backend.app.ai.actions.contracts import ActionLayerError, AddActivityArguments
+from backend.app.ai.actions.contracts import ActionLayerError, AddActivityArguments, DeleteActivityArguments
 from backend.app.ai.actions.tools import Tool
 
 
@@ -36,5 +36,10 @@ def create_proposal_tool_registry():
         name="add_activity",
         description="Propose a new activity for user confirmation. This request never saves it automatically.",
         arguments_model=AddActivityArguments,
+    ))
+    registry.register(Tool(
+        name="delete_activity",
+        description="Propose permanently deleting ONE existing activity by ID and exact name. Requires separate user confirmation. For daily/weekly activities this removes the entire recurring record, not one occurrence. Never delete by a guessed ID/name or delete all.",
+        arguments_model=DeleteActivityArguments,
     ))
     return registry

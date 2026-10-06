@@ -1,8 +1,9 @@
 # Study Planning App
 
 This README explains how to run the project and describes the backend as it
-currently works. The AI agent can **propose** an activity. It is saved only when
-the user separately clicks **Confirm** on its pending proposal, never automatically.
+currently works. The AI agent can **propose** adding or deleting one activity.
+SQLite changes only when the user separately clicks **Confirm** on its pending
+proposal, never automatically.
 
 ## Stage 8: Action Layer and first approved tool
 
@@ -17,7 +18,9 @@ Tests verify saved creation using disposable SQLite databases only.
 Commit 8.3 adds a generic Proposed changes panel with Confirm/Cancel on AI Agent,
 and owner-scoped `/actions/proposals` APIs. It uses backend-held arguments and
 the existing executor, not direct frontend activity creation. Commit 8.4 connects
-native model `add_activity` requests to pending proposals in this same panel.
+native model tool requests to pending proposals in this same panel. The tools now
+include `delete_activity` for one current ID/name. Its review card uses actual
+database details and warns that recurring deletion removes the whole activity.
 Ordinary replies need no tool; unknown/invalid calls fail safely. Model requests
 never approve or execute. The sample proposal source remains opt-in via
 `ACTION_LAYER_DEV_MODE=1`; confirming it saves a real local test activity.
@@ -100,7 +103,7 @@ backend/
 │   │   ├── agent/            # Agent coordination, reasoning and contracts
 │   │   ├── context/          # Stage 1/2/3 routing + opt-in adaptive evidence
 │   │   ├── observations/     # Compact activity/exam/Screen Time formatters
-│   │   ├── actions/          # Pending proposals, explicit approval and trusted add_activity
+│   │   ├── actions/          # Pending proposals, explicit approval and trusted activity tools
 │   │   ├── memory/           # Recent, archive, compaction and durable memory
 │   │   └── compat/           # Temporary multi-owner legacy adapters
 │   ├── planner/              # Activities, exams, calendar and activity service
@@ -983,6 +986,8 @@ Detail lists use a 20-item/6,000-character budget. Date-window observations
 include `period`, `count`, `truncated`, complete merged `busy` time intervals,
 and `untimed_count`. Missing detailed cards do not imply free time. Untimed
 activities remain represented in counts and cannot establish availability.
+Activity detail entries include their stable database `id` and `activity_type`
+for exact tool targeting; external IDs and UID mappings remain excluded.
 
 The exam observation builder keeps exams separate from activities. By default,
 it includes exams from today through the next 30 days, limits the detailed list
@@ -1034,8 +1039,10 @@ an `actions` list:
 
 The example is a proposal shape, **not** a record of an activity that was
 created. A response with `"actions": []` is also valid. Validation rejects
-unknown tools and malformed activity arguments. `add_activity` is the only
-supported proposed tool; the agent cannot issue SQL. The model and reasoning
+unknown tools and malformed activity arguments. Supported tools are `add_activity`
+and `delete_activity`; the latter takes exactly `activity_id` and `expected_name`
+from current app data. The agent cannot issue SQL or approve its own proposals.
+The model and reasoning
 effort for the main agent are configurable separately from the routing stages.
 
 ### One-shot context recovery
@@ -1135,10 +1142,10 @@ verify orchestration and validation, not the live model's detection accuracy.
 
 The React AI Agent now sends conversation messages through FastAPI and displays
 saved replies, proposals and context inspectors. AI Settings configures the key
-locally without returning it to React. Native `add_activity` tool requests now
+locally without returning it to React. Native add/delete activity tool requests now
 become pending proposals in the existing Confirm/Cancel panel. The separate
-owner-scoped approval endpoint saves only explicitly confirmed activities.
-There is no automatic execution, exam/edit/delete agent tool, durable proposal
+owner-scoped approval endpoint changes SQLite only for explicitly confirmed proposals.
+There is no automatic execution, exam/edit/bulk-delete agent tool, durable proposal
 storage or post-execution model continuation. Manual activity creation is unchanged.
 
 Automatic archive-compaction runs, automatic durable-memory extraction, Screen

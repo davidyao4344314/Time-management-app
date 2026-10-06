@@ -70,6 +70,26 @@ class AddActivityAction(BaseModel):
     arguments: AddActivityArguments
 
 
+class DeleteActivityArguments(BaseModel):
+    """One exact database record, never a name search or bulk deletion."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    activity_id: int = Field(gt=0, description="Existing activity ID from current app observations.")
+    expected_name: str = Field(min_length=1, description="Exact current name of that activity, not a guessed name.")
+
+    @model_validator(mode="after")
+    def meaningful_name(self):
+        if not self.expected_name.strip():
+            raise ValueError("The current activity name is required.")
+        return self
+
+
+class DeleteActivityAction(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    tool: Literal["delete_activity"]
+    arguments: DeleteActivityArguments
+
+
 class ActionRoute(str, Enum):
     NONE = "none"
     TOOL_ACTION = "tool_action"

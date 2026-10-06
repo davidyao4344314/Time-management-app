@@ -15,5 +15,6 @@ export default function ActionProposalCard({ proposal, onDecision, disabled, bus
     {busy && <p role="status">Sending your decision…</p>}
     {proposal.status === 'rejected' && <p role="status">Cancelled. No action was executed.</p>}
     {proposal.result && <p role={proposal.result.success ? 'status' : 'alert'}>{proposal.result.message}</p>}
+    {proposal.result && !proposal.result.success && proposal.result.error && <p role="alert">{proposal.result.error}</p>}
   </article>
 }

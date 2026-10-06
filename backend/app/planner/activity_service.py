@@ -6,7 +6,7 @@ leave connection lifetime with their caller.
 
 from datetime import date, datetime
 
-from backend.app.planner.activities import add_activity, edit_activity, get_activity_by_id
+from backend.app.planner.activities import add_activity, delete_activity, edit_activity, get_activity_by_id
 
 
 class ActivityValidationError(ValueError):
@@ -132,6 +132,31 @@ def create_activity_record(connection, prepared):
     columns, values = prepared
     activity_id = add_activity(connection, columns, values)
     return get_activity_by_id(connection, activity_id)
+
+
+def prepare_activity_deletion(connection, activity_id, expected_name):
+    """Read the exact target for preview/preflight, without changing SQLite."""
+    activity = get_activity_by_id(connection, activity_id)
+    if activity is None:
+        raise ActivityValidationError(status_code=404, detail="Activity no longer exists. Request a new proposal.")
+    if activity[1] != expected_name:
+        raise ActivityValidationError(status_code=409, detail="Activity name no longer matches. Request a new proposal.")
+    columns = ("id", "name", "category", "subject", "activity_type", "date", "weekday",
+               "start_time", "end_time", "active_start_date", "active_end_date", "source")
+    return dict(zip(columns, activity))
+
+
+def delete_activity_record(connection, activity_id, expected_name):
+    """Re-check and delete one record under the same SQLite write transaction."""
+    if connection.in_transaction:
+        raise ActivityValidationError(status_code=409, detail="Deletion needs its own transaction.")
+    with connection:
+        connection.execute("BEGIN IMMEDIATE")
+        prepare_activity_deletion(connection, activity_id, expected_name)
+        removed = delete_activity(connection, activity_id, commit=False)
+        if removed != 1:
+            raise ActivityValidationError(status_code=409, detail="The selected activity could not be deleted.")
+    return {"activity_id": activity_id, "deleted": True}
 
 
 def validate_activity_edit(activity_id, fields):

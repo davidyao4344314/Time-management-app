@@ -71,7 +71,7 @@ class ActionContractTests(unittest.TestCase):
         tool = registry.resolve("add_activity")
         self.assertIs(tool.arguments_model, AddActivityArguments)
         self.assertIsNone(tool.handler)
-        self.assertEqual([contract["name"] for contract in registry.public_contracts()], ["add_activity"])
+        self.assertEqual([contract["name"] for contract in registry.public_contracts()], ["add_activity", "delete_activity"])
         with self.assertRaises(UnknownToolError):
             registry.resolve("add_exam")
 

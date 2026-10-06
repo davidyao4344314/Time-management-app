@@ -10,7 +10,7 @@ from backend.app.conversations.memory_export import export_eligible_turns
 from backend.app.conversations import summary
 from backend.app.ai.agent.service import get_agent_proposal
 from backend.app.ai.config import is_openai_api_key_configured
-from backend.app.ai.agent.contracts import validate_agent_proposal
+from backend.app.ai.agent.contracts import validate_agent_proposal, InvalidProposalError
 from backend.app.conversations.contracts import ConversationConflict
 from backend.app.conversations.legacy import link_legacy_chat
 from backend.app.ai.context.adaptive import store as routing_store
@@ -20,6 +20,8 @@ from backend.app.files import storage as file_storage
 from backend.app.files.retrieval import detect_file_reference, retrieve_file_context
 from backend.app.ai.actions.registry import create_proposal_tool_registry
 from backend.app.ai.actions.routing import prepare_tool_proposals
+from backend.app.ai.actions.activity_tool import describe_activity_proposals
+from backend.app.planner.activity_service import ActivityValidationError
 
 
 @contextmanager
@@ -88,10 +90,14 @@ def send_message(owner_id, conversation_id, request_id, message, *, register_act
                     file_detector=lambda message: detect_file_reference(observation_connection, owner_id, message, context['file_refs']),
                     **({'routing_evidence': routing_evidence} if routing_evidence is not None else {}),
                     **({'adaptive_snapshot': adaptive_snapshot} if adaptive_snapshot is not None else {}))
+                validate_agent_proposal({key:value for key,value in proposal.items() if key != 'agent_context'})
+                pending = prepare_tool_proposals(proposal['actions'], create_proposal_tool_registry())
+                try:
+                    pending = describe_activity_proposals(observation_connection, pending)
+                except ActivityValidationError:
+                    raise InvalidProposalError("The proposed activity deletion does not match a current record.") from None
             finally:
                 observation_connection.close()
-            validate_agent_proposal({key:value for key,value in proposal.items() if key != 'agent_context'})
-            pending = prepare_tool_proposals(proposal['actions'], create_proposal_tool_registry())
             messages = storage.complete_request(connection, conversation_id, request_id, proposal)
             # Only a newly completed request registers proposals. Replaying an
             # existing request or reading saved chat never recreates authority.

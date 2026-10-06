@@ -132,13 +132,15 @@ def get_activities_by_name(connection, value_name):
 
     return cursor.fetchall()
 
-def delete_activity(connection, activity_id):
-    connection.execute(
+def delete_activity(connection, activity_id, *, commit=True):
+    cursor = connection.execute(
         "DELETE FROM activities WHERE id = ?",
         (activity_id,)
     )
 
-    connection.commit()
+    if commit:
+        connection.commit()
+    return cursor.rowcount
 
 def remove_duplicate_activities(connection):
     """Keep the lowest ID for each identical set of activity fields."""

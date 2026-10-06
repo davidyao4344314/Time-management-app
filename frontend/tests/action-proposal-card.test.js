@@ -50,3 +50,14 @@ test('both controls are disabled while a decision is pending', () => {
   assert.equal((html.match(/disabled=""/g) || []).length, 2)
   assert.match(html, /Sending your decision/)
 })
+
+test('a refused deletion shows its safe backend error without rendering HTML', () => {
+  const html = renderToStaticMarkup(jsx(Card, { proposal: {
+    ...proposal, display_title: 'Delete Activity', status: 'failed',
+    result: { success: false, message: 'This execution attempt did not run the action.',
+      error: 'Activity no longer exists. <Request a new proposal.>' },
+  } }))
+  assert.match(html, /Activity no longer exists/)
+  assert.match(html, /&lt;Request a new proposal.&gt;/)
+  assert.doesNotMatch(html, /<button/)
+})

@@ -299,10 +299,13 @@ Steps 2–3 were already committed before this batch.
 | 12 | Documentation, compatibility and dependency checks | Make ownership visible and prevent regressions |
 
 The original refactor created no action executor. Stage 8 now provides an
-approval-gated executor and an explicitly registered real `AddActivityTool`,
+approval-gated executor and explicitly registered `AddActivityTool`/`DeleteActivityTool`,
 with generic owner-scoped HTTP/UI confirmation for native model and development
-proposals. The normal agent only requests `add_activity`, never approves/executes
-it. Proposal state remains temporary and is not reconstructed from saved chat
+proposals. The normal agent requests add/delete activity tools, never approves/executes
+them. Deletion targets a current ID/name and uses a database-backed read-only
+review, a trusted preflight and a transactional recheck through the activity service.
+Only the existing activity adapter imports that service; no SQL or executable
+handler is exposed to the reasoner. Proposal state remains temporary and is not reconstructed from saved chat
 after restart. Activity edits still call `edit_activity` in the same sequence,
 now within one savepoint so a failed logical edit rolls back all its fields.
 Standalone `edit_activity` callers still commit by default. Create returns the ID from the
@@ -431,11 +434,13 @@ use the configured OpenAI account and may incur charges. Use mocked tests first.
 
 ## Future extensions (not implemented)
 
-- **Approved actions/re-evaluation:** add explicit approval, execution receipts,
-  and bounded verification separately. Stage 7 performs no action execution.
+- **Action re-evaluation:** add bounded post-execution verification separately.
+  Stage 8 already supplies explicit approval and temporary execution receipts;
+  Stage 7 context retrieval performs no action execution.
 - **Screen Time:** add a selected collector section and routing rule using the
   existing formatter, without rewriting main-agent history formatting.
-- **Additional tools:** extend action contracts, then add a distinct approval and
-  execution layer. Never execute actions inside proposal generation.
-- **Edit/delete proposals:** call the validated activity service/existing CRUD
-  only after explicit approval; protect source/external IDs and UoA mappings.
+- **Additional tools:** extend action contracts and reuse the existing approval
+  and execution layer. Never execute actions inside proposal generation.
+- **Edit proposals:** call the validated activity service/existing CRUD only
+  after explicit approval; protect source/external IDs and UoA mappings. Single
+  activity deletion now uses this boundary; exam and bulk deletion remain deferred.

@@ -17,6 +17,10 @@ class ToolExecutionUnavailableError(ActionLayerError):
     pass
 
 
+class ToolPreconditionError(ActionLayerError):
+    """A trusted read-only check refused the action before its handler started."""
+
+
 class ToolOutcomeUnconfirmedError(ActionLayerError):
     """The handler started; an exception does not prove its changes were undone."""
 
@@ -29,6 +33,7 @@ class Tool:
     handler: Callable[[dict[str, JsonValue]], dict[str, JsonValue]] | None = field(
         default=None, repr=False,
     )
+    preflight: Callable[[dict[str, JsonValue]], None] | None = field(default=None, repr=False)
 
     def __post_init__(self):
         if not isinstance(self.name, str) or not re.fullmatch(r"[a-z][a-z0-9_]*", self.name):
@@ -39,6 +44,8 @@ class Tool:
             raise ValueError("Tools require a validated input model.")
         if self.handler is not None and not callable(self.handler):
             raise ValueError("A tool handler must be callable.")
+        if self.preflight is not None and not callable(self.preflight):
+            raise ValueError("A preflight check must be callable.")
 
     def public_contract(self):
         return {
@@ -58,6 +65,8 @@ class Tool:
         if self.handler is None:
             raise ToolExecutionUnavailableError("Execution is not available for this tool.")
         validated_arguments = self.validate(arguments)
+        if self.preflight is not None:
+            self.preflight(validated_arguments)
         try:
             return self.handler(validated_arguments)
         except Exception:

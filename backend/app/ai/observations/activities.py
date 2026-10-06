@@ -21,14 +21,17 @@ from backend.app.ai.observations.formatting import (
 def _brief_activity(activity):
     """Keep only schedule fields from a database activity tuple."""
     return {
+        "id": activity[0],
         "name": activity[1],
+        "activity_type": activity[4],
         "start": _time_or_none(activity[7]),
         "end": _time_or_none(activity[8]),
     }
 
 
 def _brief_occurrence(occurrence, include_date=False):
-    brief = {"name": occurrence["name"]}
+    brief = {"id": occurrence["id"], "name": occurrence["name"],
+             "activity_type": occurrence["activity_type"]}
     if include_date:
         brief["date"] = occurrence["calendar_date"]
     brief["start"] = _time_or_none(occurrence["start_time"])
@@ -50,8 +53,9 @@ def _occurrences_in_range(connection, first_date, last_date):
 
 
 def _brief_activity_definition(activity):
-    """Represent an explicitly requested full activity list without IDs or metadata."""
+    """Include stable IDs for exact tool targeting, but no import identifiers."""
     return {
+        "id": activity[0],
         "name": activity[1],
         "category": activity[2],
         "subject": activity[3],

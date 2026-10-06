@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from backend.app.ai.actions.contracts import AddActivityAction
+from backend.app.ai.actions.contracts import AddActivityAction, DeleteActivityAction
 from backend.app.ai.memory.contracts import MemoryRequest
 from backend.app.files.contracts import MAX_QUERY_CHARS, validate_query
 
@@ -44,7 +44,7 @@ class AgentProposal(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     message: str | None
-    actions: list[AddActivityAction]
+    actions: list[AddActivityAction | DeleteActivityAction]
     memory_request: MemoryRequest | None = None
     missing_context: list[MissingContextRequest | MissingFileContextRequest] = Field(default_factory=list, max_length=2)
 

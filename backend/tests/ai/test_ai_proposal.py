@@ -517,7 +517,7 @@ class AIProposalTests(unittest.TestCase):
     def test_today_observation_does_not_send_later_dates(self):
         today = date(2026, 9, 29)
         occurrence = {
-            "id": 1, "name": "Lecture", "start_time": "11:00",
+            "id": 1, "name": "Lecture", "activity_type": "one_time", "start_time": "11:00",
             "end_time": "12:00", "calendar_date": "2026-09-29",
         }
         tomorrow = {**occurrence, "calendar_date": "2026-09-30"}
@@ -529,13 +529,13 @@ class AIProposalTests(unittest.TestCase):
             result = activity_observation.build_activity_observation(connection, scope="today")
 
         week.assert_called_once_with(connection, today)
-        self.assertEqual(result["today"], [{"name": "Lecture", "start": "11:00", "end": "12:00"}])
+        self.assertEqual(result["today"], [{"id": 1, "name": "Lecture", "activity_type": "one_time", "start": "11:00", "end": "12:00"}])
         self.assertNotIn("upcoming_7d", result)
 
     def test_week_observation_uses_the_next_seven_dates(self):
         today = date(2026, 9, 29)
         occurrence = {
-            "id": 1, "name": "Study", "start_time": None, "end_time": None,
+            "id": 1, "name": "Study", "activity_type": "one_time", "start_time": None, "end_time": None,
             "calendar_date": "2026-10-05",
         }
         too_late = {**occurrence, "calendar_date": "2026-10-06"}
@@ -545,7 +545,7 @@ class AIProposalTests(unittest.TestCase):
                 patch.object(activity_observation, "get_week_activities", return_value=[occurrence, too_late]):
             result = activity_observation.build_activity_observation(Mock(), scope="week")
         self.assertEqual(result["upcoming_7d"], [
-            {"name": "Study", "date": "2026-10-05", "start": None, "end": None},
+            {"id": 1, "name": "Study", "activity_type": "one_time", "date": "2026-10-05", "start": None, "end": None},
         ])
 
     def test_month_observation_uses_calendar_recurrence_and_stops_at_month_end(self):
@@ -556,9 +556,9 @@ class AIProposalTests(unittest.TestCase):
             starts.append(week_start)
             if week_start == date(2026, 9, 29):
                 return [
-                    {"id": 1, "name": "Month end", "calendar_date": "2026-09-30",
+                    {"id": 1, "name": "Month end", "activity_type": "one_time", "calendar_date": "2026-09-30",
                      "start_time": None, "end_time": None},
-                    {"id": 2, "name": "Next month", "calendar_date": "2026-10-01",
+                    {"id": 2, "name": "Next month", "activity_type": "one_time", "calendar_date": "2026-10-01",
                      "start_time": None, "end_time": None},
                 ]
             return []
@@ -571,7 +571,7 @@ class AIProposalTests(unittest.TestCase):
 
         self.assertEqual(starts, [date(2026, 9, day) for day in (1, 8, 15, 22, 29)])
         self.assertEqual(result["upcoming_month"], [
-            {"name": "Month end", "date": "2026-09-30", "start": None, "end": None},
+            {"id": 1, "name": "Month end", "activity_type": "one_time", "date": "2026-09-30", "start": None, "end": None},
         ])
 
     def test_month_observation_uses_real_calendar_recurrence_rules(self):
@@ -1131,7 +1131,7 @@ class AIProposalTests(unittest.TestCase):
             "ask one simple follow-up question",
             "user-facing message",
             "separate actions list",
-            "only allowed tool is add_activity",
+            "allowed tools are add_activity and delete_activity",
             "Never execute a tool, generate SQL",
             '"message": "response for the user", "actions": []',
             '"memory_request": null',

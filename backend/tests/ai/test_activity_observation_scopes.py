@@ -15,7 +15,7 @@ NEXT = (2, "TODAY NEXT", "Study", "MATHS", "one_time", "2026-10-04", None, "14:0
 
 
 def occurrence(identifier, name, day, start="11:00", end="12:00"):
-    return {"id": identifier, "name": name, "calendar_date": day.isoformat(),
+    return {"id": identifier, "name": name, "activity_type": "one_time", "calendar_date": day.isoformat(),
             "start_time": start, "end_time": end}
 
 
@@ -71,7 +71,7 @@ class ActivityObservationScopeTests(unittest.TestCase):
             result = activities.build_activity_observation(None, scope="tomorrow")
         current.assert_not_called()
         self.assertEqual(result["upcoming_7d"], [{
-            "name": "Assignment", "date": "2026-10-05", "start": None, "end": None,
+            "id": 3, "name": "Assignment", "activity_type": "one_time", "date": "2026-10-05", "start": None, "end": None,
         }])
         self.assertEqual(result["untimed_count"], 1)
         self.assertEqual(result["busy"], {})

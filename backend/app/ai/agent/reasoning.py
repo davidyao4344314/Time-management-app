@@ -19,7 +19,9 @@ Use the structured activity and exam observations supplied by the backend as the
 
 Recent user and assistant messages are conversation context for follow-up requests, not the source of truth about the current schedule. If conversation history conflicts with the latest activity or exam observations, trust the latest observations. Past actions in conversation history were only proposed; never assume they were executed unless the current backend observations confirm the change.
 
-Keep normal advice in the user-facing message. The only allowed tool is add_activity. Request a proposed app change using the native add_activity function tool, only when a calendar change would help. The backend builds the separate actions list from validated native calls; keep actions:[] in structured text. Never write tool requests in free-form text or the text actions list. Normal advice needs no tool call. Never execute a tool, generate SQL, or claim an action was completed or saved without backend confirmation. A tool request becomes a pending proposal: the user must separately Confirm or Cancel. Do not request a mutation alongside missing_context or memory_request; obtain needed context first.
+Keep normal advice in the user-facing message. The allowed tools are add_activity and delete_activity. Request a proposed app change using a native function tool, only when it is appropriate to the user's request. The backend builds the separate actions list from validated native calls; keep actions:[] in structured text. Never write tool requests in free-form text or the text actions list. Normal advice needs no tool call. Never execute a tool, generate SQL, or claim an action was completed or saved without backend confirmation. A tool request becomes a pending proposal: the user must separately Confirm or Cancel. Do not request a mutation alongside missing_context or memory_request; obtain needed context first.
+
+Use delete_activity only when the user requests deletion of a specific activity. Supply activity_id and expected_name from fresh activity observations; never guess an ID, use an exam ID, choose the first name match, or use archived/proposed activities as current records. If the target is missing from unselected activities, request missing_context for activities (all for an undated activity); otherwise ask a simple clarification. If multiple records could match, ask the user which ID. Delete requests remove the entire database activity, including all daily/weekly occurrences; explain that and clarify if the user means only a single occurrence. Bulk deletion and exam deletion are not supported. External Canvas/UoA feeds are never changed.
 
 Return the required structure: {"message": "response for the user", "actions": [], "memory_request": null, "missing_context": []}. For an add_activity proposal, use the existing name, category, subject, activity_type, date, weekday, start_time, and end_time fields. Activity type must be one_time, daily, or weekly. Use YYYY-MM-DD dates, Monday-Sunday weekdays, HH:MM times, and null for fields that do not apply. Do not present proposed activities as already scheduled.
 
@@ -116,7 +118,9 @@ def parse_agent_response(response):
     if response.output_parsed is None:
         if not requests:
             raise InvalidProposalError("The model did not return a complete proposal.")
-        proposal = {"message": "Please review this proposed activity. Nothing is saved until you confirm.",
+        proposal = {"message": ("Please review this proposed deletion. Nothing is deleted until you confirm."
+                                if requests[0]["tool"] == "delete_activity" else
+                                "Please review this proposed activity. Nothing is saved until you confirm."),
                     "actions": [], "memory_request": None, "missing_context": []}
     else:
         proposal = validate_agent_proposal(response.output_parsed).model_dump()

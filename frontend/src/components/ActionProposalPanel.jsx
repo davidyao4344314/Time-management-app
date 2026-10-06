@@ -6,7 +6,7 @@ export default function ActionProposalPanel({ disabled = false, refreshKey }) {
   const busy = state.loading || state.busyId !== null
   return <section className="action-proposal-panel" aria-labelledby="action-proposal-heading">
     <h3 id="action-proposal-heading">Proposed changes</h3>
-    <p className="agent-context-note">Nothing is saved until you confirm a backend proposal. These proposals belong to this browser profile, not a particular chat.</p>
+    <p className="agent-context-note">No changes are made until you confirm a backend proposal. These proposals belong to this browser profile, not a particular chat.</p>
     <div className="action-proposal-controls">
       <button type="button" className="chat-secondary" disabled={disabled || busy} onClick={state.refresh}>Refresh proposals</button>
       {state.devEnabled && <button type="button" className="chat-secondary" disabled={disabled || busy || state.needsRefresh}

@@ -4,6 +4,18 @@ This README explains how to run the project and describes the backend as it
 currently works. The AI agent can **propose** an activity, but cannot yet save
 an AI-proposed activity.
 
+## Stage 8: Action Layer structure
+
+`ai/actions` now contains generic proposal/result contracts, explicit tool discovery,
+a minimal router, temporary approve/reject lifecycle, an approval-gated executor
+and a response-planning interface. This is **structure only**: the default
+`add_activity` registration reuses the existing schema but has no executable
+handler. Normal chat/API responses are unchanged; no approval UI or execution
+endpoint is connected, and no planner data is written by this layer.
+
+See [Action Layer contracts, boundaries and offline tests](ACTIONS.md) for the
+file tree, lifecycle, dependency direction and fake-tool test commands.
+
 ## Multi-conversation AI chat
 
 AI Agent now supports New Chat, persisted message history and switching between
@@ -78,7 +90,7 @@ backend/
 │   │   ├── agent/            # Agent coordination, reasoning and contracts
 │   │   ├── context/          # Stage 1/2/3 routing + opt-in adaptive evidence
 │   │   ├── observations/     # Compact activity/exam/Screen Time formatters
-│   │   ├── actions/          # Proposal contracts only; no action execution
+│   │   ├── actions/          # Proposal/approval/execution skeleton; no real tool handlers
 │   │   ├── memory/           # Recent, archive, compaction and durable memory
 │   │   └── compat/           # Temporary multi-owner legacy adapters
 │   ├── planner/              # Activities, exams, calendar and activity service

@@ -65,7 +65,13 @@ backend/
     ├── ai/
     │   ├── config.py           # Existing local key/model/context configuration
     │   ├── actions/
-    │   │   └── contracts.py    # Allowed proposals, not execution
+    │   │   ├── contracts.py    # Existing arguments + generic routes/proposals/results/statuses
+    │   │   ├── tools.py        # Public schemas and optional trusted tool handlers
+    │   │   ├── registry.py     # Explicit discovery; default tools are proposal-only
+    │   │   ├── routing.py      # Validated agent output -> pending proposal(s); no execution
+    │   │   ├── approval.py     # Temporary authoritative approve/reject lifecycle
+    │   │   ├── execution.py    # Approved ID -> registry -> result; fake tools only for now
+    │   │   └── planning.py     # ResponsePlanner interface, not implemented
     │   ├── agent/
     │   │   ├── contracts.py    # AgentProposal and validation
     │   │   ├── service.py      # Coordinate a proposal request
@@ -276,8 +282,9 @@ Steps 2–3 were already committed before this batch.
 | 11 | Existing activity validation/use cases extracted | Future approved tools can reuse validation and CRUD without copying HTTP code |
 | 12 | Documentation, compatibility and dependency checks | Make ownership visible and prevent regressions |
 
-No new action executor was created: the agent still only proposes
-`add_activity`. Activity edits still call `edit_activity` in the same sequence,
+The original refactor created no action executor. Stage 8 now provides a
+structural approval-gated executor, with no real handlers or HTTP/UI wiring;
+the normal agent still only proposes `add_activity`. Activity edits still call `edit_activity` in the same sequence,
 now within one savepoint so a failed logical edit rolls back all its fields.
 Standalone `edit_activity` callers still commit by default. Create returns the ID from the
 existing `add_activity` and reads the row through `get_activity_by_id` rather than

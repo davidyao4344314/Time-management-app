@@ -90,6 +90,33 @@ class FileRoutingTests(unittest.TestCase):
         self.assertEqual(request["required"], ["source", "query"])
         self.assertNotIn("path", request["properties"])
 
+    def test_explicit_file_does_not_hide_semantic_selection_of_other_sources(self):
+        reference = {"selection": {"file_ids": ["file_" + "a" * 32]}, "method": "exact_filename",
+                     "filenames": ["assignment2.pdf"]}
+        classified = AgentIntentClassification(intent="study_planning", time_scope="today",
+            include_activities=True, include_exams=True, confidence="high", files={"query": "a different file"})
+        with patch.object(routing, "classify_agent_intent", return_value=classified) as classifier:
+            result = routing.select_agent_context(Mock(),
+                "Based on assignment2.pdf, I have something important coming up and I am free after dinner. What should I focus on?",
+                [], "model", file_reference=reference)
+        classifier.assert_called_once()
+        self.assertEqual(result["activities_scope"], "today")
+        self.assertTrue(result["include_exams"])
+        self.assertEqual(result["files"]["file_ids"], reference["selection"]["file_ids"])
+        self.assertIsNone(result["files"]["query"])
+
+    def test_existing_stage_three_schedule_fallback_keeps_explicit_file(self):
+        reference = {"selection": {"file_ids": ["file_" + "a" * 32]}, "method": "exact_filename"}
+        decision = AgentRoutingDecision(intent="schedule_query", time_scope="week",
+            include_activities=True, include_exams=False)
+        with patch.object(routing, "classify_agent_intent", side_effect=ValueError("Unavailable")), \
+                patch.object(routing, "classify_stage_three", return_value=decision) as fallback:
+            selected = routing.select_agent_context(Mock(),
+                "Based on assignment2.pdf, what am I doing after dinner?", [], "model", file_reference=reference)
+        fallback.assert_called_once()
+        self.assertEqual(selected["activities_scope"], "week")
+        self.assertEqual(selected["files"]["file_ids"], reference["selection"]["file_ids"])
+
 
 class FileAgentTests(unittest.TestCase):
     def setUp(self):
@@ -125,6 +152,49 @@ class FileAgentTests(unittest.TestCase):
         self.assertEqual(public["file_context"]["detection"], "exact_filename")
         self.assertNotIn("PRIVATE EXCERPT", json.dumps(public))
         self.assertNotIn("text", public["file_context"]["files"][0])
+        self.assertTrue(public["file_context"]["reference_matched"])
+        self.assertEqual(public["file_context"]["requested_filenames"], ["assignment2.txt"])
+        self.assertEqual(public["file_context"]["resolved_file_ids"], [self.file["file_id"]])
+
+    def test_file_and_exam_context_reach_main_agent_together_without_file_classifier(self):
+        self.client.responses.parse.return_value = response(ANSWER)
+        detector = lambda message: detect_file_reference(self.connection, "owner", message)
+        with patch.object(service, "build_exam_observation", return_value={"count": 1, "upcoming": [{"name": "Exam"}]}):
+            result = self.run_agent("Use assignment2.txt and tell me what exams I have.", file_detector=detector)
+        self.assertEqual(self.client.responses.parse.call_count, 1)
+        observations = self.input(0)["observations"]
+        self.assertEqual(set(observations), {"files", "exams"})
+        self.assertIn("PRIVATE EXCERPT", observations["files"]["chunks"][0]["text"])
+        self.assertEqual(result["agent_context"]["context_status"]["files"], "provided")
+
+    def test_generic_pdf_question_never_selects_or_reads_stored_file(self):
+        self.client.responses.parse.return_value = response({"message": "PDF is a document format.", "actions": []})
+        with patch.object(service, "select_agent_context", return_value=NO_CONTEXT.copy()):
+            self.run_agent("How do PDF files work?", file_detector=lambda message: detect_file_reference(self.connection, "owner", message))
+        self.reader.assert_not_called()
+        self.assertNotIn("files", self.input(0)["observations"])
+
+    def test_duplicate_file_asks_for_identity_and_empty_file_reports_existing_status(self):
+        self.connection.execute("PRAGMA query_only=OFF")
+        second = ingest_file(self.connection, "owner", "assignment2.txt", b"Other private content.")
+        self.connection.execute("PRAGMA query_only=ON")
+        self.client.responses.parse.return_value = response({"message": "Which file ID should I use?", "actions": []})
+        detector = lambda message: detect_file_reference(self.connection, "owner", message)
+        result = self.run_agent("Read assignment2.txt", file_detector=detector)
+        observation = self.input(0)["observations"]["files"]
+        self.assertTrue(observation["ambiguous"])
+        self.assertEqual(observation["chunks"], [])
+        self.assertEqual({file["file_id"] for file in observation["files"]}, {self.file["file_id"], second["file_id"]})
+        self.assertNotIn("PRIVATE EXCERPT", json.dumps(result["agent_context"]))
+        self.connection.execute("PRAGMA query_only=OFF")
+        self.connection.execute("UPDATE imported_file_chunks SET text='' WHERE file_id=?", (second["file_id"],))
+        self.connection.commit()
+        self.connection.execute("PRAGMA query_only=ON")
+        self.client.responses.parse.return_value = response({"message": "This file has no readable content.", "actions": []})
+        detector = lambda message: detect_file_reference(self.connection, "owner", message, [second["file_id"]])
+        result = self.run_agent("Read assignment2.txt", file_detector=detector)
+        self.assertEqual(result["agent_context"]["context_status"]["files"], "empty")
+        self.assertTrue(result["agent_context"]["file_context"]["reference_matched"])
 
     def test_file_recovery_uses_existing_single_shared_retry(self):
         self.client.responses.parse.side_effect = [response(NEED_FILE), response(ANSWER)]

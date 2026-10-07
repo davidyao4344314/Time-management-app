@@ -96,6 +96,10 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
             "chunk_count": file_observation.get("count", 0),
             "truncated": bool(file_observation.get("truncated")),
             "ambiguous": bool(file_observation.get("ambiguous")),
+            "reference_matched": bool(file_reference and file_reference["method"] != "unknown_filename"
+                                      and file_observation.get("files")),
+            "requested_filenames": file_reference.get("filenames", []) if file_reference else [],
+            "resolved_file_ids": (selection.get("files") or {}).get("file_ids", []),
             "files": [{key: item.get(key) for key in ("file_id", "filename", "file_type", "created_at", "chunk_count")}
                       for item in file_observation.get("files", [])],
         }

@@ -52,7 +52,52 @@ Files are a separate read-only observation source, not an agent action or
 conversation/global memory. Exact file references bypass semantic file routing;
 unnamed documents can be selected by Stage 2/3. Retrieval sends at most five
 chunks and 8,000 excerpt characters. It shares the existing one-shot context
-recovery budget. Duplicate names require a specific ID, not an arbitrary choice.
+recovery budget. Duplicate names require an unambiguous current-chat reference
+or a specific ID, never an arbitrary choice.
+
+### Explicitly named file context
+
+Filename detection runs before normal routing and compares complete stored
+filenames case-insensitively (`assignment2.pdf` also matches `ASSIGNMENT2.PDF`).
+Quotes and sentence punctuation are accepted; generic words such as `pdf`,
+`assignment` or `notes` do not identify a file. Paths, URLs and partial filenames
+are not exact references. Detection only checks the current owner's managed
+SQLite metadata, never the local filesystem.
+
+A unique filename resolves to its stable `file_id`. For duplicate names, a
+single matching file reference from the current chat can disambiguate; otherwise
+the observation supplies bounded candidate metadata and an ambiguity flag, with
+no excerpts, so the agent can ask which ID to use. Unknown names return an empty
+not-found observation; an existing file with no readable chunks also reports
+`context_status.files = empty`, while retaining its metadata.
+
+Retrieval reuses the existing limit of three selected IDs, five readable chunks
+and 8,000 excerpt characters in total. Literal relevance ranking selects chunks;
+the selected excerpts are then presented in reading order with their filename,
+file ID and page/section/chunk labels where available. No filesystem paths are
+sent. File text remains evidence, not instructions or permission to run actions.
+
+Explicit file selection is merged with normal Stage 1/2/3 selection for other
+sources. For example, `Use assignment2.pdf and tell me what exams I have` sends
+both file and exam observations. Narrow file-only questions need no semantic
+classifier to select the file. This change adds no new unnamed-file fallback or
+file recovery behavior; those existing paths remain unchanged. The existing
+context inspector exposes matching metadata, selected IDs, status, chunk count
+and truncation/ambiguity, not private excerpts.
+
+Offline tests (no paid requests or project-data changes):
+
+```bash
+backend/.venv/bin/python -B -m unittest backend.tests.test_file_retrieval backend.tests.ai.test_file_context -v
+```
+
+To verify manually, open **AI Agent → Files for AI context**, import a small
+`assignment2.txt`, then ask `What does ASSIGNMENT2.TXT say?`. Check the retrieved
+file and chunk count in **How the agent used context**. Also try a combined
+file/exam question, an unknown filename and two uploads with the same filename.
+Use **Use in question** to select a specific duplicate by ID; subsequent filename
+questions in that chat can reuse that unambiguous reference. Sending questions
+uses the configured API key and may incur charges; importing alone does not.
 
 See [File ingestion, storage, retrieval and tests A–I](FILES.md) for the exact
 schemas, endpoints, privacy boundaries, limitations and no-charge test commands.

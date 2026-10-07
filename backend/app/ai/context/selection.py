@@ -29,9 +29,36 @@ def _valid_context_selection(selection):
         return False
 
 
+def _file_only_request(message, reference):
+    """Recognize narrow file-only requests, never swallow a mixed context request."""
+    masked = message.casefold()
+    names = reference.get("filenames", []) or re.findall(r"[\w-][\w.-]*\.(?:txt|pdf|docx)\b", masked)
+    for name in names:
+        masked = re.sub(re.escape(name.casefold()), "FILE", masked)
+    masked = re.sub(r"\bfile_[a-f0-9]{32}\b", "FILE", masked)
+    if reference["method"] == "recent_file_reference":
+        masked = re.sub(r"\b(?:that (?:pdf|file|document)|the assignment file)\b", "FILE", masked)
+    # A file's subject does not authorize fetching the user's schedule/memory.
+    # Conversely, a request mentioning those sources must keep normal routing.
+    if re.search(r"\b(?:my|today|tonight|tomorrow|week|month|calendar|activities|exams|tests|remember)\b", masked):
+        return False
+    prefix = r"(?:please\s+|can you\s+)?"
+    patterns = (
+        prefix + r"(?:explain|summari[sz]e|read|review|describe)\s+FILE(?:\s+(?:for me|please))?",
+        prefix + r"what does\s+FILE\s+say(?:\s+about\s+[^?!]+)?",
+        prefix + r"use\s+FILE\s+to answer this",
+    )
+    return any(re.fullmatch(pattern + r"[?.!\s]*", masked) for pattern in patterns)
+
+
 def select_agent_context(client, user_message, recent_turns, stage_two_model, *, trace=None, evidence=None, adaptive_snapshot=None, file_reference=None):
     """Stop at the first confident route; never retry a failed stage."""
     excluded = excluded_context_sources(user_message)
+    explicit_files = None
+    if file_reference is not None and "files" not in excluded:
+        explicit_files = FileSelection.model_validate(file_reference["selection"]).model_dump()
+        if trace is not None:
+            trace["file_detection"] = file_reference["method"]
 
     def candidate(stage, status, selected=None, decision=None):
         if evidence is not None:
@@ -43,6 +70,10 @@ def select_agent_context(client, user_message, recent_turns, stage_two_model, *,
             })
 
     def finish(selected, stage, status, reason, decision=None):
+        if explicit_files is not None:
+            # Exact managed references take precedence over classifier guesses,
+            # but never replace independent activity/exam/memory selections.
+            selected = {**selected, "files": explicit_files}
         if evidence is not None:
             evidence["initial_selection"] = apply_context_exclusions(selected, excluded)
         return _record_route(
@@ -51,22 +82,15 @@ def select_agent_context(client, user_message, recent_turns, stage_two_model, *,
         )
 
     stage_one = assess_stage_one(user_message, recent_turns)
-    if file_reference is not None and "files" not in excluded:
-        # The explicit reference already answers the file-routing question.
-        # Preserve clear schedule intent, but do not pay for semantic file detection.
-        files = FileSelection.model_validate(file_reference["selection"]).model_dump()
-        selected = stage_one.get("selection") if stage_one.get("confident") else {
-            "activities_scope": None, "include_exams": False, "exam_scope": None,
-        }
-        selected = {**selected, "files": files}
+    if explicit_files is not None and _file_only_request(user_message, file_reference):
+        selected = {"activities_scope": None, "include_exams": False, "exam_scope": None,
+                    "files": explicit_files}
         candidate("stage_1", "matched", selected)
-        if trace is not None:
-            trace["file_detection"] = file_reference["method"]
         return finish(selected, "stage_1", "matched", "A managed file reference was resolved deterministically; semantic file routing was not needed.")
     # Uploaded-document questions must reach the semantic classifier rather than
     # being mistaken for archive recollection or a generic study keyword.
-    file_intent = re.search(r"\b(?:uploaded|imported|document|pdf|docx|file|files)\b", user_message.casefold())
-    if file_intent and "files" not in excluded:
+    file_intent = explicit_files is not None or re.search(r"\b(?:uploaded|imported|document|pdf|docx|file|files)\b", user_message.casefold())
+    if file_intent and explicit_files is None and "files" not in excluded:
         stage_one = {**stage_one, "confident": False, "reason": "requires_file_context_selection"}
     if not isinstance(adaptive_snapshot, dict):
         adaptive_snapshot = None

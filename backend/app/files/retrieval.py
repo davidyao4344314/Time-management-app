@@ -28,20 +28,34 @@ def detect_file_reference(connection, owner_id, message, recent_refs=()):
     matches = []
     for item in storage.iter_metadata(connection, owner_id):
         name = item["filename"].casefold()
-        if re.search(rf"(?<![\w/\\.-]){re.escape(name)}(?![\w.-])", folded):
+        if re.search(rf"(?<![\w/\\.:-]){re.escape(name)}(?![\w/\\:-]|\.[\w/\\.-])", folded):
             matches.append(item)
     if matches:
-        names = [item["filename"].casefold() for item in matches]
-        if len(names) != len(set(names)):
-            duplicate = next(item["filename"] for item in matches if names.count(item["filename"].casefold()) > 1)
-            return {"selection": FileSelection(filename=duplicate, query=query).model_dump(),
-                    "method": "ambiguous_filename"}
-        return {"selection": FileSelection(file_ids=[item["file_id"] for item in matches[:MAX_FILE_REFS]], query=query).model_dump(),
-                "method": "exact_filename"}
+        grouped = {}
+        for item in matches:
+            grouped.setdefault(item["filename"].casefold(), []).append(item)
+        resolved = []
+        used_recent = False
+        for group in grouped.values():
+            if len(group) == 1:
+                resolved.append(group[0])
+                continue
+            # Only a unique, owner-verified reference from this chat can decide
+            # between duplicates. Upload order/most-recent timestamp is not identity.
+            referenced = [item for item in group if item["file_id"] in recent_refs]
+            if len(referenced) != 1:
+                return {"selection": FileSelection(filename=group[0]["filename"], query=query).model_dump(),
+                        "method": "ambiguous_filename", "filenames": [group[0]["filename"]]}
+            resolved.append(referenced[0])
+            used_recent = True
+        return {"selection": FileSelection(file_ids=[item["file_id"] for item in resolved[:MAX_FILE_REFS]], query=query).model_dump(),
+                "method": "filename_chat_reference" if used_recent else "exact_filename",
+                "filenames": [item["filename"] for item in resolved[:MAX_FILE_REFS]]}
     # Preserve safe no-match behavior for an explicitly named but unknown file.
-    unknown = re.search(r"(?<![\w/\\.-])([\w-][\w.-]*\.(?:txt|pdf|docx))(?![\w.-])", message, re.I)
+    unknown = re.search(r"(?<![\w/\\.:-])([\w-][\w.-]*\.(?:txt|pdf|docx))(?![\w/\\:-]|\.[\w/\\.-])", message, re.I)
     if unknown:
-        return {"selection": FileSelection(filename=unknown.group(1), query=query).model_dump(), "method": "unknown_filename"}
+        return {"selection": FileSelection(filename=unknown.group(1), query=query).model_dump(),
+                "method": "unknown_filename", "filenames": [unknown.group(1)]}
     refs = list(dict.fromkeys(recent_refs))
     if len(refs) == 1 and re.search(r"\b(?:that (?:pdf|file|document)|the assignment file)\b", folded):
         return {"selection": FileSelection(file_ids=refs, query=query).model_dump(), "method": "recent_file_reference"}
@@ -78,9 +92,13 @@ def retrieve_file_context(connection, owner_id, selection):
     if not file_ids and not terms:
         return {"count": 0, "files": [], "chunks": [], "truncated": False, "reason": "No meaningful search terms."}
     candidates = storage.matching_chunks(connection, owner_id, file_ids=file_ids, terms=terms)
-    ranked = heapq.nsmallest(MAX_CONTEXT_CHUNKS + 1, candidates,
+    ranked = heapq.nsmallest(MAX_CONTEXT_CHUNKS + 1, (chunk for chunk in candidates if chunk["text"].strip()),
                             key=lambda chunk: (-_score(chunk, selected.query, terms), chunk["file_id"], chunk["position"]))
     chosen, files, budget = [], {}, MAX_CONTEXT_CHARS
+    for file_id in file_ids:
+        metadata = storage.get_file(connection, owner_id, file_id, include_content=False)
+        if metadata is not None:
+            files[file_id] = metadata
     truncated = len(ranked) > MAX_CONTEXT_CHUNKS
     for chunk in ranked[:MAX_CONTEXT_CHUNKS]:
         if not budget:

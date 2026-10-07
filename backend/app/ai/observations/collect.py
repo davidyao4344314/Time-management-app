@@ -15,6 +15,7 @@ def collect_agent_observations(
     excluded_sources=(),
     exam_filter="all",
     file_reader=None,
+    activity_ids=(),
 ):
     """Keep factual app state separate from the current request and recent turns.
 
@@ -25,6 +26,7 @@ def collect_agent_observations(
     if selection["activities_scope"] is not None and "activities" not in excluded_sources:
         context["activities"] = activity_builder(
             connection, scope=selection["activities_scope"],
+            **({'activity_ids': activity_ids} if activity_ids else {}),
         )
     if selection["include_exams"] and "exams" not in excluded_sources:
         context["exams"] = exam_builder(

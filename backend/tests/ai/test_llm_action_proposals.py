@@ -383,6 +383,7 @@ class ModelChatApprovalTests(unittest.TestCase):
         identifier = self.seed_delete_target(activity_type="weekly", date=None, weekday="Monday", source="UoA",
                                            external_id="not-for-the-model")
         deletion = self.model.return_value
+        self.request['message'] = 'Delete the Study activity.'
         self.model.side_effect = [SimpleNamespace(status="completed", output=[], output_parsed={
             "message": None, "actions": [], "missing_context": [{"source": "activities", "time_scope": "all"}]}), deletion]
         self.assertEqual(self.send().status_code, 200)
@@ -397,6 +398,20 @@ class ModelChatApprovalTests(unittest.TestCase):
         self.assertIn("entire recurring activity", view["display_description"])
         self.assertIn("Source: UoA", view["display_description"])
         self.assertNotIn("not-for-the-model", view["display_description"])
+
+    def test_exact_id_beyond_twenty_is_supplied_on_first_call(self):
+        with closing(sqlite3.connect(self.path)) as connection:
+            for index in range(20):
+                activities.add_activity(connection, list(ARGUMENTS), list({**ARGUMENTS, 'name': f'Earlier {index}'}.values()))
+        identifier = self.seed_delete_target()
+        self.assertEqual(self.send().status_code, 200)
+        self.model.assert_called_once()
+        payload = json.loads(self.model.call_args.kwargs['input'][-1]['content'])
+        observation = payload['observations']['activities']
+        self.assertEqual(len(observation['all_activities']), 20)
+        self.assertEqual(observation['requested_activities'][0]['id'], identifier)
+        self.assertEqual(self.proposals()[0]['status'], 'pending_approval')
+        self.assertEqual(len(self.rows()), 21)
 
     def edit_response(self, identifier, changes=None):
         self.model.return_value = native_response(name="edit_activity", arguments={

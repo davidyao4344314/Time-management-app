@@ -2,7 +2,7 @@
 
 from datetime import datetime, timedelta
 
-from backend.app.planner.activities import get_all_activities
+from backend.app.planner.activities import get_all_activities, get_activity_by_id
 from backend.app.planner.calendar import (
     get_current_and_next_activities,
     get_current_date,
@@ -91,7 +91,26 @@ def _busy_ranges(occurrences):
     return busy, untimed
 
 
-def build_activity_observation(connection, scope="week"):
+def build_activity_observation(connection, scope="week", *, activity_ids=()):
+    """Add at most three exact requested definitions without expanding the broad limit."""
+    if len(activity_ids) > 3 or any(type(identifier) is not int or not 0 < identifier <= 2**63-1 for identifier in activity_ids):
+        raise ValueError('Request at most three valid activity IDs.')
+    observation = _build_activity_observation(connection, scope)
+    if activity_ids:
+        targets, missing = [], []
+        for identifier in dict.fromkeys(activity_ids):
+            row = get_activity_by_id(connection, identifier)
+            if row is None:
+                missing.append(identifier)
+            else:
+                targets.append(_brief_activity_definition(row))
+        detailed = bounded_details(targets)
+        observation.update(requested_activities=detailed, requested_activity_count=len(targets),
+                           missing_activity_ids=missing, requested_activities_truncated=len(detailed)<len(targets))
+    return observation
+
+
+def _build_activity_observation(connection, scope):
     """Summarize the requested date window, or all activity definitions.
 
     Current activities stay a list so overlapping activities remain visible,

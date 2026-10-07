@@ -16,6 +16,7 @@ from backend.app.ai.agent.coverage import exam_context_coverage, add_exam_covera
 from backend.app.ai.context.selection import select_agent_context
 from backend.app.ai.context.policy import apply_context_exclusions, excluded_context_sources, memory_selection_allowed
 from backend.app.ai.context.exam_policy import choose_exam_filter
+from backend.app.ai.context.activity_targets import requested_activity_ids
 from backend.app.ai.observations.activities import build_activity_observation
 from backend.app.ai.observations.collect import collect_agent_observations
 from backend.app.ai.observations.exams import build_exam_observation
@@ -40,6 +41,7 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
 
     excluded_sources = excluded_context_sources(user_request)
     exam_filter = choose_exam_filter(user_request, recent_turns)
+    target_ids = requested_activity_ids(user_request) if 'activities' not in excluded_sources else []
 
     agent_settings = get_agent_model_settings()
     output_limit, timeout = reasoning.proposal_request_limits(
@@ -65,7 +67,7 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
                 classifier_model=PROPOSAL_MODEL,
                 final_selection=deepcopy(selection), initial_status=initial_status, final_status=context_status,
                 excluded_sources=sorted(excluded_sources),
-                context_dependent=bool(selection.get("files") or (recent_turns and re.search(r"\b(it|that|those|same|earlier|previously)\b", user_request.casefold()))),
+                context_dependent=bool(target_ids or selection.get("files") or (recent_turns and re.search(r"\b(it|that|those|same|earlier|previously)\b", user_request.casefold()))),
                 recovery_requested=bool(recovery_trace["attempts"] or memory_requested),
                 recovery_completed=recovery_trace["status"] == "completed",
             )
@@ -105,6 +107,9 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
         }
         public["file_refs"] = ([item["file_id"] for item in file_observation.get("files", [])][:3]
                                if context_status["files"] == "provided" else [])
+        if target_ids:
+            public['activity_target_lookup'] = {'requested_ids': target_ids,
+                'matched_count': context.get('activities', {}).get('requested_activity_count', 0)}
         return {**proposal, 'agent_context':public}
 
     def collect(selected):
@@ -117,6 +122,7 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
             **({'excluded_sources': excluded_sources} if excluded_sources else {}),
             **({'memory_builder': memory_reader} if memory_reader is not None else {}),
             **({'file_reader': file_reader} if file_reader is not None else {}),
+            **({'activity_ids': target_ids} if target_ids else {}),
         )
 
     with OpenAI(api_key=os.environ["OPENAI_API_KEY"].strip(), timeout=timeout, max_retries=0) as client:
@@ -128,6 +134,8 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
             **({"file_reference": file_reference} if file_reference is not None else {}),
         )
         selection = apply_context_exclusions(selection, excluded_sources)
+        if target_ids and selection['activities_scope'] is None:
+            selection['activities_scope'] = 'all'
         if routing_evidence is not None:
             routing_evidence["initial_selection"] = deepcopy(selection)
         context = dict(collect(selection))

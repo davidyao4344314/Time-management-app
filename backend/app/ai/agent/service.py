@@ -14,7 +14,7 @@ from backend.app.ai.config import (
 from backend.app.ai.agent import reasoning
 from backend.app.ai.agent.coverage import exam_context_coverage, add_exam_coverage_notice
 from backend.app.ai.context.selection import select_agent_context
-from backend.app.ai.context.policy import apply_context_exclusions, excluded_context_sources
+from backend.app.ai.context.policy import apply_context_exclusions, excluded_context_sources, memory_selection_allowed
 from backend.app.ai.context.exam_policy import choose_exam_filter
 from backend.app.ai.observations.activities import build_activity_observation
 from backend.app.ai.observations.collect import collect_agent_observations
@@ -186,6 +186,9 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
                 **({"scope": selection["memory"]["scope"]}
                    if (selection.get("memory") or {}).get("scope") else {}),
             }).model_dump()
+            if not memory_selection_allowed(memory_selection, excluded_sources):
+                recovery_trace['status'] = 'rejected'
+                return finish(_memory_clarification())
             old_query = (selection.get("memory") or {}).get("query")
             old_sources = (selection.get('memory') or {}).get('sources', [])
             already_searched = old_query == request and set(memory_selection['sources']) <= set(old_sources)

@@ -16,6 +16,19 @@ EXCLUDED = {"activities_scope": None, "include_exams": False, "exam_scope": None
 
 
 class ContextPolicyTests(unittest.TestCase):
+    def test_global_memory_exclusion_preserves_explicit_current_chat_scope(self):
+        message = 'Do not use global memory; summarize what we decided in this chat last month.'
+        excluded = excluded_context_sources(message)
+        self.assertEqual(excluded, {'global_memory'})
+        for scope in ('global', None, 'current_chat'):
+            selection = {**EXCLUDED, 'memory': {'scope': scope}}
+            sanitized = apply_context_exclusions(selection, excluded)
+            self.assertEqual('memory' in sanitized, scope == 'current_chat')
+            reader = Mock(return_value={'items': []})
+            context = collect_agent_observations(None, selection, excluded_sources=excluded, memory_builder=reader)
+            self.assertEqual('memory' in context, scope == 'current_chat')
+            self.assertEqual(reader.call_count, int(scope == 'current_chat'))
+
     def test_explicit_calendar_exclusion_blocks_both_calendar_sources(self):
         for message in (
             "Don't use my calendar; give general wake-up advice for tomorrow.",

@@ -18,7 +18,8 @@ _SOURCE_OBJECT = re.compile(
     r"\s+(?:(?:me|my|the|any|all|our|your|personal|scheduled|upcoming|"
     r"current|existing|stored|uploaded|imported|daily|weekly|formal|final|of)\s+)*"
     r"(?P<source>calendar|schedule|timetable|activity|activities|exam|exams|"
-    r"test|tests|assessment|assessments|deadline|deadlines|quiz|quizzes|file|files|document|documents)\b"
+    r"test|tests|assessment|assessments|deadline|deadlines|quiz|quizzes|file|files|document|documents|"
+    r"global memory|shared memory|cross-chat memory)\b"
 )
 _WITHOUT_ACCESS = re.compile(
     r"^\s+(?:using|showing|including|loading|fetching|reading|consulting|"
@@ -56,6 +57,8 @@ def excluded_context_sources(user_message):
                     excluded.add("activities")
                 elif source in {"file", "files", "document", "documents"}:
                     excluded.add("files")
+                elif source in {"global memory", "shared memory", "cross-chat memory"}:
+                    excluded.add("global_memory")
                 elif source in {"quiz", "quizzes", "test", "tests", "assessment", "assessments"} and explicit_exam_filter(message) == "formal_exams":
                     # Excluding quizzes while requesting formal exams narrows
                     # the subset; it must not block the entire exams source.
@@ -79,4 +82,11 @@ def apply_context_exclusions(selection, excluded_sources):
         selected.update(include_exams=False, exam_scope=None)
     if "files" in excluded_sources:
         selected.pop("files", None)
+    if selected.get('memory') is not None and not memory_selection_allowed(selected['memory'], excluded_sources):
+        selected.pop('memory', None)
     return selected
+
+
+def memory_selection_allowed(selection, excluded_sources):
+    """Global exclusions never block explicitly selected owned current-chat history."""
+    return not ('global_memory' in excluded_sources and selection.get('scope') != 'current_chat')

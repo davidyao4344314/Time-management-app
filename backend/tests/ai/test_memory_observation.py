@@ -229,6 +229,21 @@ class MemoryWorkflowTests(unittest.TestCase):
     def response(self, request=None):
         return SimpleNamespace(status="completed", output_parsed={"message": "Reply", "actions": [], "memory_request": request})
 
+    def test_excluded_global_memory_is_blocked_initially_and_on_followup(self):
+        request = {'time_reference': 'last_month', 'search_terms': ['study']}
+        selected = {'activities_scope': None, 'include_exams': False, 'exam_scope': None,
+                    'memory': {'scope': 'global', 'sources': ['raw_archive'], 'query': request}}
+        reader = Mock()
+        with patch.object(service, 'select_agent_context', return_value=selected), \
+             patch.object(reasoning, 'request_agent_response', return_value=self.response(request)) as model:
+            result = service.get_agent_proposal(Mock(), 'Do not use global memory; summarize this chat.',
+                [], session_id='one', memory_reader=reader)
+        reader.assert_not_called()
+        model.assert_called_once()
+        self.assertEqual(result['actions'], [])
+        self.assertIsNone(result['memory_request'])
+
+
     def test_one_followup_only_and_no_repeated_loop(self):
         request = {"time_reference": None, "search_terms": ["COMPSCI"]}
         memory = {"status": "ok", "items": [{"text": "Past discussion"}], "truncated": False, "unavailable_sources": []}

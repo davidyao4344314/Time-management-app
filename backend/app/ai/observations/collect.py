@@ -31,7 +31,9 @@ def collect_agent_observations(
             connection, scope=selection["exam_scope"],
             **({"assessment_filter": exam_filter} if exam_filter != "all" else {}),
         )
-    if selection.get("memory") is not None:
+    if selection.get("memory") is not None and not (
+        'global_memory' in excluded_sources and selection['memory'].get('scope') != 'current_chat'
+    ):
         context["memory"] = (memory_builder(selection['memory']) if memory_builder is not None
                              else build_memory_observation(selection["memory"], session_id=session_id))
     if selection.get("files") is not None and "files" not in excluded_sources:

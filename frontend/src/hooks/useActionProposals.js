@@ -21,7 +21,7 @@ export default function useActionProposals(refreshKey, onResult) {
   const previousRefreshKey = useRef(refreshKey)
   const refreshQueued = useRef(false)
   const resultCallback = useRef(onResult)
-  resultCallback.current = onResult
+  useEffect(() => { resultCallback.current = onResult }, [onResult])
 
   async function run(path, mode, options = {}) {
     if (!mounted.current || inFlight.current) return false

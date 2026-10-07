@@ -1,0 +1,280 @@
+/* Shared layout safeguards. Scoped selectors also survive lazy page CSS loading. */
+body .page,
+body .top-bar h1,
+.page :is(.ai-agent-content, .chat-message-list, .chat-bubble,
+  .add-activity-fields, .add-activity-fields label, .activity-search-details,
+  .activity-card > div, .activities-card > div, .ai-settings-form,
+  .calendar-heading-row, .calendar-import-actions, .file-import-panel,
+  .file-import-list li, .action-proposal-card) {
+  min-width: 0;
+}
+
+.page :is(h2, h3, h4, p, legend, .activity-search-details,
+  .delete-name-match, .edit-current-value, .ai-settings, .file-import-panel) {
+  overflow-wrap: anywhere;
+}
+
+.page :is(button, input, select, textarea),
+.canvas-modal :is(button, input),
+.edit-activity-form :is(button, input, select) {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.page button,
+.canvas-modal button,
+.edit-activity-form button {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.page .activities-heading-row,
+.page .activity-search-actions {
+  flex-wrap: wrap;
+}
+
+/* Keep native date/time controls and pasted content inside their grid cell. */
+body .add-activity-fields :is(input, select),
+.page .ai-settings-form :is(input, select),
+.canvas-modal input {
+  min-width: 0;
+  width: 100%;
+}
+
+.page :is(.exam-import-row legend, .delete-name-results) {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.page .ai-agent-response-text pre {
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.page .ai-agent-response-text :not(pre) > code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.page .file-import-form input[type='file'] {
+  width: 100%;
+}
+
+body .edit-activity-overlay,
+body .canvas-modal-overlay {
+  min-width: 0;
+}
+
+body .edit-activity-form,
+body .canvas-modal {
+  min-width: 0;
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}
+
+body .edit-activity-form {
+  max-width: min(100%, 48rem);
+}
+
+/* Tablet and phone: readable controls without enlarging the desktop UI. */
+@media (max-width: 64rem) {
+  .page button,
+  .canvas-modal button,
+  .edit-activity-form button {
+    min-height: 2.75rem;
+  }
+
+  .page .add-activity-button {
+    min-width: 2.75rem;
+    flex-shrink: 0;
+  }
+
+  .page .activity-search-actions {
+    opacity: 1;
+    visibility: visible;
+  }
+
+  .page :is(input:not([type='checkbox']):not([type='radio']), select),
+  .canvas-modal input,
+  .edit-activity-form :is(input, select) {
+    min-height: 2.75rem;
+    font-size: 1rem;
+  }
+
+  .page :is(textarea, summary) {
+    font-size: 1rem;
+  }
+
+  .page summary {
+    min-height: 2.75rem;
+    padding-block: 0.5rem;
+  }
+
+  .page .ai-agent-request textarea {
+    max-height: min(14rem, 30dvh);
+    min-height: 5rem;
+    overflow-y: auto;
+  }
+}
+
+/* Reuse the app's existing 36rem phone breakpoint. */
+@media (max-width: 36rem) {
+  body .page {
+    padding: 1rem 0.75rem;
+  }
+
+  body .top-bar {
+    gap: 0.5rem;
+    padding-inline: 0.75rem;
+  }
+
+  body .top-bar h1 {
+    overflow-wrap: anywhere;
+  }
+
+  body .menu {
+    width: min(100%, 18rem);
+    padding: 0.75rem;
+  }
+
+  .page :is(.chat-toolbar, .activities-heading-row, .calendar-heading-row) {
+    gap: 0.5rem;
+  }
+
+  .page .chat-toolbar .chat-secondary {
+    flex: 1 1 auto;
+  }
+
+  .page :is(.activity-card, .activities-card, .activity-search-card) {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.5rem;
+    padding: 0.75rem;
+  }
+
+  .page :is(.activity-time, .activities-time) {
+    white-space: normal;
+  }
+
+  body .add-activity-form,
+  .page .exam-import-row {
+    padding: 0.75rem;
+  }
+
+  body .add-activity-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .page .add-activity-actions,
+  .edit-activity-form .add-activity-actions,
+  .canvas-modal-actions,
+  .page .action-proposal-controls {
+    gap: 0.5rem;
+  }
+
+  .page .add-activity-actions button,
+  .edit-activity-form .add-activity-actions button,
+  .canvas-modal-actions button,
+  .page .action-proposal-controls button,
+  .page .activity-search-actions button {
+    flex: 1 1 auto;
+  }
+
+  .page .calendar-import-actions {
+    width: 100%;
+  }
+
+  .page .calendar-import-actions button {
+    flex: 1 1 auto;
+  }
+
+  .page .calendar-import-actions[role='group'] {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .page .calendar-scroll {
+    max-width: 100%;
+    margin-top: 1rem;
+    /* Horizontal scrolling stays inside the existing readable weekly grid. */
+    overflow: auto;
+  }
+
+  .page .chat-bubble {
+    max-width: 100%;
+    padding: 0.75rem;
+  }
+
+  .page :is(.agent-context, .action-proposal-panel, .action-proposal-card,
+    .file-import-panel, .agent-context-list > li) {
+    padding: 0.75rem;
+  }
+
+  .page .agent-context-fields {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.25rem;
+  }
+
+  .page .agent-context-fields dt:not(:first-child) {
+    margin-top: 0.5rem;
+  }
+
+  .page .agent-context-authority {
+    margin-left: 0;
+    display: block;
+  }
+
+  .page .ai-agent-request {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.5rem;
+    margin-top: 1rem;
+    padding: 0.5rem;
+    bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .page .ai-agent-request :is(label, textarea) {
+    grid-column: 1 / -1;
+  }
+
+  .page .ai-agent-request textarea {
+    padding: 0.75rem;
+    max-height: min(10rem, 25dvh);
+  }
+
+  .page .ai-agent-ask {
+    grid-column: 2;
+    grid-row: 3;
+    align-self: center;
+  }
+
+  .page .ai-agent-request .agent-context-note:first-of-type {
+    grid-column: 1;
+    grid-row: 3;
+    align-self: center;
+  }
+
+  .page .ai-agent-request .agent-context-note:last-of-type {
+    grid-column: 1 / -1;
+  }
+
+  .page .file-import-form {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .page .exam-clipboard-form textarea {
+    max-height: 40dvh;
+    overflow-y: auto;
+  }
+}
+
+/* On short phones or when the keyboard reduces the viewport, don't cover chat. */
+@media (max-width: 36rem) and (max-height: 40rem) {
+  .page .ai-agent-request {
+    position: relative;
+    bottom: auto;
+  }
+}

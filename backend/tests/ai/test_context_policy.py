@@ -128,8 +128,15 @@ class ContextPolicyTests(unittest.TestCase):
 
     def test_non_personal_time_mentions_reach_semantic_routing(self):
         for message in ("Tell me a joke about alarm clocks tomorrow.",
-                        "How does an alarm clock work today?"):
+                        "How does an alarm clock work today?",
+                        "Explain why exams cause stress.",
+                        "What is a study plan?",
+                        "Why do exams cause stress?",
+                        "What are study techniques?"):
             self.assertFalse(assess_stage_one(message)["confident"])
+        for message in ('What exams do I have today?', 'What are my exams this month?',
+                        'What should I study tonight?'):
+            self.assertTrue(assess_stage_one(message)['confident'])
 
 
 if __name__ == "__main__":

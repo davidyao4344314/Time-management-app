@@ -128,7 +128,9 @@ def assess_stage_one(user_message, recent_turns=None):
         reason = "ambiguous_conversation_reference"
     elif "activities" in excluded_context_sources(message):
         reason = "negated_calendar_reference"
-    elif _has_phrase(message, ("joke", "how does", "general advice", "general tips", "generic advice")):
+    elif (_has_phrase(message, ("joke", "how does", "general advice", "general tips", "generic advice"))
+          or (re.search(r"\b(?:what (?:is|are)|explain (?:why|how|what)|why (?:do|does|are))\b", message)
+              and not re.search(r"\b(?:my|our|me)\b", message))):
         reason = "requires_semantic_information_dependencies"
     elif not any(_has_phrase(message, phrases) for phrases in phrase_groups):
         reason = "no_meaningful_keyword_match"

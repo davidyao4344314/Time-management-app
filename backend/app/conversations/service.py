@@ -95,7 +95,7 @@ def send_message(owner_id, conversation_id, request_id, message, *, register_act
                 try:
                     pending = describe_activity_proposals(observation_connection, pending)
                 except ActivityValidationError:
-                    raise InvalidProposalError("The proposed activity deletion does not match a current record.") from None
+                    raise InvalidProposalError("The proposed activity change is invalid for the current record.") from None
             finally:
                 observation_connection.close()
             messages = storage.complete_request(connection, conversation_id, request_id, proposal)

@@ -8,6 +8,8 @@ from datetime import date, datetime
 
 from backend.app.planner.activities import add_activity, delete_activity, edit_activity, get_activity_by_id
 
+EDITABLE_ACTIVITY_COLUMNS = ("name", "category", "subject", "activity_type", "date", "weekday", "start_time", "end_time")
+
 
 class ActivityValidationError(ValueError):
     """An expected validation failure; the HTTP adapter maps it to a response."""
@@ -134,7 +136,7 @@ def create_activity_record(connection, prepared):
     return get_activity_by_id(connection, activity_id)
 
 
-def prepare_activity_deletion(connection, activity_id, expected_name):
+def get_activity_target(connection, activity_id, expected_name):
     """Read the exact target for preview/preflight, without changing SQLite."""
     activity = get_activity_by_id(connection, activity_id)
     if activity is None:
@@ -144,6 +146,63 @@ def prepare_activity_deletion(connection, activity_id, expected_name):
     columns = ("id", "name", "category", "subject", "activity_type", "date", "weekday",
                "start_time", "end_time", "active_start_date", "active_end_date", "source")
     return dict(zip(columns, activity))
+
+
+def prepare_activity_deletion(connection, activity_id, expected_name):
+    return get_activity_target(connection, activity_id, expected_name)
+
+
+def prepare_activity_update(connection, activity_id, expected_name, changes):
+    """Validate a final activity and compute its requested updates without writing."""
+    target = get_activity_target(connection, activity_id, expected_name)
+    if not isinstance(changes, list) or not 1 <= len(changes) <= len(EDITABLE_ACTIVITY_COLUMNS):
+        raise ActivityValidationError(status_code=400, detail="Choose one or more editable fields.")
+    requested = {}
+    for change in changes:
+        if (not isinstance(change, dict) or set(change) != {"column_name", "new_value"}
+                or change["column_name"] not in EDITABLE_ACTIVITY_COLUMNS
+                or change["column_name"] in requested
+                or (change["new_value"] is not None and not isinstance(change["new_value"], str))):
+            raise ActivityValidationError(status_code=400, detail="The requested activity fields are invalid.")
+        requested[change["column_name"]] = change["new_value"]
+    fields = {column: target[column] for column in EDITABLE_ACTIVITY_COLUMNS}
+    fields.update(requested)
+    activity_type = fields.get("activity_type")
+    if activity_type not in {"one_time", "daily", "weekly"}:
+        raise ActivityValidationError(status_code=400, detail="Invalid activity type.")
+    # Never silently accept a requested non-null value for an inapplicable field.
+    if activity_type != "one_time" and requested.get("date") is not None:
+        raise ActivityValidationError(status_code=400, detail="Date is only used for one-time activities.")
+    if activity_type != "weekly" and requested.get("weekday") is not None:
+        raise ActivityValidationError(status_code=400, detail="Weekday is only used for weekly activities.")
+    touched = set(requested)
+    if "activity_type" in requested:
+        touched.update(("date", "weekday"))
+        if activity_type != "one_time":
+            fields["date"] = None
+        if activity_type != "weekly":
+            fields["weekday"] = None
+    if not fields.get("name") or not fields.get("category"):
+        raise ActivityValidationError(status_code=400, detail="Name and category are required.")
+    columns, values = prepare_new_activity(fields)
+    normalized = dict(zip(columns, values))
+    updates = {column: normalized[column] for column in EDITABLE_ACTIVITY_COLUMNS
+               if column in touched and normalized[column] != target[column]}
+    if not updates:
+        raise ActivityValidationError(status_code=400, detail="The proposed edit does not change this activity.")
+    return target, updates
+
+
+def update_activity_fields(connection, activity_id, expected_name, changes):
+    """Update in place through existing CRUD; final-value validation and writes are atomic."""
+    if connection.in_transaction:
+        raise ActivityValidationError(status_code=409, detail="Editing needs its own transaction.")
+    with connection:
+        connection.execute("BEGIN IMMEDIATE")
+        _, updates = prepare_activity_update(connection, activity_id, expected_name, changes)
+        for column, value in updates.items():
+            edit_activity(connection, activity_id, column, value, commit=False)
+    return {"activity_id": activity_id, "updated": True, "fields": list(updates)}
 
 
 def delete_activity_record(connection, activity_id, expected_name):
@@ -166,19 +225,9 @@ def validate_activity_edit(activity_id, fields):
             detail="The activity ID in the URL and request body must match.",
         )
 
-    editable_columns = {
-        "name",
-        "category",
-        "subject",
-        "activity_type",
-        "date",
-        "weekday",
-        "start_time",
-        "end_time",
-    }
     column_name = fields["column_name"].strip()
 
-    if column_name not in editable_columns:
+    if column_name not in EDITABLE_ACTIVITY_COLUMNS:
         raise ActivityValidationError(status_code=400, detail="That field cannot be edited.")
 
     return column_name

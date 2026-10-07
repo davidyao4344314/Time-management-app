@@ -90,6 +90,51 @@ class DeleteActivityAction(BaseModel):
     arguments: DeleteActivityArguments
 
 
+class EditActivityChange(BaseModel):
+    """One editable field; null clears optional values, never protected metadata."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    column_name: Literal["name", "category", "subject", "activity_type", "date", "weekday", "start_time", "end_time"]
+    new_value: str | None
+
+    @model_validator(mode="after")
+    def valid_value(self):
+        value = self.new_value
+        if self.column_name in {"name", "category", "activity_type"} and (value is None or not value.strip()):
+            raise ValueError("A value is required for this field.")
+        if self.column_name == "activity_type" and value not in {"one_time", "daily", "weekly"}:
+            raise ValueError("Invalid activity type.")
+        if self.column_name == "weekday" and value is not None and value not in WEEKDAYS:
+            raise ValueError("Invalid weekday.")
+        if self.column_name == "date" and value is not None:
+            if date.fromisoformat(value).isoformat() != value:
+                raise ValueError("Date must use YYYY-MM-DD.")
+        if self.column_name in {"start_time", "end_time"} and value is not None:
+            if not re.fullmatch(r"\d{2}:\d{2}", value):
+                raise ValueError("Times must use HH:MM.")
+            datetime.strptime(value, "%H:%M")
+        return self
+
+
+class EditActivityArguments(DeleteActivityArguments):
+    """A checked activity target and a bounded, non-duplicated list of changes."""
+
+    changes: list[EditActivityChange] = Field(min_length=1, max_length=8)
+
+    @model_validator(mode="after")
+    def unique_fields(self):
+        names = [change.column_name for change in self.changes]
+        if len(names) != len(set(names)):
+            raise ValueError("Edit each field at most once.")
+        return self
+
+
+class EditActivityAction(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    tool: Literal["edit_activity"]
+    arguments: EditActivityArguments
+
+
 class ActionRoute(str, Enum):
     NONE = "none"
     TOOL_ACTION = "tool_action"

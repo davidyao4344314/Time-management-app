@@ -1131,7 +1131,7 @@ class AIProposalTests(unittest.TestCase):
             "ask one simple follow-up question",
             "user-facing message",
             "separate actions list",
-            "allowed tools are add_activity and delete_activity",
+            "allowed tools are add_activity, delete_activity and edit_activity",
             "Never execute a tool, generate SQL",
             '"message": "response for the user", "actions": []',
             '"memory_request": null',

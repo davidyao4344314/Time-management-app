@@ -1,7 +1,7 @@
 # Study Planning App
 
 This README explains how to run the project and describes the backend as it
-currently works. The AI agent can **propose** adding or deleting one activity.
+currently works. The AI agent can **propose** adding, deleting or editing one activity.
 SQLite changes only when the user separately clicks **Confirm** on its pending
 proposal, never automatically.
 
@@ -21,6 +21,8 @@ the existing executor, not direct frontend activity creation. Commit 8.4 connect
 native model tool requests to pending proposals in this same panel. The tools now
 include `delete_activity` for one current ID/name. Its review card uses actual
 database details and warns that recurring deletion removes the whole activity.
+`edit_activity` uses the same review panel, showing old → new values. Confirmation
+updates the existing ID atomically and preserves source/external metadata.
 Ordinary replies need no tool; unknown/invalid calls fail safely. Model requests
 never approve or execute. The sample proposal source remains opt-in via
 `ACTION_LAYER_DEV_MODE=1`; confirming it saves a real local test activity.
@@ -1040,8 +1042,9 @@ an `actions` list:
 The example is a proposal shape, **not** a record of an activity that was
 created. A response with `"actions": []` is also valid. Validation rejects
 unknown tools and malformed activity arguments. Supported tools are `add_activity`
-and `delete_activity`; the latter takes exactly `activity_id` and `expected_name`
-from current app data. The agent cannot issue SQL or approve its own proposals.
+and `delete_activity`, plus `edit_activity` for a current ID/name and a list of
+allowed field changes. Omitted fields remain unchanged; null clears optional
+values. The agent cannot issue SQL or approve its own proposals.
 The model and reasoning
 effort for the main agent are configurable separately from the routing stages.
 
@@ -1142,10 +1145,10 @@ verify orchestration and validation, not the live model's detection accuracy.
 
 The React AI Agent now sends conversation messages through FastAPI and displays
 saved replies, proposals and context inspectors. AI Settings configures the key
-locally without returning it to React. Native add/delete activity tool requests now
+locally without returning it to React. Native add/delete/edit activity tool requests now
 become pending proposals in the existing Confirm/Cancel panel. The separate
 owner-scoped approval endpoint changes SQLite only for explicitly confirmed proposals.
-There is no automatic execution, exam/edit/bulk-delete agent tool, durable proposal
+There is no automatic execution, exam/bulk-change agent tool, durable proposal
 storage or post-execution model continuation. Manual activity creation is unchanged.
 
 Automatic archive-compaction runs, automatic durable-memory extraction, Screen

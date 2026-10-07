@@ -6,20 +6,21 @@ AI request never executes a planner tool. Commit 8.3 adds the generic approval
 UI/API. Commit 8.4 connects native LLM function requests to pending proposals
 in that same UI; only a separate explicit user confirmation saves an activity.
 The tools now also support `delete_activity` with the same separate confirmation
-boundary. Exam deletion, bulk deletion and editing tools are not enabled.
+boundary. `edit_activity` now uses it too, with a database-backed old → new review
+and an atomic in-place update. Exam tools and bulk changes are not enabled.
 
 ## Structure and responsibility
 
 ```text
 backend/app/ai/actions/
 ├── __init__.py       # Package description; no initialization side effects
-├── contracts.py      # Add/delete activity schemas + routes, proposals/results/statuses
+├── contracts.py      # Add/delete/edit activity schemas + routes, proposals/results/statuses
 ├── tools.py          # Tool public contract, strict input validation, optional trusted handler
 ├── registry.py       # Explicit tool registration/discovery; proposal-only default registry
 ├── routing.py        # Existing agent output -> validated pending proposals or reserved route
 ├── approval.py       # Backend-held temporary lifecycle; explicit approve/reject decisions
 ├── execution.py      # Approved ID -> trusted tool -> ActionResult
-├── activity_tool.py  # Add/delete adapters and read-only deletion preview -> Activity service
+├── activity_tool.py  # Activity adapters and read-only change previews -> Activity service
 ├── service.py        # Owner-scoped presentation and decisions; temporary state
 └── planning.py       # ResponsePlanner interface only; no implementation or model call
 ```
@@ -57,7 +58,7 @@ registering fresh completed requests with the existing owner-scoped service.
 `AddActivityTool(connection)` is a trusted `Tool` adapter. The caller owns the
 SQLite connection and explicitly opts in using `create_activity_tool_registry(connection)`.
 It originally registered only `add_activity`; it now also registers
-`DeleteActivityTool`, described below. The default
+`DeleteActivityTool` and `EditActivityTool`, described below. The default
 `create_proposal_tool_registry()` remains non-executable. Constructing either
 registry creates no database rows and opens no connection.
 
@@ -91,7 +92,7 @@ or failed proposals cannot execute again within the same boundary.
 
 Commit 8.2 establishes this deterministic backend path. Commit 8.3 adds manual
 confirmation below, and Commit 8.4 connects chat requests to pending review.
-There are still no exam/edit/bulk-delete tools or durable approval storage.
+There are still no exam/bulk-change tools or durable approval storage.
 Handler/service failures use the existing sanitized unconfirmed-outcome behavior;
 a failed post-insert read must not be reported as proof that no row was created.
 
@@ -174,7 +175,7 @@ storage, multi-worker coordination or a restart-safe exactly-once guarantee.
 
 ```text
 existing observations + recent chat + user request
-    -> existing Responses request + schema-only add_activity/delete_activity definitions
+    -> existing Responses request + schema-only add/delete/edit activity definitions
     -> native function_call (or ordinary structured advice)
     -> agent/tool_calls.py: normalize and validate against ToolRegistry
     -> existing internal {message, actions, memory_request, missing_context}
@@ -183,7 +184,7 @@ existing observations + recent chat + user request
     -> Proposed changes panel -> explicit Confirm / Cancel
 ```
 
-`public_agent_tools()` derives both function definitions from the existing
+`public_agent_tools()` derives all three function definitions from the existing
 schema-only registry: name, description, strict input schema, no handler or
 approval authority. `tool_choice="auto"` allows ordinary answers;
 `parallel_tool_calls=False` limits the request to zero/one call. The adapter
@@ -191,7 +192,7 @@ reads Responses `function_call` items (`name`, JSON `arguments`, `call_id`,
 completed status), not free-form text. This follows the
 [OpenAI function-calling format](https://developers.openai.com/api/docs/guides/function-calling).
 
-Registry lookup and strict add/delete argument validation reject unknown
+Registry lookup and strict activity-tool argument validation reject unknown
 tools, missing/extra fields, invalid recurrence/date/time values and forged
 approval/metadata fields. SDK JSON parsing errors become sanitized response
 errors. Tool calls cannot coexist with unresolved context/memory requests.
@@ -243,7 +244,7 @@ Optional live test (uses your configured key and may incur charges):
 6. Request another and Confirm once. Check Activities/Calendar for one saved row.
 7. Refresh/replay the chat request: no second proposal or saved copy is created.
 
-Only `add_activity` and `delete_activity` are exposed. Additional tools, durable proposals, action editing,
+Only `add_activity`, `delete_activity` and `edit_activity` are exposed. Additional tools, durable proposals, editing pending proposals,
 post-execution model continuation, sequential execution loops and a date engine
 remain deferred. Context routing, recurrence, imports and database schemas are unchanged.
 Compact activity observations now include database `id` and `activity_type` for
@@ -303,6 +304,67 @@ review the card and Confirm once; open Activities/Calendar to verify removal.
 Do not test on records you need to keep. A live AI request may incur charges;
 confirmation itself makes no additional model request. Reload/restart loses
 pending proposals/receipts as before and never recreates authority from old chat.
+
+## Approved editing of one activity
+
+Use the same native request → pending card → Confirm/Cancel flow. The model
+can request one or several changes to a current activity:
+
+```json
+{
+  "activity_id": 12,
+  "expected_name": "COMPSCI revision",
+  "changes": [
+    {"column_name": "start_time", "new_value": "19:00"},
+    {"column_name": "end_time", "new_value": "20:00"}
+  ]
+}
+```
+
+`EditActivityArguments` permits only the eight existing editable columns:
+`name`, `category`, `subject`, `activity_type`, `date`, `weekday`, `start_time`,
+`end_time`. Changes contain a string or null value, at most eight distinct
+fields, and no extra keys. IDs, source, external IDs, active date ranges and
+UID mappings cannot be edited. Native calls remain limited to one tool request
+per reply; one edit request may contain several changes.
+
+`activity_service.prepare_activity_update()` checks ID/name and merges only
+the requested fields into the actual row. It reuses `prepare_new_activity()`
+for final-state domain validation, including the combined start/end range.
+One-time activities require a date; weekly activities require a weekday.
+Changing recurrence clears unused date/weekday values; a requested non-null
+value for an inapplicable field is rejected. Null can clear optional subject/time
+values; no fake times are assigned. Invalid and no-op edits create no pending card.
+
+Read-only preview shows the current activity and each actual old → new change,
+including automatic null clearing. Recurring edits apply to the whole activity,
+not one occurrence; imported edits affect only the local row. Cancel opens no
+execution connection. Confirm rechecks ID/name and final values before writing.
+
+`update_activity_fields()` owns one SQLite transaction, revalidates under its
+write lock, then calls the existing `edit_activity(..., commit=False)` for each
+changed field. It never deletes/recreates the activity or adds duplicate UPDATE
+SQL. A failure rolls back the complete edit; executor failures remain sanitized.
+The success receipt contains the activity ID, `updated: true`, and changed field
+names, not source identifiers. Existing manual edit endpoints are unchanged.
+
+No additional endpoint or frontend editing system is needed. The existing
+`/actions/proposals/{id}/decision` and generic review card are reused. No schema,
+Canvas/UoA import, recurrence or context-routing changes are made.
+
+Offline tests:
+
+```bash
+backend/.venv/bin/python -B -m unittest backend.tests.ai.test_edit_activity_tool backend.tests.ai.test_llm_action_proposals -v
+```
+
+For a live test, create a disposable activity and note its ID/name. Ask:
+“Change activity ID 12, COMPSCI revision, to 19:00–20:00.” Cancel first and verify
+it remains unchanged; ask again and Confirm. Open Activities/Calendar to check
+the updated times and unchanged ID. Test a recurrence change with an explicit
+date/weekday, and test a disposable imported activity to confirm source and
+external IDs remain unchanged. Live AI requests may incur charges; automated
+tests use temporary databases and mocked OpenAI, never your real records.
 
 ## Proposal and result contracts
 
@@ -373,8 +435,8 @@ pending_approval -> approved -> executing -> completed / failed
   The same proposal cannot be retried. Raw exception details are not exposed.
 - `create_proposal_tool_registry()` reuses `AddActivityArguments` but registers
   **no executable handler**. Even an approved `add_activity` fails safely with
-  `Execution is not available for this tool.` No exam/edit/bulk-delete tools exist;
-  single-record `delete_activity` is available only through explicit approval.
+  `Execution is not available for this tool.` No exam/bulk-change tools exist;
+  single-record delete/edit tools are available only through explicit approval.
 - Approval state is temporary and instance-scoped, not persistent or global. A
   restart loses it. The generic HTTP adapter enforces signed profile ownership,
   never accepts client-supplied approved objects, and only executes through the

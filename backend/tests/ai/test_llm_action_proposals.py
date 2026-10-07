@@ -45,7 +45,7 @@ def native_response(*, name="add_activity", arguments=None, text=None, **call_fi
 class NativeToolRequestTests(unittest.TestCase):
     def test_only_schema_is_public_and_tool_choice_is_optional(self):
         tools = public_agent_tools()
-        self.assertEqual(len(tools), 2)
+        self.assertEqual(len(tools), 3)
         tool = tools[0]
         self.assertEqual(tool["name"], "add_activity")
         self.assertEqual(set(tool), {"type", "name", "description", "parameters", "strict"})
@@ -61,6 +61,13 @@ class NativeToolRequestTests(unittest.TestCase):
         self.assertFalse(delete_tool["parameters"]["additionalProperties"])
         self.assertTrue(delete_tool["strict"])
         self.assertIsNone(create_proposal_tool_registry().resolve("delete_activity").handler)
+        edit_tool = tools[2]
+        self.assertEqual(edit_tool["name"], "edit_activity")
+        self.assertEqual(set(edit_tool["parameters"]["properties"]), {"activity_id", "expected_name", "changes"})
+        change_schema = edit_tool["parameters"]["$defs"]["EditActivityChange"]
+        self.assertEqual(set(change_schema["required"]), {"column_name", "new_value"})
+        self.assertFalse(change_schema["additionalProperties"])
+        self.assertIsNone(create_proposal_tool_registry().resolve("edit_activity").handler)
         client = Mock()
         reasoning.request_agent_response(client, "Hello", {}, [],
                                          {"model": "test-model", "reasoning_effort": "none"}, 1200)
@@ -147,6 +154,17 @@ class NativeToolRequestTests(unittest.TestCase):
             call_id="delete-sdk-call", status="completed")])
         parsed = parse_response(response=raw, input_tools=public_agent_tools(), text_format=AgentProposal)
         self.assertEqual(reasoning.parse_agent_response(parsed)["actions"][0]["arguments"], arguments)
+
+    def test_sdk_parses_edit_native_call_as_a_proposal_only(self):
+        arguments = {"activity_id": 12, "expected_name": "Study",
+                     "changes": [{"column_name": "subject", "new_value": "COMPSCI 130"}]}
+        raw = Response.model_construct(status="completed", output=[ResponseFunctionToolCall(
+            type="function_call", name="edit_activity", arguments=json.dumps(arguments),
+            call_id="edit-sdk-call", status="completed")])
+        parsed = parse_response(response=raw, input_tools=public_agent_tools(), text_format=AgentProposal)
+        result = reasoning.parse_agent_response(parsed)
+        self.assertEqual(result["actions"], [{"tool": "edit_activity", "arguments": arguments}])
+        self.assertIn("Nothing is changed until you confirm", result["message"])
 
 
 class ModelChatApprovalTests(unittest.TestCase):
@@ -363,6 +381,74 @@ class ModelChatApprovalTests(unittest.TestCase):
         self.assertIn("entire recurring activity", view["display_description"])
         self.assertIn("Source: UoA", view["display_description"])
         self.assertNotIn("not-for-the-model", view["display_description"])
+
+    def edit_response(self, identifier, changes=None):
+        self.model.return_value = native_response(name="edit_activity", arguments={
+            "activity_id": identifier, "expected_name": "Study", "changes": changes if changes is not None else [
+                {"column_name": "start_time", "new_value": "19:00"},
+                {"column_name": "end_time", "new_value": "20:00"}],
+        })
+        self.request["message"] = f"Move activity ID {identifier}: Study to 19:00–20:00."
+
+    def test_edit_preview_and_cancel_never_update_sqlite(self):
+        identifier = self.seed_delete_target()
+        self.edit_response(identifier)
+        before = self.rows()
+        self.assertEqual(self.send().status_code, 200)
+        view = self.proposals()[0]
+        self.assertEqual(view["display_title"], "Edit Activity")
+        self.assertIn("Start time: 18:00 → 19:00", view["display_description"])
+        self.assertIn("End time: 19:00 → 20:00", view["display_description"])
+        self.assertEqual(self.rows(), before)
+        self.connect.assert_not_called()
+        result = self.client.post(f"/actions/proposals/{view['id']}/decision", json={"decision": "cancel"})
+        self.assertEqual(result.json()["status"], "rejected")
+        self.assertEqual(self.rows(), before)
+        self.connect.assert_not_called()
+
+    def test_edit_confirm_updates_in_place_and_cannot_execute_twice_or_by_another_owner(self):
+        identifier = self.seed_delete_target()
+        self.edit_response(identifier)
+        self.assertEqual(self.send().status_code, 200)
+        view = self.proposals()[0]
+        self.assertEqual(self.send().status_code, 200)
+        self.assertEqual(self.proposals(), [view])
+        path = f"/actions/proposals/{view['id']}/decision"
+        self.assertEqual(self.other.post(path, json={"decision": "confirm"}).status_code, 404)
+        confirmed = self.client.post(path, json={"decision": "confirm"})
+        self.assertEqual(confirmed.status_code, 200)
+        self.assertTrue(confirmed.json()["result"]["success"])
+        rows = self.rows()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0][0], identifier)
+        self.assertEqual(rows[0][7:9], ("19:00", "20:00"))
+        self.assertEqual(self.client.post(path, json={"decision": "confirm"}).status_code, 409)
+        self.model.assert_called_once()
+
+    def test_invalid_final_edit_values_do_not_register_proposals(self):
+        identifier = self.seed_delete_target()
+        for changes in ([{"column_name": "start_time", "new_value": "20:00"}],
+                        [{"column_name": "activity_type", "new_value": "weekly"}],
+                        [{"column_name": "source", "new_value": "Manual"}]):
+            with self.subTest(changes=changes):
+                self.request["request_id"] = str(uuid4())
+                self.edit_response(identifier, changes)
+                self.assertEqual(self.send().status_code, 502)
+                self.assertEqual(self.proposals(), [])
+                self.assertEqual(self.rows()[0][7:9], ("18:00", "19:00"))
+        self.connect.assert_not_called()
+
+    def test_edit_rechecks_renamed_target_before_confirmation(self):
+        identifier = self.seed_delete_target()
+        self.edit_response(identifier)
+        self.assertEqual(self.send().status_code, 200)
+        view = self.proposals()[0]
+        with closing(sqlite3.connect(self.path)) as connection:
+            activities.edit_activity(connection, identifier, "name", "Renamed Study")
+        result = self.client.post(f"/actions/proposals/{view['id']}/decision", json={"decision": "confirm"})
+        self.assertFalse(result.json()["result"]["success"])
+        self.assertIn("name no longer matches", result.json()["result"]["error"])
+        self.assertEqual(self.rows()[0][7:9], ("18:00", "19:00"))
 
 
 if __name__ == "__main__":

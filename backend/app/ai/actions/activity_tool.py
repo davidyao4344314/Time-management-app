@@ -1,6 +1,6 @@
 """Activity tool adapters: planner services own validation and database operations."""
 
-from backend.app.ai.actions.contracts import AddActivityArguments, DeleteActivityArguments
+from backend.app.ai.actions.contracts import AddActivityArguments, DeleteActivityArguments, EditActivityArguments
 from backend.app.ai.actions.registry import ToolRegistry
 from backend.app.ai.actions.tools import Tool, ToolPreconditionError
 from backend.app.planner import activity_service
@@ -44,28 +44,61 @@ class DeleteActivityTool(Tool):
                          arguments_model=DeleteActivityArguments, handler=remove, preflight=verify)
 
 
+class EditActivityTool(Tool):
+    """Review/validate read-only, then atomically update the same activity ID."""
+
+    def __init__(self, connection):
+        def verify(arguments):
+            try:
+                activity_service.prepare_activity_update(connection, **arguments)
+            except activity_service.ActivityValidationError as error:
+                raise ToolPreconditionError(error.detail) from None
+
+        def update(arguments):
+            return activity_service.update_activity_fields(connection, **arguments)
+
+        super().__init__(name="edit_activity", description="Edit one activity after explicit user approval.",
+                         arguments_model=EditActivityArguments, handler=update, preflight=verify)
+
+
 def describe_activity_proposals(connection, proposals):
-    """Enrich destructive review cards from fresh read-only database data."""
+    """Build edit/delete review cards from fresh read-only database data."""
     reviewed = []
     for proposal in proposals:
-        if proposal.tool_name != "delete_activity":
+        if proposal.tool_name not in {"delete_activity", "edit_activity"}:
             reviewed.append(proposal)
             continue
-        target = activity_service.prepare_activity_deletion(connection, **proposal.arguments)
+        if proposal.tool_name == "edit_activity":
+            target, updates = activity_service.prepare_activity_update(connection, **proposal.arguments)
+        else:
+            target = activity_service.prepare_activity_deletion(connection, **proposal.arguments)
         description = "\n".join(f"{field.replace('_', ' ').capitalize()}: {value}"
                                  for field, value in target.items() if value is not None)
-        description += "\nPermanently delete this activity. This cannot be undone in the app."
-        if target["activity_type"] in {"daily", "weekly"}:
-            description += "\nThis deletes the entire recurring activity, not just one calendar occurrence."
-        if target.get("source") in {"Canvas", "UoA"}:
-            description += "\nOnly the local record is removed; the source feed is unchanged and a later import may restore it."
+        if proposal.tool_name == "edit_activity":
+            description += "\nProposed changes:"
+            for field, value in updates.items():
+                before = target[field] if target[field] is not None else "Not set"
+                after = value if value is not None else "Not set"
+                description += f"\n{field.replace('_', ' ').capitalize()}: {before} → {after}"
+            description += "\nUpdate the existing activity in place; its ID and import metadata are preserved."
+            if target["activity_type"] in {"daily", "weekly"} or updates.get("activity_type") in {"daily", "weekly"}:
+                description += "\nThis edits the recurring activity as a whole, not just one calendar occurrence."
+            if target.get("source") in {"Canvas", "UoA"}:
+                description += "\nOnly the local activity changes; the source feed and external identifiers are unchanged."
+        else:
+            description += "\nPermanently delete this activity. This cannot be undone in the app."
+            if target["activity_type"] in {"daily", "weekly"}:
+                description += "\nThis deletes the entire recurring activity, not just one calendar occurrence."
+            if target.get("source") in {"Canvas", "UoA"}:
+                description += "\nOnly the local record is removed; the source feed is unchanged and a later import may restore it."
         reviewed.append(proposal.model_copy(update={"display_description": description}))
     return reviewed
 
 
 def create_activity_tool_registry(connection):
-    """Opt into approved creation/deletion; public schemas still have no handlers."""
+    """Opt into approved activity changes; public schemas still have no handlers."""
     registry = ToolRegistry()
     registry.register(AddActivityTool(connection))
     registry.register(DeleteActivityTool(connection))
+    registry.register(EditActivityTool(connection))
     return registry

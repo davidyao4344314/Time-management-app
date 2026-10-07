@@ -318,7 +318,7 @@ class ActionLayerTests(unittest.TestCase):
         ]}
         registry = create_proposal_tool_registry()
         self.assertIs(registry.resolve("add_activity").arguments_model, AddActivityArguments)
-        self.assertEqual([tool["name"] for tool in registry.public_contracts()], ["add_activity", "delete_activity"])
+        self.assertEqual([tool["name"] for tool in registry.public_contracts()], ["add_activity", "delete_activity", "edit_activity"])
         validated = validate_agent_proposal(output).model_dump()
         routed = route_agent_output(validated, registry, self.approval)
         self.assertEqual(routed.route, ActionRoute.TOOL_ACTION)

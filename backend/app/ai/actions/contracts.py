@@ -175,6 +175,8 @@ class ActionProposal(BaseModel):
     display_description: str
     status: ActionStatus = ActionStatus.PENDING_APPROVAL
     requires_approval: Literal[True] = True
+    # Trusted review metadata, never accepted as model/tool arguments.
+    target_snapshot: dict[str, JsonValue] | None = None
 
 
 class ActionResult(BaseModel):

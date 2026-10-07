@@ -144,8 +144,16 @@ def get_activity_target(connection, activity_id, expected_name):
     if activity[1] != expected_name:
         raise ActivityValidationError(status_code=409, detail="Activity name no longer matches. Request a new proposal.")
     columns = ("id", "name", "category", "subject", "activity_type", "date", "weekday",
-               "start_time", "end_time", "active_start_date", "active_end_date", "source")
+               "start_time", "end_time", "active_start_date", "active_end_date", "source", "external_id")
     return dict(zip(columns, activity))
+
+
+def verify_activity_snapshot(connection, activity_id, expected_name, snapshot):
+    """Refuse stale approvals, including same-name recurrence/time changes."""
+    target = get_activity_target(connection, activity_id, expected_name)
+    if snapshot is not None and target != snapshot:
+        raise ActivityValidationError(status_code=409, detail="Activity changed since review. Request a new proposal.")
+    return target
 
 
 def prepare_activity_deletion(connection, activity_id, expected_name):
@@ -193,24 +201,26 @@ def prepare_activity_update(connection, activity_id, expected_name, changes):
     return target, updates
 
 
-def update_activity_fields(connection, activity_id, expected_name, changes):
+def update_activity_fields(connection, activity_id, expected_name, changes, *, expected_snapshot=None):
     """Update in place through existing CRUD; final-value validation and writes are atomic."""
     if connection.in_transaction:
         raise ActivityValidationError(status_code=409, detail="Editing needs its own transaction.")
     with connection:
         connection.execute("BEGIN IMMEDIATE")
+        verify_activity_snapshot(connection, activity_id, expected_name, expected_snapshot)
         _, updates = prepare_activity_update(connection, activity_id, expected_name, changes)
         for column, value in updates.items():
             edit_activity(connection, activity_id, column, value, commit=False)
     return {"activity_id": activity_id, "updated": True, "fields": list(updates)}
 
 
-def delete_activity_record(connection, activity_id, expected_name):
+def delete_activity_record(connection, activity_id, expected_name, *, expected_snapshot=None):
     """Re-check and delete one record under the same SQLite write transaction."""
     if connection.in_transaction:
         raise ActivityValidationError(status_code=409, detail="Deletion needs its own transaction.")
     with connection:
         connection.execute("BEGIN IMMEDIATE")
+        verify_activity_snapshot(connection, activity_id, expected_name, expected_snapshot)
         prepare_activity_deletion(connection, activity_id, expected_name)
         removed = delete_activity(connection, activity_id, commit=False)
         if removed != 1:

@@ -24,7 +24,7 @@ class ActionExecutor:
             tool = self.registry.resolve(proposal.tool_name)
             result = ActionResult(
                 proposal_id=proposal.id, success=True,
-                result=tool.execute(proposal.arguments),
+                result=tool.execute(proposal.arguments, target_snapshot=proposal.target_snapshot),
                 message=f"{proposal.display_title} completed.",
             )
         except UnknownToolError:

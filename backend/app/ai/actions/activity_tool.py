@@ -6,6 +6,13 @@ from backend.app.ai.actions.tools import Tool, ToolPreconditionError
 from backend.app.planner import activity_service
 
 
+def _review_check(connection, arguments, snapshot):
+    try:
+        activity_service.verify_activity_snapshot(connection, arguments["activity_id"], arguments["expected_name"], snapshot)
+    except activity_service.ActivityValidationError as error:
+        raise ToolPreconditionError(error.detail) from None
+
+
 class AddActivityTool(Tool):
     """Use the caller's connection and existing creation service, not direct SQL.
 
@@ -41,7 +48,10 @@ class DeleteActivityTool(Tool):
             return activity_service.delete_activity_record(connection, **arguments)
 
         super().__init__(name="delete_activity", description="Delete one activity after explicit user approval.",
-                         arguments_model=DeleteActivityArguments, handler=remove, preflight=verify)
+                         arguments_model=DeleteActivityArguments, handler=remove, preflight=verify,
+                         review_validator=lambda args, snapshot: _review_check(connection, args, snapshot),
+                         reviewed_handler=lambda args, snapshot: activity_service.delete_activity_record(
+                             connection, **args, expected_snapshot=snapshot))
 
 
 class EditActivityTool(Tool):
@@ -58,7 +68,10 @@ class EditActivityTool(Tool):
             return activity_service.update_activity_fields(connection, **arguments)
 
         super().__init__(name="edit_activity", description="Edit one activity after explicit user approval.",
-                         arguments_model=EditActivityArguments, handler=update, preflight=verify)
+                         arguments_model=EditActivityArguments, handler=update, preflight=verify,
+                         review_validator=lambda args, snapshot: _review_check(connection, args, snapshot),
+                         reviewed_handler=lambda args, snapshot: activity_service.update_activity_fields(
+                             connection, **args, expected_snapshot=snapshot))
 
 
 def describe_activity_proposals(connection, proposals):
@@ -73,7 +86,7 @@ def describe_activity_proposals(connection, proposals):
         else:
             target = activity_service.prepare_activity_deletion(connection, **proposal.arguments)
         description = "\n".join(f"{field.replace('_', ' ').capitalize()}: {value}"
-                                 for field, value in target.items() if value is not None)
+                                 for field, value in target.items() if value is not None and field != "external_id")
         if proposal.tool_name == "edit_activity":
             description += "\nProposed changes:"
             for field, value in updates.items():
@@ -91,7 +104,7 @@ def describe_activity_proposals(connection, proposals):
                 description += "\nThis deletes the entire recurring activity, not just one calendar occurrence."
             if target.get("source") in {"Canvas", "UoA"}:
                 description += "\nOnly the local record is removed; the source feed is unchanged and a later import may restore it."
-        reviewed.append(proposal.model_copy(update={"display_description": description}))
+        reviewed.append(proposal.model_copy(update={"display_description": description, "target_snapshot": target}))
     return reviewed
 
 

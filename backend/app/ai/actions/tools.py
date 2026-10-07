@@ -34,6 +34,8 @@ class Tool:
         default=None, repr=False,
     )
     preflight: Callable[[dict[str, JsonValue]], None] | None = field(default=None, repr=False)
+    reviewed_handler: Callable | None = field(default=None, repr=False)
+    review_validator: Callable | None = field(default=None, repr=False)
 
     def __post_init__(self):
         if not isinstance(self.name, str) or not re.fullmatch(r"[a-z][a-z0-9_]*", self.name):
@@ -61,13 +63,17 @@ class Tool:
             # Validation details can echo user input. Keep the boundary error safe.
             raise InvalidToolArgumentsError("The tool arguments are invalid.") from None
 
-    def execute(self, arguments):
+    def execute(self, arguments, *, target_snapshot=None):
         if self.handler is None:
             raise ToolExecutionUnavailableError("Execution is not available for this tool.")
         validated_arguments = self.validate(arguments)
+        if self.review_validator is not None:
+            self.review_validator(validated_arguments, target_snapshot)
         if self.preflight is not None:
             self.preflight(validated_arguments)
         try:
+            if self.reviewed_handler is not None:
+                return self.reviewed_handler(validated_arguments, target_snapshot)
             return self.handler(validated_arguments)
         except Exception:
             # Even a validation-style exception raised INSIDE the handler may

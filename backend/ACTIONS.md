@@ -18,10 +18,12 @@ backend/app/ai/actions/
 ├── tools.py          # Tool public contract, strict input validation, optional trusted handler
 ├── registry.py       # Explicit tool registration/discovery; proposal-only default registry
 ├── routing.py        # Existing agent output -> validated pending proposals or reserved route
-├── approval.py       # Backend-held temporary lifecycle; explicit approve/reject decisions
+├── approval.py       # In-memory execution boundary inside a durable decision transaction
 ├── execution.py      # Approved ID -> trusted tool -> ActionResult
 ├── activity_tool.py  # Activity adapters and read-only change previews -> Activity service
-├── service.py        # Owner-scoped presentation and decisions; temporary state
+├── service.py        # Isolated in-memory adapter for unit/development callers
+├── persistent_service.py # Production owner-scoped decisions and atomic receipts
+├── storage.py        # SQLite proposals, origin links and terminal results
 └── planning.py       # ResponsePlanner interface only; no implementation or model call
 ```
 
@@ -51,7 +53,7 @@ add/edit/delete conditional chain.
 The internal message/actions contract remains unchanged. Commit 8.4 changes
 how the provider supplies actions: native function calls, not a text actions list.
 The chat service reuses `prepare_tool_proposals()` from this router before
-registering fresh completed requests with the existing owner-scoped service.
+atomically saving them alongside fresh completed requests in owner-scoped storage.
 
 ## Commit 8.2: approved activity creation
 
@@ -82,7 +84,8 @@ backend-held approved proposal ID
 Contract validation rejects missing/extra fields, invalid recurrence/date/time
 values, and an end time not later than a start time. The existing service remains
 responsible for domain preparation and validation; the adapter contains no SQL
-or copied business rules. Creation uses the existing commit behavior and schema
+or copied business rules. Standalone creation keeps its commit default; production
+approved actions disable the inner commit and share the receipt transaction. Schema
 defaults (`source="Manual"`, `external_id=NULL`). Date-only activities retain null times.
 
 Tests register a pending proposal, explicitly approve it through `ApprovalBoundary`,
@@ -92,9 +95,11 @@ or failed proposals cannot execute again within the same boundary.
 
 Commit 8.2 establishes this deterministic backend path. Commit 8.3 adds manual
 confirmation below, and Commit 8.4 connects chat requests to pending review.
-There are still no exam/bulk-change tools or durable approval storage.
-Handler/service failures use the existing sanitized unconfirmed-outcome behavior;
-a failed post-insert read must not be reported as proof that no row was created.
+There are still no exam/bulk-change tools. Production approval storage is durable.
+The isolated executor conservatively reports unconfirmed handler errors. The
+production service owns a transaction and rolls all tool changes back on failure,
+then saves a failed receipt. A post-insert read failure therefore saves no new row
+through the production approval API.
 
 ## Commit 8.3: generic Confirm / Cancel flow
 
@@ -103,9 +108,11 @@ the backend's title, description and status without inspecting tool names. It
 never calls the activity API to create data. Commit 8.4 now supplies pending
 proposals from validated native calls as well as the optional development sample.
 
-`ActionProposalService` owns one process-local `ApprovalBoundary`, owner links and
-result receipts. It reuses the existing signed browser-profile identity; no owner
-ID is accepted in request bodies. Proposals belong to that profile, not a chat.
+Production uses `PersistentActionProposalService`, with SQLite owner links,
+chat/request origin links and result receipts. `ActionProposalService` remains an
+in-memory adapter for isolated callers/tests. Both reuse the signed browser-profile
+identity; no owner ID is accepted in request bodies. Listing is profile-wide,
+while each chat-created proposal retains its exact originating conversation/request.
 Unknown and foreign IDs both return 404. Public views contain only:
 
 ```json
@@ -130,20 +137,22 @@ second result schema. Responses are not cached by the browser.
 | `POST /actions/proposals/{id}/decision` | Accept only `{"decision":"confirm"}` or `{"decision":"cancel"}` |
 | `POST /actions/dev/proposals` | Accept only `{}`; create a pending sample if `ACTION_LAYER_DEV_MODE=1` |
 
-Confirm verifies owner and pending status, opens the existing database connection,
-approves through `ApprovalBoundary`, then invokes `ActionExecutor` with the trusted
-activity registry. Cancel marks it rejected without opening an activity connection.
+Confirm verifies owner and pending status under `BEGIN IMMEDIATE`, approves through
+`ApprovalBoundary`, then invokes `ActionExecutor` with the trusted activity registry
+on that same connection. A savepoint encloses the tool change; the terminal receipt
+and activity change commit together. Cancel persists rejection without invoking a tool.
 Extra body fields (arguments, tool name, approved status, owner, etc.) are rejected.
-The service serializes decisions; repeat or concurrent confirmations return 409
-instead of inserting again. Completed/failed result receipts remain available on
-refresh during this process lifetime. Connection-open failure leaves the proposal pending.
+SQLite serializes decisions across processes; repeat or concurrent confirmations
+return 409 instead of inserting again. Proposals and completed/failed receipts
+survive refresh/restart. Connection or receipt-write failure rolls back the whole
+decision and leaves it pending; refresh status before manually retrying.
 
 The UI disables both controls during a decision and never retries automatically.
 If a network/API error makes the outcome uncertain, refresh authoritative status
-before making another decision. Handler failures retain the existing warning
-that state might have changed; a failure does not promise rollback. A trusted
-read-only preflight refusal reports that the action did not run and shows its
-sanitized domain error on the card.
+before making another decision. Production handler failures roll back tool changes
+and save a sanitized failed receipt. The chat reloads execution receipts without a
+model call; later requests receive these facts separately from proposals. Current
+observations still override historical outcomes.
 
 ### Manual testing without an LLM
 
@@ -167,9 +176,10 @@ Run the frontend normally (`cd frontend`, then `npm run dev`). Open **AI Agent**
 This test uses your actual local database **only when you Confirm**. It makes no
 OpenAI request. Automated tests instead use disposable databases and identities.
 Start the backend without `ACTION_LAYER_DEV_MODE=1` to hide/disable the sample source.
-Restart/reload discards pending proposals and receipts; saved activities remain.
-Use a single backend process for this local stage. This is not durable workflow
-storage, multi-worker coordination or a restart-safe exactly-once guarantee.
+Restart/reload preserves pending proposals, receipts and saved activities. Activity
+writes and receipts use the same SQLite transaction, so retrying a completed ID
+cannot replay it. This is a local database workflow, not a distributed transaction
+or a general multi-user authorization system. Mutations of external systems are unsupported.
 
 ## Commit 8.4: native model requests become pending proposals
 
@@ -179,8 +189,8 @@ existing observations + recent chat + user request
     -> native function_call (or ordinary structured advice)
     -> agent/tool_calls.py: normalize and validate against ToolRegistry
     -> existing internal {message, actions, memory_request, missing_context}
-    -> conversations/service.py: prepare pending proposals, save completed chat
-    -> API-injected registration in the SAME ActionProposalService
+    -> conversations/service.py: prepare fresh database-backed pending proposals
+    -> save completed chat + proposals in the SAME SQLite transaction
     -> Proposed changes panel -> explicit Confirm / Cancel
 ```
 
@@ -205,18 +215,17 @@ backend message explaining that nothing is saved until confirmation. No second
 model call is made to acknowledge execution. The internal actions list is retained
 for existing inspectors/history as proposal evidence, never proof of execution.
 
-`api/action_runtime.py` is the single composition root shared by the chat and
-approval adapters. The chat service receives a registration callback; it invokes
-no executor or tool handler and imports no HTTP layer. It prepares all requests before
-saving chat and registers only newly completed requests. Replaying a request ID,
+`api/action_runtime.py` composes the production approval adapter. Chat orchestration
+uses action storage directly within transcript completion; it invokes no executor
+or tool handler and imports no HTTP layer. It prepares all requests before saving
+chat and registers only newly completed requests. Replaying a request ID,
 refreshing chat, or reading old replies never creates another proposal. The UI
 refreshes proposals when a new assistant reply appears. It queues a read rather
 than aborting/retrying an in-flight confirmation.
 
-Proposals remain process-local. A restart (or interruption after chat persistence
-but before registration) can lose pending review state; old saved chat is **not**
-rehydrated into executable authority. Ask again to create a fresh proposal and
-check the calendar first if an earlier execution outcome was uncertain. Nothing
+Proposals are persisted with the reply, closing the former registration gap.
+A restart reads existing authoritative proposal rows, not reconstructed assistant
+text. Pre-upgrade process-local proposals are not recreated from old chat. Nothing
 automatically approves, retries or executes during generation or recovery.
 The compatibility `/ai/propose` preview path returns the internal proposal only;
 the current `/conversations/{id}/messages` chat path registers reviewable proposals.
@@ -244,9 +253,10 @@ Optional live test (uses your configured key and may incur charges):
 6. Request another and Confirm once. Check Activities/Calendar for one saved row.
 7. Refresh/replay the chat request: no second proposal or saved copy is created.
 
-Only `add_activity`, `delete_activity` and `edit_activity` are exposed. Additional tools, durable proposals, editing pending proposals,
+Only `add_activity`, `delete_activity` and `edit_activity` are exposed. Additional tools, editing pending proposals,
 post-execution model continuation, sequential execution loops and a date engine
-remain deferred. Context routing, recurrence, imports and database schemas are unchanged.
+remain deferred. Recurrence/import behavior and planner schemas are unchanged;
+the additive `action_proposals` table stores approval authority and results.
 Compact activity observations now include database `id` and `activity_type` for
 exact deletion targeting, retaining existing detail limits and excluding import IDs.
 
@@ -276,12 +286,12 @@ delete_activity native request
     -> explicit Confirm through existing /actions/proposals/{id}/decision
     -> executor -> DeleteActivityTool read-only preflight
     -> activity_service.delete_activity_record
-    -> transaction: recheck ID/name, existing delete_activity(commit=False)
-    -> commit -> {"activity_id": 12, "deleted": true}
+    -> transaction: recheck full reviewed snapshot, existing delete_activity(commit=False)
+    -> commit deletion + receipt -> {"activity_id": 12, "deleted": true}
 ```
 
 Cancel does not open execution resources. Confirm checks the target again; a
-missing or renamed record fails without deleting another activity. The transaction
+missing, renamed or otherwise changed record fails without deleting another activity. The transaction
 rechecks under SQLite's write lock and requires exactly one affected row. The
 existing standalone `delete_activity` still commits by default. Different records
 with the same name remain untouched. Existing foreign-key cascade removes only
@@ -302,8 +312,8 @@ For a live test, create a disposable manual activity and note its ID. Ask the AI
 to delete that exact ID/name, then Cancel and verify it remains. Ask again,
 review the card and Confirm once; open Activities/Calendar to verify removal.
 Do not test on records you need to keep. A live AI request may incur charges;
-confirmation itself makes no additional model request. Reload/restart loses
-pending proposals/receipts as before and never recreates authority from old chat.
+confirmation itself makes no additional model request. Reload/restart preserves
+proposal/receipt rows and never reconstructs new authority from old chat.
 
 ## Approved editing of one activity
 
@@ -339,16 +349,17 @@ values; no fake times are assigned. Invalid and no-op edits create no pending ca
 Read-only preview shows the current activity and each actual old → new change,
 including automatic null clearing. Recurring edits apply to the whole activity,
 not one occurrence; imported edits affect only the local row. Cancel opens no
-execution connection. Confirm rechecks ID/name and final values before writing.
+tool handler. Confirm rechecks the entire reviewed snapshot and final values before writing.
 
-`update_activity_fields()` owns one SQLite transaction, revalidates under its
+`update_activity_fields()` uses a caller-owned approval transaction (or owns its
+standalone transaction), revalidates under its
 write lock, then calls the existing `edit_activity(..., commit=False)` for each
 changed field. It never deletes/recreates the activity or adds duplicate UPDATE
 SQL. A failure rolls back the complete edit; executor failures remain sanitized.
 The success receipt contains the activity ID, `updated: true`, and changed field
 names, not source identifiers. Existing manual edit endpoints are unchanged.
 
-No additional endpoint or frontend editing system is needed. The existing
+No additional editing endpoint or frontend editing system is needed. The existing
 `/actions/proposals/{id}/decision` and generic review card are reused. No schema,
 Canvas/UoA import, recurrence or context-routing changes are made.
 
@@ -428,21 +439,22 @@ pending_approval -> approved -> executing -> completed / failed
   submissions cannot execute the same proposal twice within this boundary.
 - Execution validates tool arguments again. Unknown tools, unavailable execution
   and invalid inputs are preflight refusals: this attempt did not run the action.
-  If a handler raises after starting, or its returned result is not JSON-compatible,
+  In the isolated executor (without an enclosing transaction), if a handler raises
+  after starting or its returned result is not JSON-compatible,
   the outcome is reported as **unconfirmed**, not as proof that nothing changed.
   Check application state before proposing another attempt. `success: false` and
-  terminal `failed` mean success was not confirmed; they do not promise rollback.
+  terminal `failed` alone do not promise rollback. Production decisions additionally
+  roll back the tool savepoint before persisting their failed receipt.
   The same proposal cannot be retried. Raw exception details are not exposed.
 - `create_proposal_tool_registry()` reuses `AddActivityArguments` but registers
   **no executable handler**. Even an approved `add_activity` fails safely with
   `Execution is not available for this tool.` No exam/bulk-change tools exist;
   single-record delete/edit tools are available only through explicit approval.
-- Approval state is temporary and instance-scoped, not persistent or global. A
-  restart loses it. The generic HTTP adapter enforces signed profile ownership,
-  never accepts client-supplied approved objects, and only executes through the
-  existing boundary. Persistent proposals remain deferred; chat integration only
-  creates pending proposals and grants no execution authority.
-  This is not a durable exactly-once guarantee or a multi-user permissions framework.
+- The isolated `ApprovalBoundary` is instance-scoped, but production authority
+  and receipts are persisted in SQLite. The generic HTTP adapter enforces signed
+  profile ownership, never accepts client-supplied approved objects, and executes
+  only through explicit decisions. No model output grants execution authority.
+  This is a local workflow, not a general multi-user permissions framework.
 
 Tools expose only name, description and input schema. Handlers are trusted
 explicit backend registrations, never supplied by the LLM or dynamically imported.
@@ -451,8 +463,8 @@ explicit backend registrations, never supplied by the LLM or dynamically importe
 
 ```text
 agent/tool_calls -> schema-only registry + pure routing preparation -> contracts
-conversations/service -> pure routing preparation; receives registration callback
-api/conversations + api/actions -> api/action_runtime -> SAME owner-scoped service
+conversations/service -> pure routing preparation + action storage / transcript transaction
+api/actions -> api/action_runtime -> persistent owner-scoped service
 api/actions -> owner-scoped service -> approval -> contracts
 api/actions supplies execution resources -> executor -> approval + registry/tools -> contracts
 activity_tool -> planner/activity_service -> existing CRUD

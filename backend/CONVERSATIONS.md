@@ -12,6 +12,8 @@ refresh; access still requires the signed local owner cookies.
 validated proposals and separate inspector metadata. `conversation_summaries`
 stores an optional local summary and its exact message boundary.
 `conversation_memory_exports` stores receipts for archive handoff.
+`action_proposals` stores owner/chat/request links, backend review snapshots,
+approval status and terminal tool receipts. Assistant text is not approval authority.
 
 Conversation tables are initialized by the conversation service's `open_store`,
 independently of planner connection setup. Migrations only add tables.
@@ -71,7 +73,10 @@ The existing three-stage router may select `memory.scope = current_chat` or
 lookups search only opted-in chats owned by the signed profile, using existing
 raw/compressed/durable readers and a combined five-result/8,000-character limit.
 Current activity/exam facts override historical schedule claims. Proposed actions
-are still proposals only; no execution or approval workflow was added.
+remain proposals until explicitly confirmed through the separate action workflow.
+Linked terminal execution receipts are read into recent context and the chat UI;
+they record outcomes at approval time, while fresh planner observations still
+determine current state. See [Action approval and durable receipts](ACTIONS.md).
 
 Examples: “What did I just say?” uses recent chat context. “Earlier in this chat,
 what did we discuss about COMPSCI?” can look up local messages. “What did we

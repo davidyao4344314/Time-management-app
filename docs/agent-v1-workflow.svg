@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1140 1170" role="img" aria-labelledby="title description">
+  <title id="title">Agent V1: actual request, context and approved action workflow</title>
+  <desc id="description">A signed owner and conversation request lead through context routing, bounded observations and reasoning. There is at most one read-only recovery and second main-agent call. A reply and any pending proposal are saved atomically. Only explicit confirmation executes an activity tool; the activity change and receipt commit together. Receipts refresh in chat and later requests use fresh observations. No autonomous planning or execution loop runs.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="#465166"/></marker>
+    <style>
+      text{font-family:Arial,Helvetica,sans-serif;fill:#17213b;font-size:17px}
+      .heading{font-size:27px;font-weight:bold}.label{font-size:19px;font-weight:bold}.small{font-size:15px}
+      .box{fill:#f3f5fc;stroke:#b8c2d9;stroke-width:1.5;rx:12}
+      .guard{fill:#e8f4ed;stroke:#8cb49c;stroke-width:1.5;rx:12}
+      .side{fill:#fff8e7;stroke:#c5b478;stroke-width:1.5;rx:12}
+      .line{fill:none;stroke:#465166;stroke-width:2;marker-end:url(#arrow)}
+      .optional{stroke-dasharray:6 5}
+    </style>
+  </defs>
+  <rect width="1140" height="1170" fill="#fff"/>
+  <text x="35" y="42" class="heading">Agent V1 · current implemented workflow</text>
+  <text x="35" y="69">Local study assistant · selected context · explicit approval · persistent results</text>
+
+  <rect x="395" y="92" width="425" height="77" class="box"/>
+  <text x="417" y="119" class="label">User message → FastAPI</text>
+  <text x="417" y="145">Signed owner + chat + stable request ID</text>
+  <path d="M607 169V190" class="line"/>
+  <rect x="395" y="192" width="425" height="77" class="box"/>
+  <text x="417" y="219" class="label">Reserve request / load recent context</text>
+  <text x="417" y="245">5–100 turns · character budget · local summary</text>
+  <path d="M607 269V290" class="line"/>
+  <rect x="395" y="292" width="425" height="77" class="box"/>
+  <text x="417" y="319" class="label">ROUTE · choose context, not actions</text>
+  <text x="417" y="345">Stage 1 → Stage 2 → Stage 3 → safe fallback</text>
+  <path d="M607 369V390" class="line"/>
+  <rect x="395" y="392" width="425" height="91" class="box"/>
+  <text x="417" y="419" class="label">OBSERVE · bounded read-only context</text>
+  <text x="417" y="446">Fresh activities / exams · files · selected memory</text>
+  <text x="417" y="469" class="small">Exact requested IDs · exclusions · ownership guards</text>
+  <path d="M607 483V504" class="line"/>
+  <rect x="395" y="506" width="425" height="77" class="box"/>
+  <text x="417" y="533" class="label">THINK · main agent</text>
+  <text x="417" y="559">Structured reply + optional native tool request</text>
+  <path d="M607 583V634" class="line"/>
+  <text x="624" y="611" class="small">Validate schema / tool allowlist</text>
+  <rect x="395" y="636" width="425" height="91" class="box"/>
+  <text x="417" y="663" class="label">Save reply + pending proposal together</text>
+  <text x="417" y="689">SQLite transcript + owner / chat / request link</text>
+  <text x="417" y="713" class="small">Fresh edit/delete preview + full target snapshot</text>
+  <path d="M607 727V748" class="line"/>
+  <rect x="395" y="750" width="425" height="77" class="guard"/>
+  <text x="417" y="777" class="label">User reviews · Confirm or Cancel</text>
+  <text x="417" y="803">No tool executes while generating the reply</text>
+  <path d="M607 827V855" class="line"/>
+  <text x="624" y="847" class="small">Confirm only</text>
+  <rect x="395" y="857" width="425" height="91" class="guard"/>
+  <text x="417" y="884" class="label">ACT · trusted activity tool</text>
+  <text x="417" y="910">add_activity / edit_activity / delete_activity</text>
+  <text x="417" y="934" class="small">Write lock · reject stale snapshot · preserve identity</text>
+  <path d="M607 948V969" class="line"/>
+  <rect x="395" y="971" width="425" height="91" class="guard"/>
+  <text x="417" y="998" class="label">Commit change + receipt atomically</text>
+  <text x="417" y="1024">Failure rolls back · restart-safe status / no replay</text>
+  <text x="417" y="1048" class="small">Refresh chat receipt · next request observes fresh state</text>
+  <text x="395" y="1104" class="label">RE-EVALUATE on the next user request</text>
+  <text x="395" y="1131">No automatic paid continuation or background agent loop.</text>
+
+  <rect x="25" y="295" width="325" height="142" class="box"/>
+  <text x="45" y="324" class="label">Context sources</text>
+  <text x="45" y="351">SQLite planner + Python recurrence</text>
+  <text x="45" y="377">Owner-scoped imported files</text>
+  <text x="45" y="403">Current-chat or opt-in global history</text>
+  <path d="M350 417H377V437H395" class="line"/>
+  <rect x="25" y="495" width="325" height="115" class="side"/>
+  <text x="45" y="525" class="label">If information is still missing</text>
+  <text x="45" y="552">Ask the user a clarification.</text>
+  <text x="45" y="578">Never invent data or execute a tool.</text>
+  <path d="M395 549H352" class="line"/>
+
+  <rect x="865" y="408" width="250" height="160" class="side"/>
+  <text x="882" y="437" class="label">One-shot recovery</text>
+  <text x="882" y="467">Read missing context</text>
+  <text x="882" y="494">Schedule / file / memory</text>
+  <text x="882" y="521">At most ONE follow-up</text>
+  <text x="882" y="546" class="small">No mutation in this branch</text>
+  <path d="M820 544H854V535H865" class="line optional"/>
+  <path d="M865 432H843V431H820" class="line optional"/>
+
+  <rect x="865" y="746" width="250" height="91" class="box"/>
+  <text x="883" y="776" class="label">Cancel / advice only</text>
+  <text x="883" y="804">No planner changes</text>
+  <path d="M820 790H862" class="line"/>
+
+  <rect x="25" y="895" width="325" height="150" class="box"/>
+  <text x="45" y="925" class="label">Adaptive routing · opt-in</text>
+  <text x="45" y="955">Routing evidence → explicit review</text>
+  <text x="45" y="982">Confirmed patterns / examples</text>
+  <text x="45" y="1009">Influence future context selection</text>
+  <text x="45" y="1032" class="small">Off by default · never grants action approval</text>
+  <path d="M395 681H369V870H185V894" class="line optional"/>
+  <path d="M25 922H10V280H374V330H395" class="line optional"/>
+</svg>

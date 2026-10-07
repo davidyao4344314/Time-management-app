@@ -5,10 +5,75 @@ currently works. The AI agent can **propose** adding, deleting or editing one ac
 SQLite changes only when the user separately clicks **Confirm** on its pending
 proposal, never automatically.
 
+## Agent V1 completed — local, approval-gated scope
+
+Agent V1 implements owned persistent chats, bounded recent/history/file context,
+Stage 1/2/3 selection, one-shot read-only context recovery, and add/edit/delete
+activity proposals. It is not an autonomous scheduler or a production multi-user
+authentication system. No background agent loop or automatic paid continuation runs.
+
+![Actual Agent V1 workflow: routing, observation, reasoning, approval, action and saved results](../docs/agent-v1-workflow.svg)
+
+The diagram describes the current conversation API, not the legacy preview route.
+New schedule data is observed on the next user request, not by a background model.
+After confirmation the chat reloads its receipt without calling OpenAI; opening
+Activities or Calendar loads the saved planner state.
+
+### V1 hardening
+
+- Chat completion and its pending proposals are saved in one SQLite transaction.
+  Each proposal retains owner, conversation and request identity. A reply cannot
+  be committed while its proposal registration is lost.
+- Approval status and execution receipts survive restarts in `action_proposals`.
+  The activity change and terminal receipt commit together. A failed tool rolls
+  back its activity changes; a failed receipt write rolls back the whole transaction
+  and leaves the proposal pending. Repeat/concurrent confirmation returns 409.
+- Edit/delete previews retain a backend-only target snapshot. A changed target,
+  including same-name recurrence/time changes, requires a fresh proposal.
+- Confirmed receipts enter recent chat context separately from proposed actions.
+  They prove an outcome at approval time; current observations still take priority.
+- Explicit global-memory exclusions apply to initial and follow-up retrieval.
+  Permitted current-chat history remains separate.
+- General explanatory study/exam questions defer to semantic routing. Literal
+  activity-ID requests fetch at most three target definitions beyond the normal
+  20-item/6,000-character detail window, without exposing external identifiers.
+
+The additive action-storage migration preserves existing planner/chat records and
+runs when conversation/action storage opens. Older process-local proposals are
+not reconstructed from old assistant text. Existing standalone CRUD functions
+still commit by default; approved actions share a caller-owned transaction.
+
+### Verification and safe manual checks
+
+From the project root, the offline completion checks are:
+
+```bash
+backend/.venv/bin/python -B -m unittest discover -s backend/tests -t . -q
+cd frontend
+npm test
+npm run lint
+npm run build
+```
+
+Completion verification: **584 backend tests and 41 frontend tests passed**;
+frontend lint and production build passed. Tests mock model responses and use
+disposable storage. No live OpenAI request was made for this verification.
+`.env` and `.env.save` remain ignored and untracked; no key values were printed.
+
+Manually test with a disposable activity: request an add, Cancel first, then
+request again and Confirm; inspect the chat receipt and saved activity. Restart
+the backend and refresh proposals: pending/terminal status must survive and a
+completed proposal must not run again. For edit/delete, change the target through
+the normal form after its preview is created, then Confirm: the stale proposal
+must fail without changing the newer row. Test `Do not use global memory; recall
+this chat` and inspect context selection. Test an explicit activity ID beyond
+the first 20 records. Live chat requests use your configured key and may cost money;
+Confirm/Cancel, status refreshes and the offline tests make no extra model call.
+
 ## Stage 8: Action Layer and first approved tool
 
 `ai/actions` now contains generic proposal/result contracts, explicit tool discovery,
-a minimal router, temporary approve/reject lifecycle, an approval-gated executor
+a minimal router, persistent approve/reject lifecycle, an approval-gated executor
 and a response-planning interface. The default
 `add_activity` registration reuses the existing schema but has no executable
 handler. Commit 8.2 adds an opt-in `AddActivityTool` and
@@ -26,7 +91,7 @@ updates the existing ID atomically and preserves source/external metadata.
 Ordinary replies need no tool; unknown/invalid calls fail safely. Model requests
 never approve or execute. The sample proposal source remains opt-in via
 `ACTION_LAYER_DEV_MODE=1`; confirming it saves a real local test activity.
-See ACTIONS.md for the test command and temporary-state/restart limitations.
+See ACTIONS.md for test commands, persistent approval storage and transaction guarantees.
 
 See [Action Layer contracts, boundaries and offline tests](ACTIONS.md) for the
 file tree, lifecycle, dependency direction and offline test commands.
@@ -203,7 +268,10 @@ POST /conversations/{id}/messages with a message and request ID
   -> build fresh observations and retrieve memory only when selected
   -> send selected context, optional local summary and recent turns to OpenAI
   -> validate a structured message and proposed actions
-  -> persist the assistant response; return it without executing actions
+  -> atomically persist the assistant response and any pending proposals
+  -> explicit Confirm/Cancel on a stored proposal, separate from the model request
+  -> on Confirm: recheck target, execute trusted activity tool, commit change + receipt
+  -> refresh chat receipt; the next request observes the current database
 ```
 
 The API checks for a configured `OPENAI_API_KEY` before calling OpenAI. The key
@@ -1193,8 +1261,8 @@ saved replies, proposals and context inspectors. AI Settings configures the key
 locally without returning it to React. Native add/delete/edit activity tool requests now
 become pending proposals in the existing Confirm/Cancel panel. The separate
 owner-scoped approval endpoint changes SQLite only for explicitly confirmed proposals.
-There is no automatic execution, exam/bulk-change agent tool, durable proposal
-storage or post-execution model continuation. Manual activity creation is unchanged.
+There is no automatic execution, exam/bulk-change agent tool or post-execution
+model continuation. Proposals and results are now durable. Manual activity creation is unchanged.
 
 Automatic archive-compaction runs, automatic durable-memory extraction, Screen
 Time context routing, goals and study-history
@@ -1202,7 +1270,7 @@ observations, and observation hash/change caching are not part of the normal
 AI request flow. They should not be assumed to affect a current AI response.
 
 See [Stage 8 native tool proposals and tests](ACTIONS.md) for this workflow,
-offline tests and the single-process/restart limitations. Open or refresh the
+offline tests and transaction/restart guarantees. Open or refresh the
 Calendar/Activities page after confirmation to inspect the saved activity.
 
 ## Test without an OpenAI charge

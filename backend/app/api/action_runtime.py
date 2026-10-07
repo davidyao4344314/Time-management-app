@@ -5,17 +5,21 @@ from contextlib import contextmanager
 from backend.app.api import common
 from backend.app.ai.actions.activity_tool import create_activity_tool_registry
 from backend.app.ai.actions.execution import ActionExecutor
-from backend.app.ai.actions.service import ActionProposalService
+from backend.app.ai.actions.persistent_service import PersistentActionProposalService
+from backend.app.conversations.service import open_store
 
 
 @contextmanager
-def execution_resources(approval):
+def execution_resources(approval, *, connection=None):
     # Only the explicit confirmation path opens a writable planner connection.
-    connection = common.create_connection()
+    owns_connection = connection is None
+    if owns_connection:
+        connection = common.create_connection()
     try:
-        yield ActionExecutor(create_activity_tool_registry(connection), approval)
+        yield ActionExecutor(create_activity_tool_registry(connection, transactional=not owns_connection), approval)
     finally:
-        connection.close()
+        if owns_connection:
+            connection.close()
 
 
-service = ActionProposalService(execution_resources)
+service = PersistentActionProposalService(open_store, execution_resources)

@@ -22,6 +22,7 @@ from backend.app.ai.actions.registry import create_proposal_tool_registry
 from backend.app.ai.actions.routing import prepare_tool_proposals
 from backend.app.ai.actions.activity_tool import describe_activity_proposals
 from backend.app.planner.activity_service import ActivityValidationError
+from backend.app.ai.actions import storage as action_storage
 
 
 @contextmanager
@@ -33,6 +34,7 @@ def open_store():
         summary.migrate(connection)
         routing_store.migrate(connection)
         file_storage.migrate(connection)
+        action_storage.migrate(connection)
         yield connection
     finally:
         connection.close()
@@ -56,7 +58,7 @@ def read_chat(owner_id, conversation_id, *, before=None, limit=50):
                 **storage.get_messages(connection, conversation_id, owner_id, before=before, limit=limit)}
 
 
-def send_message(owner_id, conversation_id, request_id, message, *, register_actions=None):
+def send_message(owner_id, conversation_id, request_id, message):
     with open_store() as connection:
         storage.require_conversation(connection, conversation_id, owner_id)
         storage.expire_interrupted_requests(connection,conversation_id)
@@ -98,11 +100,11 @@ def send_message(owner_id, conversation_id, request_id, message, *, register_act
                     raise InvalidProposalError("The proposed activity change is invalid for the current record.") from None
             finally:
                 observation_connection.close()
-            messages = storage.complete_request(connection, conversation_id, request_id, proposal)
-            # Only a newly completed request registers proposals. Replaying an
-            # existing request or reading saved chat never recreates authority.
-            if register_actions is not None and pending:
-                register_actions(pending)
+            messages = storage.complete_request(connection, conversation_id, request_id, proposal,
+                save_actions=lambda: action_storage.insert_proposals(connection, owner_id, pending,
+                    conversation_id=conversation_id, request_id=request_id))
+            # Authority was saved in the SAME transaction as the assistant turn.
+            # Replaying a request reads it; it never re-registers or executes it.
             learning_pending = False
             if routing_evidence is not None:
                 try:

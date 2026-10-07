@@ -129,7 +129,7 @@ def begin_request(connection, conversation_id, owner_id, request_id, content):
         raise
 
 
-def complete_request(connection, conversation_id, request_id, proposal):
+def complete_request(connection, conversation_id, request_id, proposal, *, save_actions=None):
     """Persist the response and user completion atomically, retaining IDs."""
     with connection:
         rows = request_messages(connection, conversation_id, request_id)
@@ -142,6 +142,8 @@ def complete_request(connection, conversation_id, request_id, proposal):
              clean['message'], json.dumps(clean), json.dumps(inspector) if inspector else None, 'completed', now_iso()))
         connection.execute("UPDATE conversation_messages SET status='completed' WHERE conversation_id=? AND request_id=? AND role='user'", (conversation_id, request_id))
         connection.execute('UPDATE conversations SET updated_at=? WHERE conversation_id=?', (now_iso(), conversation_id))
+        if save_actions is not None:
+            save_actions()
     return request_messages(connection, conversation_id, request_id)
 
 

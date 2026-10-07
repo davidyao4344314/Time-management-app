@@ -67,7 +67,7 @@ def save_uoa_external_ids(connection, activity_id, external_ids):
     return added
 
 
-def add_activity(connection, columns, values):
+def add_activity(connection, columns, values, *, commit=True):
     column_names = ", ".join(columns)
     placeholders = ", ".join(["?"] * len(columns))
 
@@ -77,7 +77,8 @@ def add_activity(connection, columns, values):
     """
 
     cursor = connection.execute(sql, values)
-    connection.commit()
+    if commit:
+        connection.commit()
     return cursor.lastrowid
 
 """

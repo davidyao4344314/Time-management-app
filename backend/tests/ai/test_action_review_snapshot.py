@@ -1,6 +1,7 @@
 """Stale review cards must never authorize a different activity state."""
 import sqlite3
 import unittest
+from contextlib import closing
 
 from backend.app import database
 from backend.app.ai.actions.activity_tool import create_activity_tool_registry, describe_activity_proposals
@@ -15,7 +16,7 @@ from backend.app.planner.activities import add_activity, get_activity_by_id
 class ReviewSnapshotTests(unittest.TestCase):
     def test_same_name_changed_recurrence_refuses_edit_and_delete(self):
         for tool in ("edit_activity", "delete_activity"):
-            with self.subTest(tool=tool), sqlite3.connect(":memory:") as connection:
+            with self.subTest(tool=tool), closing(sqlite3.connect(":memory:")) as connection:
                 database.create_tables(connection)
                 identifier = add_activity(connection,
                     ["name", "category", "activity_type", "date"],
@@ -34,4 +35,3 @@ class ReviewSnapshotTests(unittest.TestCase):
                 self.assertFalse(result.success)
                 self.assertIn("changed since review", result.error)
                 self.assertEqual(get_activity_by_id(connection, identifier)[4], "daily")
-

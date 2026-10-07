@@ -20,10 +20,11 @@ class AddActivityTool(Tool):
     authoritative approval boundary gates creation, as with every trusted tool.
     """
 
-    def __init__(self, connection):
+    def __init__(self, connection, *, transactional=False):
         def create_activity(arguments):
             prepared = activity_service.prepare_new_activity(arguments)
-            created = activity_service.create_activity_record(connection, prepared)
+            created = activity_service.create_activity_record(connection, prepared,
+                **({"commit": False} if transactional else {}))
             return {"activity_id": created[0]}
 
         super().__init__(
@@ -37,7 +38,7 @@ class AddActivityTool(Tool):
 class DeleteActivityTool(Tool):
     """Delete one checked record, only through the existing approval executor."""
 
-    def __init__(self, connection):
+    def __init__(self, connection, *, transactional=False):
         def verify(arguments):
             try:
                 activity_service.prepare_activity_deletion(connection, **arguments)
@@ -51,13 +52,13 @@ class DeleteActivityTool(Tool):
                          arguments_model=DeleteActivityArguments, handler=remove, preflight=verify,
                          review_validator=lambda args, snapshot: _review_check(connection, args, snapshot),
                          reviewed_handler=lambda args, snapshot: activity_service.delete_activity_record(
-                             connection, **args, expected_snapshot=snapshot))
+                             connection, **args, expected_snapshot=snapshot, commit=not transactional))
 
 
 class EditActivityTool(Tool):
     """Review/validate read-only, then atomically update the same activity ID."""
 
-    def __init__(self, connection):
+    def __init__(self, connection, *, transactional=False):
         def verify(arguments):
             try:
                 activity_service.prepare_activity_update(connection, **arguments)
@@ -71,7 +72,7 @@ class EditActivityTool(Tool):
                          arguments_model=EditActivityArguments, handler=update, preflight=verify,
                          review_validator=lambda args, snapshot: _review_check(connection, args, snapshot),
                          reviewed_handler=lambda args, snapshot: activity_service.update_activity_fields(
-                             connection, **args, expected_snapshot=snapshot))
+                             connection, **args, expected_snapshot=snapshot, commit=not transactional))
 
 
 def describe_activity_proposals(connection, proposals):
@@ -108,10 +109,10 @@ def describe_activity_proposals(connection, proposals):
     return reviewed
 
 
-def create_activity_tool_registry(connection):
+def create_activity_tool_registry(connection, *, transactional=False):
     """Opt into approved activity changes; public schemas still have no handlers."""
     registry = ToolRegistry()
-    registry.register(AddActivityTool(connection))
-    registry.register(DeleteActivityTool(connection))
-    registry.register(EditActivityTool(connection))
+    registry.register(AddActivityTool(connection, transactional=transactional))
+    registry.register(DeleteActivityTool(connection, transactional=transactional))
+    registry.register(EditActivityTool(connection, transactional=transactional))
     return registry

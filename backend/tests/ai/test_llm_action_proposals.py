@@ -19,7 +19,7 @@ from openai.types.responses import Response, ResponseFunctionToolCall
 from backend.app import database
 from backend.app.api import actions, action_runtime, conversations
 from backend.app.ai.actions.registry import create_proposal_tool_registry
-from backend.app.ai.actions.service import ActionProposalService
+from backend.app.ai.actions.persistent_service import PersistentActionProposalService
 from backend.app.ai.agent import reasoning, service as agent
 from backend.app.ai.agent.contracts import AgentProposal, InvalidProposalError
 from backend.app.ai.agent.tool_calls import public_agent_tools
@@ -186,7 +186,7 @@ class ModelChatApprovalTests(unittest.TestCase):
         factory = self.stack.enter_context(patch.object(agent, "OpenAI"))
         self.model = factory.return_value.__enter__.return_value.responses.parse
         self.model.return_value = native_response()
-        self.stack.enter_context(patch.object(action_runtime, "service", ActionProposalService(action_runtime.execution_resources)))
+        self.stack.enter_context(patch.object(action_runtime, "service", PersistentActionProposalService(chats.open_store, action_runtime.execution_resources)))
         self.connect = self.stack.enter_context(patch.object(action_runtime.common, "create_connection", side_effect=lambda: sqlite3.connect(self.path)))
         app = FastAPI()
         app.include_router(conversations.router)
@@ -241,7 +241,7 @@ class ModelChatApprovalTests(unittest.TestCase):
         self.assertEqual(self.send().status_code, 200)
         self.assertEqual(len(self.rows()), 1)
         self.assertEqual(len(self.proposals()), 1)
-        self.connect.assert_called_once()
+        self.connect.assert_not_called()  # Execution shares the receipt transaction's connection.
         self.model.assert_called_once()  # No post-execution model continuation.
 
     def test_cancel_never_opens_execution_resources(self):
@@ -290,12 +290,13 @@ class ModelChatApprovalTests(unittest.TestCase):
                 self.assertEqual(self.rows(), [])
         self.connect.assert_not_called()
 
-    def test_restart_does_not_recreate_old_authority_from_saved_chat(self):
+    def test_restart_preserves_authority_without_recreating_from_chat(self):
         self.assertEqual(self.send().status_code, 200)
-        action_runtime.service = ActionProposalService(action_runtime.execution_resources)
+        before = self.proposals()
+        action_runtime.service = PersistentActionProposalService(chats.open_store, action_runtime.execution_resources)
         self.assertEqual(self.send().status_code, 200)
         self.client.get(f"/conversations/{self.chat}/messages")
-        self.assertEqual(self.proposals(), [])
+        self.assertEqual(self.proposals(), before)
         self.assertEqual(self.rows(), [])
         self.model.assert_called_once()
         self.connect.assert_not_called()
@@ -326,7 +327,7 @@ class ModelChatApprovalTests(unittest.TestCase):
         self.assertEqual([row[0] for row in self.rows()], [other_id])
         self.assertEqual(self.client.post(path, json={"decision": "confirm"}).status_code, 409)
         self.model.assert_called_once()
-        self.connect.assert_called_once()
+        self.connect.assert_not_called()
 
     def test_native_deletion_cancel_leaves_activity_unchanged(self):
         self.seed_delete_target()

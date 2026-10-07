@@ -129,10 +129,10 @@ def prepare_new_activity(fields):
     return columns, values
 
 
-def create_activity_record(connection, prepared):
+def create_activity_record(connection, prepared, *, commit=True):
     """Insert through the existing CRUD function and return its new row."""
     columns, values = prepared
-    activity_id = add_activity(connection, columns, values)
+    activity_id = add_activity(connection, columns, values, commit=commit)
     return get_activity_by_id(connection, activity_id)
 
 
@@ -201,10 +201,16 @@ def prepare_activity_update(connection, activity_id, expected_name, changes):
     return target, updates
 
 
-def update_activity_fields(connection, activity_id, expected_name, changes, *, expected_snapshot=None):
+def update_activity_fields(connection, activity_id, expected_name, changes, *, expected_snapshot=None, commit=True):
     """Update in place through existing CRUD; final-value validation and writes are atomic."""
-    if connection.in_transaction:
+    if connection.in_transaction and commit:
         raise ActivityValidationError(status_code=409, detail="Editing needs its own transaction.")
+    if not commit:
+        verify_activity_snapshot(connection, activity_id, expected_name, expected_snapshot)
+        _, updates = prepare_activity_update(connection, activity_id, expected_name, changes)
+        for column, value in updates.items():
+            edit_activity(connection, activity_id, column, value, commit=False)
+        return {"activity_id": activity_id, "updated": True, "fields": list(updates)}
     with connection:
         connection.execute("BEGIN IMMEDIATE")
         verify_activity_snapshot(connection, activity_id, expected_name, expected_snapshot)
@@ -214,10 +220,17 @@ def update_activity_fields(connection, activity_id, expected_name, changes, *, e
     return {"activity_id": activity_id, "updated": True, "fields": list(updates)}
 
 
-def delete_activity_record(connection, activity_id, expected_name, *, expected_snapshot=None):
+def delete_activity_record(connection, activity_id, expected_name, *, expected_snapshot=None, commit=True):
     """Re-check and delete one record under the same SQLite write transaction."""
-    if connection.in_transaction:
+    if connection.in_transaction and commit:
         raise ActivityValidationError(status_code=409, detail="Deletion needs its own transaction.")
+    if not commit:
+        verify_activity_snapshot(connection, activity_id, expected_name, expected_snapshot)
+        prepare_activity_deletion(connection, activity_id, expected_name)
+        removed = delete_activity(connection, activity_id, commit=False)
+        if removed != 1:
+            raise ActivityValidationError(status_code=409, detail="The selected activity could not be deleted.")
+        return {"activity_id": activity_id, "deleted": True}
     with connection:
         connection.execute("BEGIN IMMEDIATE")
         verify_activity_snapshot(connection, activity_id, expected_name, expected_snapshot)

@@ -9,7 +9,7 @@ const pending = {
   status: 'pending_approval', requires_approval: true, result: null,
 }
 
-function harness(dev = true) {
+function harness(dev = true, onResult) {
   const values = [], refs = [], calls = []
   let cursor = 0, refCursor = 0, effect, cleanup, responder, keyEffect, refreshKey
   const context = vm.createContext({
@@ -29,7 +29,7 @@ function harness(dev = true) {
   const source = fs.readFileSync(new URL('../src/hooks/useActionProposals.js', import.meta.url), 'utf8')
     .replace(/^import .*\n/, '').replace('export default function', 'function')
   vm.runInContext(source, context)
-  const render = (key = refreshKey) => { refreshKey = key; cursor = refCursor = 0; return context.useActionProposals(key) }
+  const render = (key = refreshKey) => { refreshKey = key; cursor = refCursor = 0; return context.useActionProposals(key, onResult) }
   const response = data => ({ ok: true, json: async () => data })
   responder = () => response({ proposals: [pending], dev_enabled: dev })
   return { render, calls, response, runKeyEffect() { keyEffect() }, setResponder(fn) { responder = fn }, stop() { cleanup?.() },
@@ -45,6 +45,18 @@ test('loading proposals does not approve or call any other backend path', async 
   assert.equal(h.calls[0][0], '/api/actions/proposals')
   assert.equal(h.calls[0][1].credentials, 'same-origin')
   assert.equal(h.calls[0][1].method, undefined)
+})
+
+test('a confirmed result refreshes chat receipts without sending another AI prompt', async () => {
+  const receipts = []
+  const h = harness(true, result => receipts.push(result))
+  await h.start()
+  assert.equal(receipts.length, 0)
+  h.setResponder(() => h.response({ ...pending, status: 'completed', result: { success: true } }))
+  await h.render().decide(pending.id, 'confirm')
+  assert.equal(receipts.length, 1)
+  assert.equal(receipts[0].status, 'completed')
+  assert.equal(h.calls.length, 2)
 })
 
 test('confirm sends only identity and decision and blocks synchronous double clicks', async () => {

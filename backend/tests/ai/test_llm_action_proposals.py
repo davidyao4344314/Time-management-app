@@ -252,6 +252,21 @@ class ModelChatApprovalTests(unittest.TestCase):
         self.assertEqual(self.rows(), [])
         self.connect.assert_not_called()
 
+    def test_saved_receipt_reaches_chat_and_next_context_without_model_continuation(self):
+        self.assertEqual(self.send().status_code, 200)
+        view = self.proposals()[0]
+        response = self.client.post(f"/actions/proposals/{view['id']}/decision", json={"decision": "confirm"})
+        self.assertTrue(response.json()['result']['success'])
+        self.model.assert_called_once()
+        messages = self.client.get(f"/conversations/{self.chat}/messages").json()['messages']
+        self.assertTrue(messages[-1]['action_results'][0]['success'])
+        with chats.open_store() as connection:
+            owner = connection.execute('SELECT owner_id FROM conversations WHERE conversation_id=?', (self.chat,)).fetchone()[0]
+            turns = chats.build_chat_context(connection, self.chat, owner)['recent_turns']
+        payload = reasoning.build_agent_messages('Did it save?', {}, turns)
+        receipts = [json.loads(item['content']) for item in payload if item['role']=='user' and item['content'].startswith('{')]
+        self.assertTrue(any(item.get('backend_action_results', [{}])[0].get('success') for item in receipts))
+
     def test_context_recovery_registers_only_the_final_tool_request(self):
         self.model.side_effect = [SimpleNamespace(status="completed", output=[], output_parsed={
             "message": None, "actions": [],

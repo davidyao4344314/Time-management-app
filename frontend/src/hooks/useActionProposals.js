@@ -6,7 +6,7 @@ function isProposalView(value) {
     && typeof value.requires_approval === 'boolean'
 }
 
-export default function useActionProposals(refreshKey) {
+export default function useActionProposals(refreshKey, onResult) {
   const [proposals, setProposals] = useState([])
   const [devEnabled, setDevEnabled] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -20,6 +20,8 @@ export default function useActionProposals(refreshKey) {
   const latest = useRef([])
   const previousRefreshKey = useRef(refreshKey)
   const refreshQueued = useRef(false)
+  const resultCallback = useRef(onResult)
+  resultCallback.current = onResult
 
   async function run(path, mode, options = {}) {
     if (!mounted.current || inFlight.current) return false
@@ -39,6 +41,9 @@ export default function useActionProposals(refreshKey) {
         throw new Error('The backend returned an invalid proposal response.')
       }
       if (!mounted.current || controller.signal.aborted) return false
+      const resolved = mode === 'load' ? data.proposals.filter(proposal =>
+        ['completed', 'failed', 'rejected'].includes(proposal.status)
+        && latest.current.find(previous => previous.id === proposal.id)?.status !== proposal.status) : []
       if (mode === 'load') {
         latest.current = data.proposals
         setDevEnabled(data.dev_enabled === true)
@@ -49,6 +54,10 @@ export default function useActionProposals(refreshKey) {
           : latest.current.map(proposal => proposal.id === data.id ? data : proposal)
       }
       setProposals(latest.current)
+      if (resolved.length) resultCallback.current?.(resolved[0])
+      if (mode !== 'load' && mode !== 'create' && ['completed', 'failed', 'rejected'].includes(data.status)) {
+        resultCallback.current?.(data)
+      }
       return true
     } catch (failure) {
       if (!mounted.current || controller.signal.aborted) return false

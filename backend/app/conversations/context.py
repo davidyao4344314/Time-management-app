@@ -23,12 +23,13 @@ def _excerpt(text, limit):
 def _bounded_turn(turn, budget):
     snapshot = deepcopy(turn)
     def size():
-        return len(json.dumps({'user':snapshot['user'], 'assistant':snapshot['assistant']}, ensure_ascii=False))
+        return len(json.dumps({'user':snapshot['user'], 'assistant':snapshot['assistant'],
+            **({'action_results': snapshot['action_results']} if snapshot.get('action_results') else {})}, ensure_ascii=False))
     if size() <= budget:
         return snapshot, size()
     # Retain literal excerpts of both sides; never rewrite the stored transcript.
     snapshot['assistant']['actions'] = []
-    snapshot['assistant']['message'] += '\n[Large turn excerpt; proposed action details may be omitted. No actions were executed.]'
+    snapshot['assistant']['message'] += '\n[Large turn excerpt; action details may be omitted. Check backend receipts for execution.]'
     available = max(1, (budget - 400) // 2)
     while size() > budget:
         snapshot['user'] = _excerpt(snapshot['user'], available)
@@ -36,6 +37,9 @@ def _bounded_turn(turn, budget):
         if size() > budget:
             # Other response metadata is not needed for conversation context.
             snapshot['assistant'] = {'message': snapshot['assistant']['message'], 'actions': []}
+            if snapshot.get('action_results'):
+                snapshot['action_results'] = [{key: item[key] for key in ('proposal_id','status','success')}
+                    for item in snapshot['action_results']][:1]
             available = max(1, available // 2)
     snapshot['context_truncated'] = True
     return snapshot, size()

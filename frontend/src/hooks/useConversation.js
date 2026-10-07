@@ -74,6 +74,19 @@ export default function useConversation() {
     return result.conversations
   }, [])
 
+  async function refreshActionResults() {
+    const id = active.current
+    if (!id) return
+    try {
+      const result = await api(`/${id}/messages`, { cache: 'no-store' })
+      if (!mounted.current || active.current !== id) return
+      const fresh = new Map(result.messages.map(item => [item.message_id, item]))
+      setMessages(current => current.map(item => fresh.get(item.message_id) || item))
+    } catch {
+      if (mounted.current && active.current === id) setError('Action status is saved. Refresh this chat to see its receipt.')
+    }
+  }
+
   async function newChat() {
     setError('')
     setLoading(true)
@@ -218,6 +231,6 @@ export default function useConversation() {
 
   return { chats, chat, messages, draft, setDraft, loading, sending, error, nextBefore, loadingOlder,
     retryMessage, retryingMessageId,
-    selectChat, newChat, send, loadOlder, setMemorySharing, summarizeChat, summarizing, summaryMessage,
+    selectChat, newChat, send, loadOlder, setMemorySharing, summarizeChat, summarizing, summaryMessage, refreshActionResults,
     retryAvailable, checkLast: () => { const request = pending.current.get(active.current); if (request) return send(request) } }
 }

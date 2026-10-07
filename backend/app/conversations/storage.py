@@ -12,6 +12,17 @@ def now_iso():
     return datetime.now(timezone.utc).isoformat(timespec='seconds')
 
 
+def conversation_results(connection, conversation_id, request_id):
+    """Read linked terminal receipts; no action execution dependencies."""
+    if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='action_proposals'").fetchone() is None:
+        return []
+    return [{'status': row[0], **json.loads(row[1])} for row in connection.execute(
+        '''SELECT p.status,p.result_json FROM action_proposals p JOIN conversations c
+           ON p.conversation_id=c.conversation_id AND p.owner_id=c.owner_id
+           WHERE p.conversation_id=? AND p.request_id=? AND p.result_json IS NOT NULL
+           ORDER BY p.created_at,p.proposal_id''', (conversation_id, request_id))]
+
+
 def migrate(connection):
     """Add tables without replacing any existing application data."""
     with connection:
@@ -91,6 +102,11 @@ def get_messages(connection, conversation_id, owner_id, *, before=None, limit=50
         ORDER BY sequence_number DESC LIMIT ?''', (conversation_id, before or 2**63-1, limit+1)))
     has_more = len(rows) > limit
     items = [message_dict(row) for row in reversed(rows[:limit])]
+    for item in items:
+        if item['role'] == 'assistant':
+            receipts = conversation_results(connection, conversation_id, item['request_id'])
+            if receipts:
+                item['action_results'] = receipts
     return {'messages': items, 'has_more': has_more,
             'next_before': items[0]['sequence_number'] if has_more else None}
 
@@ -172,8 +188,10 @@ def completed_turns(connection, conversation_id, owner_id, *, limit=100):
     for row in reversed(rows):
         inspector = json.loads(row[5]) if row[5] else {}
         refs = [ref for ref in (inspector or {}).get('file_refs', []) if isinstance(ref, str)][:3]
+        receipts = conversation_results(connection, conversation_id, row[4])
         result.append({'user': row[0], 'assistant': json.loads(row[1]), 'sequence_number': row[2],
-                       'timestamp': row[3], 'request_id': row[4], **({'file_refs': refs} if refs else {})})
+                       'timestamp': row[3], 'request_id': row[4], **({'file_refs': refs} if refs else {}),
+                       **({'action_results': receipts} if receipts else {})})
     return result
 
 

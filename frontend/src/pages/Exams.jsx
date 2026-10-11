@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import ExamClipboardImport from '../components/ExamClipboardImport'
+import useModalFocus from '../hooks/useModalFocus'
 import './Activities.css'
 
 const emptyExamForm = {
@@ -106,6 +107,7 @@ function Exams() {
   const [editColumn, setEditColumn] = useState('name')
   const [editValue, setEditValue] = useState('')
   const [isSavingEdit, setIsSavingEdit] = useState(false)
+  const editDialog = useModalFocus(Boolean(editingExam), closeEditForm, isSavingEdit)
   const [editError, setEditError] = useState('')
   const [isImportOpen, setIsImportOpen] = useState(false)
   const [isImportBusy, setIsImportBusy] = useState(false)
@@ -791,6 +793,8 @@ function Exams() {
       {editingExam && (
         <div className="edit-activity-overlay">
           <form
+            ref={editDialog}
+            tabIndex={-1}
             aria-labelledby="edit-exam-heading"
             aria-modal="true"
             className="add-activity-form edit-activity-form"
@@ -842,7 +846,7 @@ function Exams() {
               <button disabled={isSavingEdit} type="submit">
                 {isSavingEdit ? 'Saving...' : 'Save'}
               </button>
-              <button onClick={closeEditForm} type="button">Cancel</button>
+              <button disabled={isSavingEdit} onClick={closeEditForm} type="button">Cancel</button>
             </div>
           </form>
         </div>

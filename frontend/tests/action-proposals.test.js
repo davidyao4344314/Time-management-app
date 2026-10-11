@@ -11,7 +11,7 @@ const pending = {
 
 function harness(dev = true, onResult) {
   const values = [], refs = [], calls = []
-  let cursor = 0, refCursor = 0, effect, cleanup, responder, keyEffect, refreshKey
+  let cursor = 0, refCursor = 0, effectCursor = 0, effect, cleanup, responder, keyEffect, refreshKey
   const context = vm.createContext({
     AbortController, encodeURIComponent,
     useState(initial) {
@@ -20,16 +20,18 @@ function harness(dev = true, onResult) {
       return [values[index], value => { values[index] = typeof value === 'function' ? value(values[index]) : value }]
     },
     useRef(initial) { const index = refCursor++; return refs[index] ||= { current: initial } },
-    useEffect(callback, dependencies) {
-      if (dependencies.length === 0) effect ||= callback
-      else keyEffect = callback
+    useCallback(callback) { return callback },
+    useEffect(callback) {
+      const index = effectCursor++
+      if (index === 1) effect ||= callback
+      else if (index === 2) keyEffect = callback
     },
     async fetch(path, options) { calls.push([path, options]); return responder(path, options) },
   })
   const source = fs.readFileSync(new URL('../src/hooks/useActionProposals.js', import.meta.url), 'utf8')
     .replace(/^import .*\n/, '').replace('export default function', 'function')
   vm.runInContext(source, context)
-  const render = (key = refreshKey) => { refreshKey = key; cursor = refCursor = 0; return context.useActionProposals(key, onResult) }
+  const render = (key = refreshKey) => { refreshKey = key; cursor = refCursor = effectCursor = 0; return context.useActionProposals(key, onResult) }
   const response = data => ({ ok: true, json: async () => data })
   responder = () => response({ proposals: [pending], dev_enabled: dev })
   return { render, calls, response, runKeyEffect() { keyEffect() }, setResponder(fn) { responder = fn }, stop() { cleanup?.() },

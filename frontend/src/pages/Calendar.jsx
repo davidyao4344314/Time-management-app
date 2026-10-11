@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import UoaTimetableImport from '../components/UoaTimetableImport'
 import ActivityEditModal from '../components/ActivityEditModal'
-import { prepareCalendarActivities } from './calendarDisplay'
+import { layoutCalendarDay, timeToMinutes, hasTimeRange } from './calendarDisplay'
+import useModalFocus from '../hooks/useModalFocus'
 import './Calendar.css'
 
 const dayNames = [
@@ -87,20 +88,6 @@ async function fetchActivitiesForWeek(weekStart, signal) {
   return formatWeeklyActivities(await response.json())
 }
 
-function timeToMinutes(time) {
-  if (typeof time !== 'string') {
-    return null
-  }
-
-  const [hoursPart, minutesPart] = time.split(':').map(Number)
-
-  if (!Number.isFinite(hoursPart) || !Number.isFinite(minutesPart)) {
-    return null
-  }
-
-  return hoursPart * 60 + minutesPart
-}
-
 function formatTimeRange(startTime, endTime) {
   if (!startTime && !endTime) {
     return 'No time set'
@@ -109,46 +96,42 @@ function formatTimeRange(startTime, endTime) {
   return `${startTime || 'No start time'} – ${endTime || 'No end time'}`
 }
 
-function CalendarActivity({ activity, onDragStart, onEdit, untimedIndex }) {
+function CalendarActivity({ activity, onDragStart, onEdit, onDetails, untimed = false }) {
   const wasDragged = useRef(false)
   const canEdit = activity.eventType !== 'exam'
   const startMinutes = timeToMinutes(activity.startTime)
   const endMinutes = timeToMinutes(activity.endTime)
-  const hasTimeRange = (
-    startMinutes !== null
-    && endMinutes !== null
-    && startMinutes < endMinutes
-  )
-  const position = hasTimeRange
+  const position = !untimed && hasTimeRange(activity)
     ? {
         top: `${(startMinutes / minutesPerDay) * 100}%`,
         height: `${((endMinutes - startMinutes) / minutesPerDay) * 100}%`,
+        left: `calc(${(activity.lane / activity.laneCount) * 100}% + 0.25rem)`,
+        width: `calc(${100 / activity.laneCount}% - 0.5rem)`,
       }
-    : {
-        top: `${0.25 + untimedIndex * 3.25}rem`,
-        height: '3rem',
-      }
+    : undefined
 
   return (
     <article
-      className="calendar-activity"
+      className={`calendar-activity${untimed ? ' calendar-activity-untimed' : ''}`}
       data-event-type={activity.eventType}
       draggable={activity.eventType !== 'exam'}
-      role={canEdit ? 'button' : undefined}
-      tabIndex={canEdit ? 0 : undefined}
-      aria-label={canEdit ? `Edit ${activity.name}` : undefined}
+      role="button"
+      tabIndex={0}
+      aria-label={`${canEdit ? 'Edit' : 'View'} ${activity.name}, ${activity.calendarDate}, ${formatTimeRange(activity.startTime, activity.endTime)}`}
+      title={`${activity.name}\n${formatTimeRange(activity.startTime, activity.endTime)}\n${canEdit ? 'Click to edit' : 'Click for exam details'}`}
       onPointerDown={() => { wasDragged.current = false }}
       onDragStart={(event) => {
         wasDragged.current = true
         onDragStart(event, activity.calendarId)
       }}
       onClick={() => {
-        if (canEdit && !wasDragged.current) onEdit(activity)
+        if (!wasDragged.current) (canEdit ? onEdit : onDetails)(activity)
       }}
       onKeyDown={(event) => {
-        if (canEdit && (event.key === 'Enter' || event.key === ' ')) {
+        if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault()
-          onEdit(activity)
+          const open = canEdit ? onEdit : onDetails
+          open(activity)
         }
       }}
       style={position}
@@ -159,23 +142,22 @@ function CalendarActivity({ activity, onDragStart, onEdit, untimedIndex }) {
   )
 }
 
-function CalendarDay({ day, isToday, activities, onDragStart, onDrop, onEdit }) {
-  const orderedActivities = prepareCalendarActivities(activities)
-
+function CalendarDay({ day, isToday, activities, onDragStart, onDrop, onEdit, onDetails, untimed = false }) {
   return (
     <section
-      aria-label={`${day.name}, ${day.dateLabel}`}
-      className={`calendar-day-timeline${isToday ? ' calendar-today' : ''}`}
+      aria-label={`${day.name}, ${day.dateLabel}${untimed ? ', untimed events' : ''}`}
+      className={`${untimed ? 'calendar-untimed-day' : 'calendar-day-timeline'}${isToday ? ' calendar-today' : ''}`}
       onDragOver={(event) => event.preventDefault()}
       onDrop={(event) => onDrop(event, day)}
     >
-      {orderedActivities.map((activity, index) => (
+      {activities.map((activity, index) => (
         <CalendarActivity
           activity={activity}
           key={`${activity.calendarId}-${activity.startTime}-${activity.endTime}-${index}`}
           onDragStart={onDragStart}
           onEdit={onEdit}
-          untimedIndex={index}
+          onDetails={onDetails}
+          untimed={untimed}
         />
       ))}
     </section>
@@ -192,6 +174,7 @@ function Calendar() {
   const [error, setError] = useState('')
   const [moveError, setMoveError] = useState('')
   const [editingActivity, setEditingActivity] = useState(null)
+  const [examDetails, setExamDetails] = useState(null)
   const [isLoadingEdit, setIsLoadingEdit] = useState(false)
   const [editError, setEditError] = useState('')
   const [editMessage, setEditMessage] = useState('')
@@ -206,6 +189,22 @@ function Calendar() {
   const [isRemovingDuplicates, setIsRemovingDuplicates] = useState(false)
   const [duplicateMessage, setDuplicateMessage] = useState('')
   const [duplicateError, setDuplicateError] = useState('')
+  const canvasDialog = useModalFocus(isCanvasModalOpen, closeCanvasModal, isImportingCanvas)
+  const duplicatesDialog = useModalFocus(isClearDuplicatesOpen, () => setIsClearDuplicatesOpen(false), isRemovingDuplicates)
+  const detailsDialog = useModalFocus(Boolean(examDetails), () => setExamDetails(null))
+  const calendarScroll = useRef(null)
+  const displayDays = weekDays.map(day => ({ ...day,
+    ...layoutCalendarDay(activities.filter(activity => activity.calendarDate === day.date)),
+  }))
+
+  useEffect(() => {
+    if (isLoading || !calendarScroll.current) return
+    const timeline = calendarScroll.current.querySelector('.calendar-day-timeline')
+    // Start near the morning; midnight remains accessible by scrolling upward.
+    const header = calendarScroll.current.querySelector('.calendar-day-header')
+    if (header) calendarScroll.current.style.setProperty('--calendar-header-height', `${header.offsetHeight}px`)
+    if (timeline) calendarScroll.current.scrollTop = timeline.clientHeight * 7 / 24
+  }, [isLoading, selectedWeek])
 
   async function fetchWeeklyActivities(signal) {
     // Refresh the visible week even if navigation happened during an import.
@@ -508,6 +507,8 @@ function Calendar() {
       {isClearDuplicatesOpen && (
         <div className="canvas-modal-overlay">
           <section
+            ref={duplicatesDialog}
+            tabIndex={-1}
             className="canvas-modal"
             role="dialog"
             aria-modal="true"
@@ -533,6 +534,8 @@ function Calendar() {
       {isCanvasModalOpen && (
         <div className="canvas-modal-overlay">
           <form
+            ref={canvasDialog}
+            tabIndex={-1}
             aria-labelledby="canvas-modal-heading"
             aria-modal="true"
             className="canvas-modal"
@@ -585,8 +588,19 @@ function Calendar() {
           onClose={() => setEditingActivity(null)} onSaved={handleCalendarEditSaved} />
       )}
 
+      {examDetails && <div className="canvas-modal-overlay">
+        <section ref={detailsDialog} tabIndex={-1} className="canvas-modal" role="dialog" aria-modal="true" aria-labelledby="calendar-exam-details">
+          <h3 id="calendar-exam-details">{examDetails.name}</h3>
+          <p>{examDetails.subject || examDetails.category}</p>
+          <p>Date: {examDetails.calendarDate}</p>
+          <p>{formatTimeRange(examDetails.startTime, examDetails.endTime)}</p>
+          <p>Exam details are read-only here. Use the Exams page to edit.</p>
+          <button type="button" onClick={() => setExamDetails(null)}>Close</button>
+        </section>
+      </div>}
+
       {!isLoading && (
-        <div className="calendar-scroll" key={selectedWeek} tabIndex={0} role="region" aria-label="Monday to Sunday calendar">
+        <div ref={calendarScroll} className="calendar-scroll" key={selectedWeek} tabIndex={0} role="region" aria-label="Monday to Sunday calendar">
           <div className="calendar-layout" style={{ '--calendar-day-count': weekDays.length }}>
             <div className="calendar-corner" aria-hidden="true" />
 
@@ -602,6 +616,11 @@ function Calendar() {
               </header>
             ))}
 
+            <div className="calendar-untimed-label">Untimed</div>
+            {displayDays.map(day => <CalendarDay key={`untimed-${day.date}`} day={day} isToday={day.date === today}
+              activities={day.untimed} untimed onDragStart={handleDragStart} onDrop={handleDrop}
+              onEdit={openCalendarEdit} onDetails={setExamDetails} />)}
+
             <div className="calendar-time-column" aria-hidden="true">
               {hours.map((hour) => (
                 <span
@@ -614,17 +633,16 @@ function Calendar() {
               ))}
             </div>
 
-            {weekDays.map((day) => (
+            {displayDays.map((day) => (
               <CalendarDay
-                activities={activities.filter(
-                  (activity) => activity.calendarDate === day.date,
-                )}
+                activities={day.timed}
                 day={day}
                 isToday={day.date === today}
                 key={day.date}
                 onDragStart={handleDragStart}
                 onDrop={handleDrop}
                 onEdit={openCalendarEdit}
+                onDetails={setExamDetails}
               />
             ))}
           </div>

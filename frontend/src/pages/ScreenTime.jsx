@@ -21,7 +21,8 @@ function ScreenTime() {
 
       <section>
         <h3>Today</h3>
-        <p>0h 0m</p>
+        <p>Not connected</p>
+        <p>No screen time has been measured yet.</p>
       </section>
 
       <section>

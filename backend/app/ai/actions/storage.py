@@ -36,7 +36,7 @@ def insert_proposals(connection, owner, proposals, *, conversation_id=None, requ
 
 
 def read_proposal(connection, owner, identifier):
-    return connection.execute('''SELECT proposal_json,status,result_json FROM action_proposals
+    return connection.execute('''SELECT proposal_json,status,result_json,conversation_id,request_id FROM action_proposals
         WHERE owner_id=? AND proposal_id=?''', (owner, identifier)).fetchone()
 
 
@@ -44,7 +44,8 @@ def public_view(identifier, row):
     proposal = json.loads(row[0])
     return {'id': identifier, 'display_title': proposal['display_title'],
             'display_description': proposal['display_description'], 'status': row[1],
-            'requires_approval': True, 'result': json.loads(row[2]) if row[2] else None}
+            'requires_approval': True, 'result': json.loads(row[2]) if row[2] else None,
+            'conversation_id': row[3], 'request_id': row[4]}
 
 
 def finish(connection, owner, identifier, status, result=None):

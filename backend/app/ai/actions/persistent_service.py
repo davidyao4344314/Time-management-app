@@ -32,7 +32,7 @@ class PersistentActionProposalService:
     def list_proposals(self, owner):
         with self._store_factory() as connection:
             return [storage.public_view(row[0], row[1:]) for row in connection.execute(
-                'SELECT proposal_id,proposal_json,status,result_json FROM action_proposals WHERE owner_id=? ORDER BY created_at,proposal_id', (owner,))]
+                'SELECT proposal_id,proposal_json,status,result_json,conversation_id,request_id FROM action_proposals WHERE owner_id=? ORDER BY created_at,proposal_id', (owner,))]
 
     def decide(self, owner, identifier, decision):
         if not isinstance(decision, ApprovalDecision):

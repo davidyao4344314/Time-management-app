@@ -6,3 +6,12 @@ body {
   margin: 0;
   font-family: Arial, sans-serif;
 }
+
+button, input, select, textarea { font: inherit; }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible,
+[role='button']:focus-visible, [role='region']:focus-visible {
+  outline: 2px solid #4f46e5;
+  outline-offset: 3px;
+}
+.activity-card h4, .activities-card h4 { overflow-wrap: anywhere; }
+[id] { scroll-margin-top: 6rem; }

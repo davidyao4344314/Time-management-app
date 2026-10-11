@@ -34,7 +34,7 @@ function FileImportPanel({ disabled = false, canAsk = true, onUseFile }) {
     <ul className="file-import-list">
       {state.files.map(file => <li key={file.file_id}>
         <strong>{file.filename}</strong><span>{file.file_type.toUpperCase()} · {file.chunk_count} chunks</span>
-        <code>{file.file_id}</code>
+        <details><summary>File reference</summary><code>{file.file_id}</code></details>
         <button type="button" className="chat-secondary" disabled={disabled || state.uploading || !canAsk} onClick={() => onUseFile(file)}>Use in question</button>
       </li>)}
     </ul>

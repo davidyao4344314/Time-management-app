@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import useConversation from '../hooks/useConversation'
 import MessageList from '../components/chat/MessageList'
 import ChatComposer from '../components/chat/ChatComposer'
 import FileImportPanel from '../components/FileImportPanel'
 import ActionProposalPanel from '../components/ActionProposalPanel'
+import useActionProposals from '../hooks/useActionProposals'
+import { groupActionProposals } from '../components/proposalDisplay'
 import './AIAgent.css'
 
 const suggestions = [
@@ -17,6 +19,9 @@ function AIAgent() {
   const state = useConversation()
   const [model, setModel] = useState('Loading model…')
   const proposalRefreshKey = state.messages.findLast(message => message.role === 'assistant')?.message_id
+  const proposals = useActionProposals(proposalRefreshKey, state.refreshActionResults)
+  const proposalGroups = useMemo(() => groupActionProposals(proposals.proposals, state.chat?.conversation_id, state.messages),
+    [proposals.proposals, state.chat?.conversation_id, state.messages])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -49,37 +54,42 @@ function AIAgent() {
           </select>
         </div>
       </div>
-      <h2 id="ai-agent-heading">{state.chat?.title || 'What do you want help with?'}</h2>
+      <h2 id="ai-agent-heading" className={state.chat ? 'chat-title' : undefined}>{state.chat?.title || 'What do you want help with?'}</h2>
       <p className="agent-context-note chat-model-label">Model for new replies: {model}</p>
-      {!state.loading && <FileImportPanel disabled={state.sending || state.summarizing || state.retryAvailable} canAsk={Boolean(state.chat)}
-        onUseFile={file => state.setDraft(`What does ${file.file_id} say?`)} />}
-      {state.chat && <label className="chat-memory-setting"><input type="checkbox" checked={state.chat.memory_sharing_enabled} disabled={state.sending || state.loading}
-        onChange={event => state.setMemorySharing(event.target.checked)} /> Allow older completed turns from this chat to be used as global memory</label>}
       {state.loading && <p role="status">Loading conversation…</p>}
       {!state.chat && !state.loading && <p>Start a New Chat to begin.</p>}
-      {!state.loading && <ActionProposalPanel disabled={state.sending || state.summarizing} refreshKey={proposalRefreshKey} onResult={state.refreshActionResults} />}
       {state.nextBefore && <button className="chat-secondary" onClick={state.loadOlder} disabled={state.loadingOlder || state.loading}>
         {state.loadingOlder ? 'Loading earlier messages…' : 'Load earlier messages'}
       </button>}
       <MessageList messages={state.messages} sending={state.sending} onRetry={state.retryMessage}
+        proposalsByRequest={proposalGroups.byRequest} onDecision={proposals.decide} busyId={proposals.busyId}
+        proposalsDisabled={state.sending || state.summarizing || proposals.loading || proposals.busyId !== null || proposals.needsRefresh}
         retryingMessageId={state.retryingMessageId}
         retryDisabled={state.loading || state.sending || state.summarizing || state.retryAvailable} />
+      {!state.loading && <ActionProposalPanel disabled={state.sending || state.summarizing}
+        state={proposals} groups={proposalGroups} chats={state.chats} />}
       {state.error && <p className="chat-error" role="alert">{state.error}</p>}
       {state.retryAvailable && <button className="chat-secondary" onClick={state.checkLast} disabled={state.sending}>Check last request</button>}
-      {state.chat && <button className="chat-secondary" onClick={() => state.selectChat(state.chat.conversation_id)} disabled={state.sending}>Refresh chat</button>}
-      {state.chat && <div>
-        <button className="chat-secondary" onClick={state.summarizeChat} disabled={state.sending || state.summarizing || state.loading}>
-          {state.summarizing ? 'Summarizing…' : 'Summarize older messages'}
-        </button>
-        <p className="agent-context-note">Optional for long chats. Updating a summary makes an additional AI request.</p>
-        {state.summaryMessage && <p role="status">{state.summaryMessage}</p>}
-      </div>}
       {state.messages.length === 0 && state.chat && <div className="ai-agent-suggestions" aria-label="Request suggestions">
         {suggestions.map(([title, request]) => <button key={title} className="ai-agent-suggestion" disabled={state.sending}
           onClick={() => state.setDraft(request)}><strong>{title}</strong><span>{request}</span></button>)}
       </div>}
       <ChatComposer draft={state.draft} setDraft={state.setDraft} disabled={!state.chat || state.loading || state.retryAvailable}
         sending={state.sending || state.summarizing} onSend={() => state.send()} />
+      {!state.loading && <FileImportPanel disabled={state.sending || state.summarizing || state.retryAvailable} canAsk={Boolean(state.chat)}
+        onUseFile={file => state.setDraft(`What does the file "${file.filename}" say?`)} />}
+      {state.chat && <details className="chat-options">
+        <summary>Conversation options</summary>
+        <label className="chat-memory-setting"><input type="checkbox" checked={state.chat.memory_sharing_enabled} disabled={state.sending || state.loading}
+          onChange={event => state.setMemorySharing(event.target.checked)} /> Allow this chat’s older messages to be used in other chats</label>
+        <p className="agent-context-note">Off by default. Current app data still takes priority over remembered conversations.</p>
+        <button className="chat-secondary" onClick={() => state.selectChat(state.chat.conversation_id)} disabled={state.sending}>Refresh chat</button>
+        <button className="chat-secondary" onClick={state.summarizeChat} disabled={state.sending || state.summarizing || state.loading}>
+          {state.summarizing ? 'Summarizing…' : 'Summarize older messages'}
+        </button>
+        <p className="agent-context-note">Optional for long chats. Updating a summary makes an additional AI request.</p>
+        {state.summaryMessage && <p role="status">{state.summaryMessage}</p>}
+      </details>}
     </section>
   </main>
 }

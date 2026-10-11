@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import useModalFocus from '../hooks/useModalFocus'
 import '../pages/Activities.css'
 
 const fieldLabels = {
@@ -19,6 +20,7 @@ export default function ActivityEditModal({ activity, onClose, onSaved }) {
   const [scheduleWeekday, setScheduleWeekday] = useState(activity.weekday || 'Monday')
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState('')
+  const dialog = useModalFocus(true, onClose, isSaving)
   const fields = Object.keys(fieldLabels).filter((field) =>
     (field !== 'date' || activity.activityType === 'one_time')
     && (field !== 'weekday' || activity.activityType === 'weekly'),
@@ -60,7 +62,7 @@ export default function ActivityEditModal({ activity, onClose, onSaved }) {
 
   return (
     <div className="edit-activity-overlay">
-      <form aria-labelledby="edit-activity-heading" aria-modal="true" className="add-activity-form edit-activity-form" onSubmit={save} role="dialog">
+      <form ref={dialog} tabIndex={-1} aria-labelledby="edit-activity-heading" aria-modal="true" className="add-activity-form edit-activity-form" onSubmit={save} role="dialog">
         <h3 id="edit-activity-heading">Edit {activity.name} (ID {activity.id})</h3>
         <p>Source: <strong>{activity.source || 'Manual'}</strong> (read-only)</p>
         {activity.source && activity.source !== 'Manual' && <p>Changes are saved locally only. The original feed is not changed.</p>}

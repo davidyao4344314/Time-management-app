@@ -9,7 +9,7 @@ function harness() {
   let cursor = 0, refCursor = 0, effect, cleanup, number = 0, responder
   const context = vm.createContext({
     Map, URL, AbortController,
-    window: { location: { href: 'http://localhost/' }, history: { replaceState() {} } },
+    window: { location: { href: 'http://localhost/' }, history: { replaceState() {} }, addEventListener() {}, removeEventListener() {} },
     crypto: { randomUUID: () => `request-${++number}` },
     useState(initial) {
       const index = cursor++

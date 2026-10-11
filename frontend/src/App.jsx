@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import './App.css'
 import Home from './pages/Home'
+import { pageFromUrl, urlForPage } from './navigation'
 
 // Keep the Home screen light; other pages load on their first visit.
 const pages = {
@@ -16,11 +17,21 @@ const pages = {
 function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [currentPage, setCurrentPage] = useState(() =>
-    new URL(window.location.href).searchParams.has('chat') ? 'AI Agent' : 'Home'
+    pageFromUrl(new URL(window.location.href))
   )
   const menu = useRef(null)
   const menuToggle = useRef(null)
   const Page = pages[currentPage]
+
+  useEffect(() => {
+    const navigateBack = () => {
+      setCurrentPage(pageFromUrl(new URL(window.location.href)))
+      setIsSidebarOpen(false)
+      window.scrollTo({ top: 0, left: 0 })
+    }
+    window.addEventListener('popstate', navigateBack)
+    return () => window.removeEventListener('popstate', navigateBack)
+  }, [])
 
   useEffect(() => {
     document.title = `${currentPage} · Activities Planning App`
@@ -52,21 +63,19 @@ function App() {
   }, [isSidebarOpen])
 
   function changePage(pageName) {
+    if (pageName !== currentPage) {
+      window.history.pushState(null, '', urlForPage(window.location.href, pageName))
+    }
     setCurrentPage(pageName)
     setIsSidebarOpen(false)
     menuToggle.current?.focus()
     window.scrollTo({ top: 0, left: 0 })
-    if (pageName !== 'AI Agent') {
-      const url = new URL(window.location.href)
-      url.searchParams.delete('chat')
-      window.history.replaceState(null, '', url)
-    }
   }
 
   return (
     <>
       <a className="skip-link" href="#page-content">Skip to content</a>
-      <header className={`top-bar${currentPage === 'AI Agent' ? ' top-bar-sticky' : ''}`}>
+      <header className="top-bar top-bar-sticky">
         <h1>Activities Planning App</h1>
         <button
           ref={menuToggle}

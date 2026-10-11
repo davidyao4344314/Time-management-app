@@ -51,6 +51,25 @@ class PersistentActionTests(unittest.TestCase):
             self.service.decide('owner', self.proposal.id, ApprovalDecision.APPROVE)
         self.assertEqual(self.count(), 1)
 
+    def test_public_origin_links_proposal_to_chat_without_exposing_arguments(self):
+        linked = create_test_activity_proposal()
+        with self.open_store() as connection:
+            chat = chat_storage.create_conversation(connection, 'owner', 'Study tonight')
+            with connection:
+                storage.insert_proposals(connection, 'owner', [linked],
+                    conversation_id=chat['conversation_id'], request_id='request-1')
+        view = self.service.get_proposal('owner', linked.id)
+        self.assertEqual(view['conversation_id'], chat['conversation_id'])
+        self.assertEqual(view['request_id'], 'request-1')
+        self.assertNotIn('arguments', view)
+        self.assertNotIn('target_snapshot', view)
+        self.assertNotIn('owner_id', view)
+        self.assertIn(view, self.service.list_proposals('owner'))
+        self.assertEqual(self.service.list_proposals('other'), [])
+        standalone = self.service.get_proposal('owner', self.proposal.id)
+        self.assertIsNone(standalone['conversation_id'])
+        self.assertIsNone(standalone['request_id'])
+
     def test_concurrent_confirmations_change_state_once(self):
         def confirm(_):
             try:
@@ -88,4 +107,3 @@ class PersistentActionTests(unittest.TestCase):
                     {'message': 'Review this proposal.', 'actions': []}, save_actions=fail_after_insert)
             self.assertEqual(len(chat_storage.request_messages(connection, chat['conversation_id'], 'request')), 1)
             self.assertEqual(len(self.service.list_proposals('owner')), 1)  # Only the setUp proposal.
-

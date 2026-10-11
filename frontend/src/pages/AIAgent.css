@@ -22,11 +22,20 @@
   text-align: center;
   overflow-wrap: anywhere;
 }
+.ai-agent-content h2.chat-title { font-size: clamp(1.4rem, 3vw, 2rem); }
 
 .ai-agent-request {
   display: grid;
   gap: 0.75rem;
   margin-top: 2rem;
+  position: sticky;
+  bottom: 0;
+  z-index: 8;
+  padding: 0.75rem;
+  border: 1px solid #ddd;
+  border-radius: 0.75rem;
+  background: #ffffff;
+  box-shadow: 0 -0.25rem 1rem #11104f0a;
 }
 
 .ai-agent-request label {
@@ -116,6 +125,18 @@
 .chat-error { padding: 0.75rem 1rem; border: 1px solid #b42318; border-radius: 0.5rem; color: #9b1c13; background: #fff6f5; overflow-wrap: anywhere; }
 .chat-secondary { padding: 0.5rem 0.75rem; margin-block: 0.25rem; border: 1px solid #ddd; border-radius: 0.5rem; background: white; color: #11104f; font: inherit; cursor: pointer; }
 .chat-message-list { display: grid; gap: 1rem; margin-block: 1.5rem; }
+.chat-message-list { scroll-margin-bottom: 16rem; }
+.chat-message-list > div:last-child { scroll-margin-bottom: 16rem; }
+.ai-agent-request .agent-context-note { margin: 0; font-size: 0.8rem; }
+.action-proposal-panel details { margin-top: 1rem; }
+.action-proposal-panel summary { cursor: pointer; font-weight: 600; }
+.action-proposal-panel > details { margin-top: 0; }
+.chat-options { margin-top: 1rem; }
+.chat-options summary { cursor: pointer; font-weight: 600; color: #11104f; }
+.ai-agent-response-text > :first-child { margin-top: 0; }
+.ai-agent-response-text > :last-child { margin-bottom: 0; }
+.ai-agent-response-text li + li { margin-top: 0.4rem; }
+.ai-agent-response-text code { padding: 0.1rem 0.25rem; background: #f4f4f8; border-radius: 0.2rem; }
 .chat-bubble { padding: 1rem; border-radius: 0.75rem; max-width: 95%; min-width: 0; overflow-wrap: anywhere; }
 .chat-bubble-user { justify-self: end; background: #eeeeff; }
 .chat-bubble-assistant { justify-self: start; width: 100%; border: 1px solid #ddd; }

@@ -115,8 +115,18 @@ export default function useConversation() {
         if (failure.name !== 'AbortError') { setError(failure.message); setLoading(false) }
       }
     }
+    function onHistoryChange() {
+      const url = new URL(window.location.href)
+      const page = url.searchParams.get('page')
+      const requested = url.searchParams.get('chat')
+      if ((!page || page === 'ai-agent') && requested && requested !== active.current) void selectChat(requested)
+    }
+    window.addEventListener('popstate', onHistoryChange)
     initialize()
-    return () => { mounted.current = false; controller.abort(); load.current?.abort(); olderLoad.current?.abort() }
+    return () => {
+      window.removeEventListener('popstate', onHistoryChange)
+      mounted.current = false; controller.abort(); load.current?.abort(); olderLoad.current?.abort()
+    }
   }, [])
 
   const performRequest = useCallback(async request => {

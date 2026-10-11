@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 function isProposalView(value) {
   return value && typeof value.id === 'string' && typeof value.display_title === 'string'
@@ -23,7 +23,7 @@ export default function useActionProposals(refreshKey, onResult) {
   const resultCallback = useRef(onResult)
   useEffect(() => { resultCallback.current = onResult }, [onResult])
 
-  async function run(path, mode, options = {}) {
+  const run = useCallback(async function runRequest(path, mode, options = {}) {
     if (!mounted.current || inFlight.current) return false
     inFlight.current = true
     const controller = new AbortController()
@@ -76,27 +76,27 @@ export default function useActionProposals(refreshKey, onResult) {
         if (mounted.current) { setLoading(false); setBusyId(null) }
         if (mounted.current && refreshQueued.current) {
           refreshQueued.current = false
-          void run('/proposals', 'load')
+          void runRequest('/proposals', 'load')
         }
       }
     }
-  }
+  }, [])
 
-  const refresh = () => run('/proposals', 'load')
-  function createTestProposal() {
+  const refresh = useCallback(() => run('/proposals', 'load'), [run])
+  const createTestProposal = useCallback(() => {
     if (!devEnabled || uncertain.current) return false
     return run('/dev/proposals', 'create', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
     })
-  }
-  function decide(proposalId, decision) {
+  }, [devEnabled, run])
+  const decide = useCallback((proposalId, decision) => {
     if (uncertain.current || !['confirm', 'cancel'].includes(decision)
       || !latest.current.some(proposal => proposal.id === proposalId && proposal.status === 'pending_approval')) return false
     return run(`/proposals/${encodeURIComponent(proposalId)}/decision`, proposalId, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ decision }),
     })
-  }
+  }, [run])
 
   useEffect(() => {
     mounted.current = true
@@ -109,7 +109,7 @@ export default function useActionProposals(refreshKey, onResult) {
       request.current = null
       inFlight.current = false
     }
-  }, [])
+  }, [refresh])
 
   useEffect(() => {
     if (previousRefreshKey.current === refreshKey) return
@@ -118,7 +118,7 @@ export default function useActionProposals(refreshKey, onResult) {
     // Do not abort/retry an in-flight decision; queue a read after it completes.
     if (inFlight.current) refreshQueued.current = true
     else void run('/proposals', 'load')
-  }, [refreshKey])
+  }, [refreshKey, run])
 
   return { proposals, devEnabled, loading, busyId, error, needsRefresh, refresh, createTestProposal, decide }
 }

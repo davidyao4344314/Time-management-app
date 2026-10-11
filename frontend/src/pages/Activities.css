@@ -10,8 +10,9 @@
 
 .add-activity-button {
   display: inline-grid;
-  width: 2rem;
-  height: 2rem;
+  width: 2.75rem;
+  height: 2.75rem;
+  flex-shrink: 0;
   padding: 0;
   place-items: center;
   border: 0;
@@ -28,7 +29,7 @@
 }
 
 .delete-all-activities-button {
-  height: 2rem;
+  min-height: 2.75rem;
   padding: 0 0.75rem;
   border: 0;
   border-radius: 1rem;
@@ -189,8 +190,8 @@
   display: flex;
   gap: 0.5rem;
   align-items: start;
-  opacity: 0;
-  visibility: hidden;
+  opacity: 1;
+  visibility: visible;
 }
 
 .activity-search-card:hover .activity-search-actions,
@@ -220,7 +221,7 @@
 
 .edit-activity-overlay {
   position: fixed;
-  z-index: 20;
+  z-index: 300;
   inset: 0;
   display: grid;
   padding: 1rem;

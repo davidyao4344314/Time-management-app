@@ -76,3 +76,40 @@ function mergeAdjacentActivities(activities) {
 export function prepareCalendarActivities(activities) {
   return mergeAdjacentActivities(removeDuplicateExamBlocks(activities))
 }
+
+export function timeToMinutes(time) {
+  if (typeof time !== 'string' || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time)) return null
+  const [hour, minute] = time.split(':').map(Number)
+  return hour * 60 + minute
+}
+
+export function hasTimeRange(activity) {
+  const start = timeToMinutes(activity.startTime)
+  const end = timeToMinutes(activity.endTime)
+  return start !== null && end !== null && start < end
+}
+
+// Allocate visual lanes within overlapping groups, without altering occurrences.
+export function layoutCalendarDay(activities) {
+  const prepared = prepareCalendarActivities(activities)
+  const untimed = prepared.filter(activity => !hasTimeRange(activity))
+  const timed = prepared.filter(hasTimeRange).map(activity => ({ ...activity }))
+    .sort((a, b) => a.startTime.localeCompare(b.startTime) || a.endTime.localeCompare(b.endTime))
+  let group = [], laneEnds = [], groupEnd = -1
+  function finishGroup() {
+    for (const activity of group) activity.laneCount = laneEnds.length
+    group = []; laneEnds = []; groupEnd = -1
+  }
+  for (const activity of timed) {
+    const start = timeToMinutes(activity.startTime), end = timeToMinutes(activity.endTime)
+    if (start >= groupEnd) finishGroup()
+    let lane = laneEnds.findIndex(laneEnd => laneEnd <= start)
+    if (lane === -1) lane = laneEnds.length
+    laneEnds[lane] = end
+    activity.lane = lane
+    group.push(activity)
+    groupEnd = Math.max(groupEnd, end)
+  }
+  finishGroup()
+  return { timed, untimed }
+}

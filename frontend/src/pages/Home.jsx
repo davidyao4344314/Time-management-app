@@ -1,32 +1,11 @@
 import { useEffect, useState } from 'react'
 import './Home.css'
 
-const activities = [
-  {
-    id: 1,
-    name: 'Physics study',
-    startTime: '9:00 AM',
-    endTime: '10:00 AM',
-    category: 'Physics',
-  },
-  {
-    id: 2,
-    name: 'Lunch break',
-    startTime: '12:00 PM',
-    endTime: '12:30 PM',
-  },
-  {
-    id: 3,
-    name: 'Maths revision',
-    startTime: '3:00 PM',
-    endTime: '4:00 PM',
-    category: 'Mathematics',
-  },
-]
-
 function Home() {
   const [schedule, setSchedule] = useState(null)
   const [scheduleError, setScheduleError] = useState('')
+  const [activities, setActivities] = useState(null)
+  const [activitiesError, setActivitiesError] = useState('')
 
   useEffect(() => {
     let controller
@@ -37,6 +16,19 @@ function Home() {
       if (fetching) return
       fetching = true
       controller = new AbortController()
+      const signal = controller.signal
+      async function loadToday() {
+        try {
+          const response = await fetch('/api/activities/today', { signal })
+          if (!response.ok) throw new Error()
+          const data = await response.json()
+          if (!Array.isArray(data)) throw new Error()
+          if (!stopped) { setActivities(data); setActivitiesError('') }
+        } catch (error) {
+          if (!stopped && error.name !== 'AbortError') setActivitiesError('Could not load today’s activities. Retrying every minute.')
+        }
+      }
+      const todayRequest = loadToday()
       try {
         const response = await fetch('/api/activities/current-next', {
           signal: controller.signal,
@@ -52,6 +44,7 @@ function Home() {
           setScheduleError('Could not load current and next activities. Check the backend server; retrying every minute.')
         }
       } finally {
+        await todayRequest
         fetching = false
       }
     }
@@ -104,7 +97,9 @@ function Home() {
       <section className="today-activities">
         <h3>Today's Activities</h3>
 
-        {activities.length === 0 ? (
+        {activitiesError ? <p role="alert">{activitiesError}</p> : activities === null ? (
+          <p role="status">Loading today’s activities...</p>
+        ) : activities.length === 0 ? (
           <p>No activities scheduled for today.</p>
         ) : (
           <ul className="activity-list">
@@ -112,10 +107,11 @@ function Home() {
               <li className="activity-card" key={activity.id}>
                 <div>
                   <h4>{activity.name}</h4>
-                  {activity.category && <p>{activity.category}</p>}
+                  {(activity.subject || activity.category) && <p>{activity.subject || activity.category}</p>}
                 </div>
                 <p className="activity-time">
-                  {activity.startTime} – {activity.endTime}
+                  {!activity.start_time && !activity.end_time ? 'No time set'
+                    : `${activity.start_time || 'No start time'} – ${activity.end_time || 'No end time'}`}
                 </p>
               </li>
             ))}

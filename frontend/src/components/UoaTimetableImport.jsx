@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import useModalFocus from '../hooks/useModalFocus'
 
 function isValidTimetableUrl(value) {
   try {
@@ -19,6 +20,7 @@ export default function UoaTimetableImport({ onImported }) {
   const [timetableUrl, setTimetableUrl] = useState('')
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const dialog = useModalFocus(isModalOpen, closeModal, isImporting)
 
   async function importTimetable(url = null) {
     if (isImporting) return
@@ -94,7 +96,7 @@ export default function UoaTimetableImport({ onImported }) {
       {!isModalOpen && error && <p className="timetable-import-message" role="alert">{error}</p>}
       {isModalOpen && (
         <div className="canvas-modal-overlay">
-          <form className="canvas-modal" role="dialog" aria-modal="true" aria-labelledby="uoa-modal-heading" onSubmit={handleSubmit}>
+          <form ref={dialog} tabIndex={-1} className="canvas-modal" role="dialog" aria-modal="true" aria-labelledby="uoa-modal-heading" onSubmit={handleSubmit}>
             <h3 id="uoa-modal-heading">Connect UoA timetable</h3>
             <label>
               UoA timetable subscription URL

@@ -1203,11 +1203,15 @@ response instead of asking the user for schedule information the app can read:
 `MissingContextRequest` in `ai/agent/contracts.py` permits only `activities` and
 `exams`, with at most two distinct requests. Activity scopes are `today`,
 `tomorrow`, `week`, `this_week`, `next_week`, `month`, `all`; exam scopes use the
-same date scopes plus `upcoming`, without `all`. Python also requires each
-requested source to currently be `not_selected`. Unknown sources, extra fields,
+same date scopes plus `upcoming`, without `all`. Python permits unselected sources
+and activity/exam windows outside the supplied date coverage. A `provided` or
+`empty` schedule describes its checked period, not every future date. Existing
+date helpers determine the requested window; all-activity definitions are not
+treated as availability. Unknown sources, extra fields,
 unsupported scopes, repeated sources and actions attached to a recovery request
-are rejected. Provided, empty and unavailable sources are never re-fetched by
-this fallback. Recognized explicit user exclusions are separately enforced by
+are rejected. Already-covered schedule requests reuse the current observations
+with explicit correction feedback, without another database read. Unavailable
+sources and already-selected files are not re-fetched. Recognized explicit user exclusions are separately enforced by
 backend policy, not just the agent instructions. An excluded source cannot be
 recovered even if its manifest status is `not_selected`.
 
@@ -1218,6 +1222,15 @@ updates the manifest, and makes at most one follow-up main-agent call. Failed
 activity/exam reads become `unavailable`; a failed recovery with no usable reads
 returns a clarification without another model call. A successful empty query
 is sent to the one retry as `empty`.
+
+Redundant schedule requests get at most the same one follow-up call, with
+`context_recovery_feedback` separate from factual observations. This prevents an
+unnecessary request for already-provided exams from turning into a generic
+missing-context refusal. The agent follows the latest user clarification: using
+the available exams instead of a missing plan file does not require that old
+file. If essential study constraints remain unknown, it should ask a specific
+question about study time or planning dates. Existing approval rules remain:
+proposals do not change the calendar until the user confirms them.
 
 The existing `memory_request` lookup and new context recovery share this single
 follow-up budget. They can be satisfied together before one retry, but neither

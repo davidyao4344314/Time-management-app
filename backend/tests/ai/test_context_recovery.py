@@ -5,17 +5,19 @@ import sqlite3
 import tempfile
 import unittest
 from contextlib import ExitStack
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from uuid import uuid4
 
 from backend.app.ai.agent import reasoning, service
+from backend.app.ai.agent import context_recovery
 from backend.app.ai.agent.contracts import InvalidProposalError, validate_agent_proposal
 from backend.app.ai.agent.context_recovery import (
-    MAX_CONTEXT_RECOVERY_RETRIES, build_context_status, recovery_selection,
+    MAX_CONTEXT_RECOVERY_RETRIES, build_context_status, build_recovery_plan, recovery_selection,
 )
+from backend.app.infrastructure.clock import LOCAL_TIMEZONE
 
 
 NO_CONTEXT = {"activities_scope": None, "include_exams": False, "exam_scope": None}
@@ -75,6 +77,80 @@ class ContextManifestTests(unittest.TestCase):
                 validate_agent_proposal(proposal)
         with self.assertRaises(ValueError):
             recovery_selection(missing()["missing_context"], {"activities": "empty"})
+
+
+class RecoveryWindowTests(unittest.TestCase):
+    def setUp(self):
+        clock = patch.object(context_recovery, "local_now",
+                             return_value=datetime(2026, 10, 14, 12, tzinfo=LOCAL_TIMEZONE))
+        clock.start()
+        self.addCleanup(clock.stop)
+
+    def plan(self, source="activities", old="today", new="week", status="provided", observations=None):
+        selected = {**NO_CONTEXT, "activities_scope": old} if source == "activities" else {
+            **NO_CONTEXT, "include_exams": True, "exam_scope": old,
+        }
+        return build_recovery_plan(missing(source, new)["missing_context"], {source: status},
+                                   current_selection=selected, observations=observations)
+
+    def test_today_can_expand_to_week_even_when_empty(self):
+        for status in ("provided", "empty"):
+            with self.subTest(status=status):
+                plan = self.plan(status=status)
+                self.assertEqual(plan["selection"]["activities_scope"], "week")
+                self.assertEqual(plan["fetch_requests"], [{"source": "activities", "time_scope": "week"}])
+                self.assertEqual(plan["already_available"], [])
+
+    def test_actual_period_controls_coverage_not_scope_rank(self):
+        plan = self.plan(old="month", new="next_week", observations={
+            "activities": {"period": {"start": "2026-10-14", "end": "2026-10-15"}},
+        })
+        self.assertEqual(plan["selection"]["activities_scope"], "next_week")
+        self.assertIsNone(self.plan(old="month", new="next_week")["selection"]["activities_scope"])
+        # At the month boundary, next week can extend beyond this month's range.
+        with patch.object(context_recovery, "local_now",
+                          return_value=datetime(2026, 10, 30, tzinfo=LOCAL_TIMEZONE)):
+            self.assertEqual(self.plan(old="month", new="next_week")["selection"]["activities_scope"], "next_week")
+
+    def test_covered_scope_and_same_scope_need_feedback_not_another_read(self):
+        for old, new in [("today", "today"), ("week", "tomorrow"), ("month", "week")]:
+            with self.subTest(old=old, new=new):
+                plan = self.plan(old=old, new=new)
+                self.assertEqual(plan["fetch_requests"], [])
+                self.assertEqual(plan["already_available"], [{"source": "activities", "time_scope": new}])
+
+    def test_definitions_are_not_treated_as_availability(self):
+        self.assertEqual(self.plan(old="all", new="week")["selection"]["activities_scope"], "week")
+        self.assertEqual(self.plan(old="today", new="all")["selection"]["activities_scope"], "all")
+        self.assertEqual(self.plan(old="all", new="all")["fetch_requests"], [])
+
+    def test_exam_window_can_expand_without_repeating_covered_upcoming(self):
+        self.assertEqual(self.plan(source="exams", old="today", new="upcoming")["selection"]["exam_scope"], "upcoming")
+        self.assertEqual(self.plan(source="exams", old="upcoming", new="month")["fetch_requests"], [])
+        self.assertEqual(self.plan(source="exams", old="upcoming", new="upcoming")["fetch_requests"], [])
+
+    def test_mixed_requests_separate_covered_exams_from_new_activity_window(self):
+        requests = [{"source": "activities", "time_scope": "week"},
+                    {"source": "exams", "time_scope": "upcoming"}]
+        plan = build_recovery_plan(requests, {"activities": "provided", "exams": "provided"},
+                                   current_selection={"activities_scope": "today", "include_exams": True,
+                                                      "exam_scope": "upcoming"})
+        self.assertEqual(plan["fetch_requests"], requests[:1])
+        self.assertEqual(plan["already_available"], requests[1:])
+        self.assertFalse(plan["selection"]["include_exams"])
+
+    def test_exclusions_unavailable_and_duplicate_sources_still_rejected(self):
+        request = missing(scope="week")["missing_context"]
+        for kwargs in ({"excluded_sources": {"activities"}}, {}):
+            with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
+                build_recovery_plan(request, {"activities": "unavailable"},
+                                    current_selection={**NO_CONTEXT, "activities_scope": "today"}, **kwargs)
+        with self.assertRaises(ValueError):
+            build_recovery_plan(request, {"activities": "provided"}, excluded_sources={"activities"})
+        with self.assertRaises(ValueError):
+            build_recovery_plan(request * 2, {"activities": "provided"})
+        with self.assertRaises(ValueError):
+            build_recovery_plan([{ "source": "files", "query": "exam plan"}], {"files": "empty"})
 
 
 class ContextRecoveryTests(unittest.TestCase):
@@ -165,21 +241,127 @@ class ContextRecoveryTests(unittest.TestCase):
         self.exams.assert_not_called()
         self.assertEqual(self.client.responses.parse.call_count, 2)
 
-    def test_provided_empty_and_unavailable_sources_are_not_fetched_again(self):
-        for data, expected in ((CLASS, "provided"), ({"count": 0, "today": []}, "empty"),
-                               ({"status": "unavailable"}, "unavailable")):
+    def test_redundant_provided_and_empty_sources_reuse_data_once_without_refetch(self):
+        for data, expected in ((CLASS, "provided"), ({"count": 0, "today": []}, "empty")):
             with self.subTest(status=expected):
                 self.router.return_value = TOMORROW
                 self.activities.return_value = data
                 self.activities.reset_mock()
-                self.respond(missing())
+                self.respond(missing(), answer("Using the schedule already supplied."))
                 result = self.run_agent()
                 self.activities.assert_called_once()
-                self.assertEqual(self.client.responses.parse.call_count, 1)
+                self.assertEqual(self.client.responses.parse.call_count, 2)
                 self.assertEqual(result["agent_context"]["context_status"]["activities"], expected)
-                self.assertEqual(result["agent_context"]["context_recovery"]["status"], "rejected")
+                self.assertEqual(result["agent_context"]["context_recovery"]["status"], "completed")
+                self.assertEqual(self.model_input(1)["context_recovery_feedback"], missing()["missing_context"])
+                self.assertEqual(self.model_input(1)["observations"]["activities"], data)
                 self.assertIsNotNone(result["message"])
                 self.client.responses.parse.reset_mock()
+
+    def test_unavailable_source_is_not_retried(self):
+        self.router.return_value = TOMORROW
+        self.activities.return_value = {"status": "unavailable"}
+        self.respond(missing())
+        result = self.run_agent()
+        self.activities.assert_called_once()
+        self.assertEqual(self.client.responses.parse.call_count, 1)
+        self.assertEqual(result["agent_context"]["context_recovery"]["status"], "rejected")
+
+    def test_today_expands_to_week_and_preserves_upcoming_formal_exams(self):
+        self.router.return_value = {"activities_scope": "today", "include_exams": True, "exam_scope": "upcoming"}
+        self.respond(missing(scope="week"), answer("Here are proposed study times for this week."))
+        result = self.run_agent("Plan study based on upcoming formal exams.")
+        self.assertEqual([call.kwargs["scope"] for call in self.activities.call_args_list], ["today", "week"])
+        self.exams.assert_called_once_with(self.connection, scope="upcoming", assessment_filter="formal_exams")
+        self.assertEqual(set(self.model_input(1)["observations"]), {"activities", "exams"})
+        self.assertEqual(result["agent_context"]["context_recovery"]["status"], "completed")
+        self.assertEqual(self.model_input(1)["context_recovery_remaining"], 0)
+
+    def test_corrected_request_uses_exam_context_and_recent_chat_not_obsolete_file(self):
+        self.router.return_value = {"activities_scope": "today", "include_exams": True, "exam_scope": "upcoming"}
+        self.respond(missing(source="exams", scope="upcoming"),
+                     answer("How much time can you study each day?"))
+        old_turn = {"user": "Based on my final test plan, plan study activities.",
+                    "assistant": {"message": "The file was not found. Upcoming exams are PHYSICS, ECON, MATHS and COMPSCI.",
+                                  "actions": []}}
+        files = Mock()
+        request = "Yep, just use those exams: PHYSICS 2 Nov, ECON and MATHS 6 Nov, COMPSCI 10 Nov."
+        result = service.get_agent_proposal(self.connection, request, [old_turn], include_context=True, file_reader=files)
+        self.assertEqual(result["message"], "How much time can you study each day?")
+        self.exams.assert_called_once()
+        self.activities.assert_called_once()
+        files.assert_not_called()
+        self.assertEqual(self.model_input(1)["request"], request)
+        self.assertNotIn("files", self.model_input(1)["observations"])
+        history = self.client.responses.parse.call_args_list[1].kwargs["input"]
+        self.assertEqual(history[0]["content"], old_turn["user"])
+        self.assertIn("replace an earlier missing-file requirement", self.client.responses.parse.call_args.kwargs["instructions"])
+        self.assertEqual(result["agent_context"]["context_recovery"]["requests"][0]["resolution"], "already_available")
+        self.connection.execute.assert_not_called()
+
+    def test_redundant_request_correction_cannot_trigger_a_third_call(self):
+        self.router.return_value = TOMORROW
+        self.respond(missing(), missing())
+        result = self.run_agent()
+        self.assertEqual(self.client.responses.parse.call_count, 2)
+        self.activities.assert_called_once()
+        self.assertEqual(result["agent_context"]["context_recovery"]["status"], "exhausted")
+        self.assertEqual(result["actions"], [])
+
+    def test_recovery_feedback_is_separate_from_factual_observations(self):
+        data = {"activities": CLASS}
+        feedback = [{"source": "activities", "time_scope": "week"}]
+        payload = json.loads(reasoning.build_agent_messages("Use those exams.", data,
+                              context_recovery_remaining=0, context_recovery_feedback=feedback)[-1]["content"])
+        self.assertEqual(payload["observations"], data)
+        self.assertEqual(payload["context_recovery_feedback"], feedback)
+        self.assertEqual(payload["context_recovery_remaining"], 0)
+
+    def test_exam_study_followup_expands_real_read_only_calendar_and_only_proposes(self):
+        from backend.app import database
+        from backend.app.ai.observations.activities import build_activity_observation
+        from backend.app.ai.observations.exams import build_exam_observation
+
+        connection = sqlite3.connect(":memory:")
+        self.addCleanup(connection.close)
+        database.create_tables(connection)
+        connection.execute(
+            "INSERT INTO activities (name, category, activity_type, date, start_time, end_time) VALUES (?, ?, ?, ?, ?, ?)",
+            ("Lecture", "University", "one_time", "2026-10-15", "09:00", "10:00"),
+        )
+        connection.execute(
+            "INSERT INTO exams (name, category, subject, date, start_time, end_time) VALUES (?, ?, ?, ?, ?, ?)",
+            ("PHYSICS 140 Exam", "University", "PHYSICS 140", "2026-11-02", "09:00", "11:15"),
+        )
+        connection.commit()
+        connection.execute("PRAGMA query_only=ON")
+        action = {"tool": "add_activity", "arguments": {
+            "name": "Physics revision", "category": "Study", "subject": "PHYSICS 140",
+            "activity_type": "one_time", "date": "2026-10-15", "weekday": None,
+            "start_time": "11:00", "end_time": "12:00",
+        }}
+        self.router.return_value = {"activities_scope": "today", "include_exams": True, "exam_scope": "upcoming"}
+        self.client.responses.parse.side_effect = [
+            SimpleNamespace(status="completed", output_parsed=missing(scope="week")),
+            SimpleNamespace(status="completed", output_parsed=answer("Please review this study session; it is not saved."),
+                            output=[SimpleNamespace(type="function_call", status="completed", call_id="offline-1",
+                                                    name="add_activity", arguments=json.dumps(action["arguments"]))]),
+        ]
+        with patch.object(service, "build_activity_observation", wraps=build_activity_observation) as activities, \
+                patch.object(service, "build_exam_observation", wraps=build_exam_observation) as exams, \
+                patch("backend.app.ai.observations.activities.get_current_date", return_value=date(2026, 10, 14)), \
+                patch("backend.app.ai.observations.exams.get_current_date", return_value=date(2026, 10, 14)), \
+                patch("backend.app.planner.calendar.get_current_date", return_value=date(2026, 10, 14)), \
+                patch("backend.app.ai.observations.activities.get_current_time", return_value="08:00"):
+            result = service.get_agent_proposal(connection, "Just plan it based on upcoming formal exams.", [], include_context=True)
+        self.assertEqual([call.kwargs["scope"] for call in activities.call_args_list], ["today", "week"])
+        exams.assert_called_once_with(connection, scope="upcoming", assessment_filter="formal_exams")
+        self.assertEqual(self.model_input(1)["observations"]["activities"]["busy"], {"2026-10-15": [["09:00", "10:00"]]})
+        self.assertEqual(self.model_input(1)["observations"]["exams"]["upcoming"][0]["date"], "2026-11-02")
+        self.assertEqual(result["actions"], [action])
+        self.assertEqual(result["agent_context"]["context_recovery"]["status"], "completed")
+        self.assertEqual(connection.execute("SELECT COUNT(*) FROM activities").fetchone()[0], 1)
+        self.assertEqual(connection.execute("SELECT COUNT(*) FROM exams").fetchone()[0], 1)
 
     def test_selected_schedule_uses_the_normal_single_call_path(self):
         self.router.return_value = TOMORROW

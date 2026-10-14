@@ -7,9 +7,8 @@ from backend.app.planner.exams import get_all_exams
 from backend.app.planner.assessment_types import classify_assessment_name
 from backend.app.ai.observations.formatting import (
     chronological_key, compact_time, observation_date_range, bounded_details,
+    UPCOMING_LOOKAHEAD_DAYS,
 )
-
-UPCOMING_LOOKAHEAD_DAYS = 90
 
 
 def _exam_date(value):

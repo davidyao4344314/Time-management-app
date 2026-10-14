@@ -25,7 +25,7 @@ from backend.app.ai.memory.contracts import MemorySelection
 from backend.app.ai.agent.transparency import build_agent_context, build_adaptive_metadata
 from backend.app.ai.agent.context_recovery import (
     MAX_CONTEXT_RECOVERY_RETRIES, build_context_status, read_observation,
-    recovery_selection, observation_status,
+    build_recovery_plan, observation_status,
 )
 
 
@@ -162,15 +162,29 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
         if followup_count >= MAX_CONTEXT_RECOVERY_RETRIES:
             return finish(_context_clarification())
         recovered = False
+        recovery_feedback = []
         if missing:
             try:
-                selected = recovery_selection(missing, context_status, excluded_sources=excluded_sources)
+                plan = build_recovery_plan(
+                    missing, context_status, excluded_sources=excluded_sources,
+                    current_selection=selection, observations=context,
+                )
             except ValueError:
                 recovery_trace["status"] = "rejected"
                 return finish(_context_clarification())
             recovery_trace["attempts"] = 1
-            extra = collect(selected)
-            for item in missing:
+            selected = plan["selection"]
+            recovery_feedback = plan["already_available"]
+            # A harmless redundant request gets the same one-shot correction,
+            # using the supplied observations instead of discarding them.
+            for item in recovery_feedback:
+                source = item["source"]
+                recovery_trace["requests"].append({**item,
+                    "status_before": context_status[source], "status_after": context_status[source],
+                    "resolution": "already_available"})
+            recovered = bool(recovery_feedback)
+            extra = collect(selected) if plan["fetch_requests"] else {}
+            for item in plan["fetch_requests"]:
                 source = item["source"]
                 status = observation_status(source, extra.get(source))
                 recovery_trace["requests"].append({**item,
@@ -232,6 +246,7 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
             client, user_request, context, recent_turns, agent_settings, output_limit,
             context_status=context_status,
             context_recovery_remaining=MAX_CONTEXT_RECOVERY_RETRIES - followup_count,
+            **({'context_recovery_feedback': recovery_feedback} if recovery_feedback else {}),
             **({'chat_summary':chat_summary} if chat_summary is not None else {}),
         )
         proposal = reasoning.parse_agent_response(response)

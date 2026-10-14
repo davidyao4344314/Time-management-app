@@ -5,6 +5,7 @@ import json
 
 MAX_OBSERVATION_ITEMS = 20
 MAX_DETAIL_CHARS = 6000
+UPCOMING_LOOKAHEAD_DAYS = 90
 
 
 def bounded_details(items):

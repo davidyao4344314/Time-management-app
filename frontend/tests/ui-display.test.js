@@ -89,6 +89,21 @@ test('pending proposals attach only to a matching reply in the current conversat
   assert.equal(groupActionProposals(proposals, null, []).byRequest.size, 0)
 })
 
+test('a multi-subject batch keeps every pending card attached to one reply independently', () => {
+  const subjects = ['PHYSICS 140', 'ECON 151G', 'MATHS 102', 'COMPSCI 130']
+  const proposals = subjects.map((subject, index) => ({
+    id: `subject-${index}`, status: 'pending_approval', conversation_id: 'current', request_id: 'batch',
+    display_title: 'Add Activity', display_description: `Subject: ${subject}`,
+  }))
+  const messages = [{ role: 'assistant', request_id: 'batch' }]
+  const before = groupActionProposals(proposals, 'current', messages)
+  assert.equal(before.byRequest.get('batch').length, 4)
+  const after = groupActionProposals(proposals.map(item => item.id === 'subject-1'
+    ? { ...item, status: 'completed' } : item), 'current', messages)
+  assert.deepEqual(after.byRequest.get('batch').map(item => item.id), ['subject-0', 'subject-2', 'subject-3'])
+  assert.deepEqual(after.history.map(item => item.id), ['subject-1'])
+})
+
 const proposalPanel = (await component('components/ActionProposalPanel.jsx', {
   ActionProposalCard: ({ proposal }) => jsx('article', { children: proposal.display_title }),
 })).ActionProposalPanel

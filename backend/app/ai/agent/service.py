@@ -21,6 +21,8 @@ from backend.app.ai.observations.activities import build_activity_observation
 from backend.app.ai.observations.collect import collect_agent_observations
 from backend.app.ai.observations.exams import build_exam_observation
 from backend.app.ai.observations.memory import build_memory_observation
+from backend.app.ai.observations.proposal_schedule import build_proposal_schedule_observation
+from backend.app.ai.agent.schedule_guard import unchecked_proposal_dates, proposal_schedule_dates
 from backend.app.ai.memory.contracts import MemorySelection
 from backend.app.ai.agent.transparency import build_agent_context, build_adaptive_metadata
 from backend.app.ai.agent.context_recovery import (
@@ -77,6 +79,11 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
         public = build_agent_context(
             routing_trace, selection, recent_count, lookups,
         )
+        checked_dates = context.get("activities", {}).get("checked_dates")
+        if checked_dates:
+            for source in public["context_sources"]:
+                if source["source"] == "activities":
+                    source.update(selected=True, reason="Fresh calendar check for proposed dates: " + ", ".join(checked_dates))
         if coverage is not None:
             public["exam_coverage"] = coverage
             for source in public["context_sources"]:
@@ -154,7 +161,8 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
         request = proposal.get("memory_request")
         memory_requested = request is not None
         missing = proposal.get("missing_context", [])
-        if not missing and not (request is not None and session_id is not None):
+        schedule_dates = unchecked_proposal_dates(proposal, context)
+        if not missing and not schedule_dates and not (request is not None and session_id is not None):
             return finish(proposal)
 
         # One shared follow-up budget covers schedule recovery and the existing
@@ -163,6 +171,28 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
             return finish(_context_clarification())
         recovered = False
         recovery_feedback = []
+        if schedule_dates:
+            # Recheck the whole draft, not just uncovered dates: replacing a
+            # broad observation must not discard coverage for other batch items.
+            schedule_dates = proposal_schedule_dates(proposal)
+            if "activities" in excluded_sources:
+                return finish(_schedule_clarification("May I check your calendar before proposing study times? You excluded calendar access for this request."))
+            if context_status["activities"] == "unavailable":
+                return finish(_schedule_clarification("I couldn't read your current calendar. Please try again before I propose study times."))
+            schedule = read_observation(build_proposal_schedule_observation, connection, schedule_dates)
+            before = context_status["activities"]
+            context["activities"] = schedule
+            context_status = build_context_status(context, memory_available=session_id is not None)
+            recovery_trace["attempts"] = 1
+            recovery_trace["requests"].append({"source": "activities", "time_scope": "proposed_dates",
+                "dates": [day.isoformat() for day in schedule_dates],
+                "status_before": before, "status_after": context_status["activities"]})
+            if context_status["activities"] == "unavailable":
+                recovery_trace["status"] = "unavailable"
+                return finish(_schedule_clarification("I couldn't verify your proposed study dates against the current calendar. Please try again."))
+            recovered = True
+            recovery_trace["status"] = "fetched"
+            recovery_feedback = [{"source": "activities", "reason": "Review the draft using fresh busy intervals for checked_dates; the draft was not saved."}]
         if missing:
             try:
                 plan = build_recovery_plan(
@@ -256,6 +286,9 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
         if proposal.get("memory_request") is not None:
             recovery_trace["status"] = "exhausted"
             return finish(_memory_clarification())
+        if unchecked_proposal_dates(proposal, context):
+            recovery_trace["status"] = "exhausted"
+            return finish(_schedule_clarification("The new proposed dates are outside the calendar dates checked in this request. Which dates should the study sessions use?"))
         recovery_trace["status"] = "completed"
     return finish(proposal)
 
@@ -268,3 +301,7 @@ def _context_clarification():
 def _memory_clarification():
     return {"message": "I couldn't retrieve enough reliable historical context. Could you remind me of the discussion or give a more specific topic?",
             "actions": [], "memory_request": None, "missing_context": []}
+
+
+def _schedule_clarification(message):
+    return {"message": message, "actions": [], "memory_request": None, "missing_context": []}

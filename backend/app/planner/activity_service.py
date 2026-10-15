@@ -7,8 +7,14 @@ leave connection lifetime with their caller.
 from datetime import date, datetime
 
 from backend.app.planner.activities import add_activity, delete_activity, edit_activity, get_activity_by_id
+from backend.app.planner.conflicts import find_activity_conflicts
 
 EDITABLE_ACTIVITY_COLUMNS = ("name", "category", "subject", "activity_type", "date", "weekday", "start_time", "end_time")
+
+
+def check_activity_conflicts(connection, candidate_activity, exclude_activity_id=None):
+    """Read-only warning information; never block or execute a proposed change."""
+    return find_activity_conflicts(connection, candidate_activity, exclude_activity_id)
 
 
 class ActivityValidationError(ValueError):

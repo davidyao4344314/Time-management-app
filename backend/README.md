@@ -1,9 +1,22 @@
 # Study Planning App
 
 This README explains how to run the project and describes the backend as it
-currently works. The AI agent can **propose** adding, deleting or editing one activity.
+currently works. The AI agent can **propose** up to ten new activities in one
+reply, or delete/edit one activity. Mixed-tool and bulk edit/delete replies are rejected.
 SQLite changes only when the user separately clicks **Confirm** on its pending
 proposal, never automatically.
+
+For multi-subject study planning, each add proposal gets a separate review card
+and Confirm/Cancel decision. Native tool calls are proposals, not parallel execution.
+Every timed addition must have fresh calendar coverage for its proposed dates.
+If routing omitted that window, the backend reads the bounded proposed dates and
+uses the existing one-shot recovery budget to let the agent revise its draft.
+Only the final checked proposals are saved as pending authority. An excluded or
+unavailable calendar, or new unchecked dates after that retry, produces a
+clarification without activity proposals. Recent chat never proves availability.
+Recurring additions check near-term dates, not every future recurrence. Review
+cards warn about overlaps found by the existing Python conflict detector;
+warnings do not block explicit confirmation or automatically reschedule anything.
 
 ## Agent V1 completed — local, approval-gated scope
 

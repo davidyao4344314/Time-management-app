@@ -23,9 +23,11 @@ from backend.app.ai.actions.persistent_service import PersistentActionProposalSe
 from backend.app.ai.agent import reasoning, service as agent
 from backend.app.ai.agent.contracts import AgentProposal, InvalidProposalError
 from backend.app.ai.agent.tool_calls import public_agent_tools
+from backend.app.ai.actions.contracts import MAX_ADD_ACTIVITY_PROPOSALS
 from backend.app.conversations import service as chats
 from backend.app.infrastructure import identity
 from backend.app.planner import activities
+from backend.app.ai.observations.activities import build_activity_observation
 
 
 ARGUMENTS = {"name": "COMPSCI revision", "category": "Study", "subject": "COMPSCI 130",
@@ -40,6 +42,14 @@ def native_response(*, name="add_activity", arguments=None, text=None, **call_fi
     for key, value in call_fields.items():
         setattr(call, key, value)
     return SimpleNamespace(status="completed", output=[call], output_parsed=text)
+
+
+def native_batch(count=4):
+    subjects = ["PHYSICS 140", "ECON 151G", "MATHS 102", "COMPSCI 130"]
+    calls = [native_response(arguments={**ARGUMENTS, "name": f"{subjects[index % 4]} revision {index + 1}",
+              "subject": subjects[index % 4], "start_time": f"{8 + index:02d}:00", "end_time": f"{9 + index:02d}:00"},
+              call_id=f"batch-{index}").output[0] for index in range(count)]
+    return SimpleNamespace(status="completed", output=calls, output_parsed=None)
 
 
 class NativeToolRequestTests(unittest.TestCase):
@@ -74,8 +84,48 @@ class NativeToolRequestTests(unittest.TestCase):
         request = client.responses.parse.call_args.kwargs
         self.assertEqual(request["tools"], tools)
         self.assertEqual(request["tool_choice"], "auto")
-        self.assertFalse(request["parallel_tool_calls"])
+        self.assertTrue(request["parallel_tool_calls"])
+        self.assertGreaterEqual(request["max_output_tokens"], 3000)
         self.assertFalse(request["store"])
+
+    def test_multiple_subjects_produce_separate_proposals_and_plural_review(self):
+        result = reasoning.parse_agent_response(native_batch())
+        self.assertEqual(len(result["actions"]), 4)
+        self.assertEqual([action["arguments"]["subject"] for action in result["actions"]],
+                         ["PHYSICS 140", "ECON 151G", "MATHS 102", "COMPSCI 130"])
+        self.assertIn("4 proposed activities", result["message"])
+        self.assertEqual(len(reasoning.parse_agent_response(native_batch(MAX_ADD_ACTIVITY_PROPOSALS))["actions"]), 10)
+
+    def test_invalid_over_limit_mixed_and_duplicate_batches_are_rejected_as_a_whole(self):
+        cases = [native_batch(MAX_ADD_ACTIVITY_PROPOSALS + 1)]
+        mixed = native_batch(2)
+        mixed.output[1] = native_response(name="delete_activity", arguments={"activity_id": 1, "expected_name": "Study"}, call_id="delete").output[0]
+        cases.append(mixed)
+        for tool in ("edit_activity", "delete_activity"):
+            batch = native_batch(2)
+            for call in batch.output:
+                call.name = tool
+            cases.append(batch)
+        bad = native_batch(2)
+        bad.output[-1].arguments = json.dumps({**ARGUMENTS, "approved": True})
+        cases.append(bad)
+        duplicate = native_batch(2)
+        duplicate.output[-1].arguments = duplicate.output[0].arguments
+        cases.append(duplicate)
+        duplicate_id = native_batch(2)
+        duplicate_id.output[-1].call_id = duplicate_id.output[0].call_id
+        cases.append(duplicate_id)
+        for response in cases:
+            with self.subTest(response=response), self.assertRaises(InvalidProposalError):
+                reasoning.parse_agent_response(response)
+
+    def test_sdk_parses_multiple_strict_native_calls_without_executing(self):
+        calls = [ResponseFunctionToolCall(type="function_call", name=call.name,
+                 arguments=call.arguments, call_id=call.call_id, status="completed")
+                 for call in native_batch().output]
+        raw = Response.model_construct(status="completed", output=calls)
+        parsed = parse_response(response=raw, input_tools=public_agent_tools(), text_format=AgentProposal)
+        self.assertEqual(len(reasoning.parse_agent_response(parsed)["actions"]), 4)
 
     def test_normal_reply_and_tool_only_and_mixed_reply(self):
         advice = {"message": "No changes needed.", "actions": []}
@@ -182,7 +232,12 @@ class ModelChatApprovalTests(unittest.TestCase):
         self.stack.enter_context(patch.object(chats, "is_openai_api_key_configured", return_value=True))
         self.stack.enter_context(patch.object(agent, "is_openai_api_key_configured", return_value=True))
         self.stack.enter_context(patch.object(agent, "get_agent_model_settings", return_value={"model": "test-model", "reasoning_effort": "none"}))
-        self.stack.enter_context(patch.object(agent, "select_agent_context", return_value={"activities_scope": None, "include_exams": False, "exam_scope": None}))
+        self.router = self.stack.enter_context(patch.object(agent, "select_agent_context", return_value={"activities_scope": "today", "include_exams": False, "exam_scope": None}))
+        def fixture_schedule(connection, scope, **kwargs):
+            if scope == "all":
+                return build_activity_observation(connection, scope=scope, **kwargs)
+            return {"count": 0, "busy": {}, "period": {"start": ARGUMENTS["date"], "end": ARGUMENTS["date"]}}
+        self.stack.enter_context(patch.object(agent, "build_activity_observation", side_effect=fixture_schedule))
         factory = self.stack.enter_context(patch.object(agent, "OpenAI"))
         self.model = factory.return_value.__enter__.return_value.responses.parse
         self.model.return_value = native_response()
@@ -206,6 +261,7 @@ class ModelChatApprovalTests(unittest.TestCase):
             return connection.execute("SELECT * FROM activities").fetchall()
 
     def seed_delete_target(self, **changes):
+        self.router.return_value = {"activities_scope": None, "include_exams": False, "exam_scope": None}
         fields = {**ARGUMENTS, "name": "Study", **changes}
         with closing(sqlite3.connect(self.path)) as connection:
             identifier = activities.add_activity(connection, list(fields), list(fields.values()))
@@ -268,16 +324,49 @@ class ModelChatApprovalTests(unittest.TestCase):
         self.assertTrue(any(item.get('backend_action_results', [{}])[0].get('success') for item in receipts))
 
     def test_context_recovery_registers_only_the_final_tool_request(self):
+        self.router.return_value = {"activities_scope": None, "include_exams": False, "exam_scope": None}
         self.model.side_effect = [SimpleNamespace(status="completed", output=[], output_parsed={
             "message": None, "actions": [],
             "missing_context": [{"source": "activities", "time_scope": "today"}]}), native_response()]
-        with patch.object(agent, "build_activity_observation", return_value={"count": 0, "today": []}):
+        with patch.object(agent, "build_activity_observation", return_value={"count": 0, "today": [],
+                          "period": {"start": ARGUMENTS["date"], "end": ARGUMENTS["date"]}}):
             self.assertEqual(self.send().status_code, 200)
         self.assertEqual(self.model.call_count, 2)
         self.assertEqual(len(self.proposals()), 1)
         self.assertEqual(self.proposals()[0]["status"], "pending_approval")
         self.assertEqual(self.rows(), [])
         self.connect.assert_not_called()
+
+    def test_batch_is_saved_as_independent_owned_pending_proposals(self):
+        self.model.return_value = native_batch()
+        self.assertEqual(self.send().status_code, 200)
+        proposals = self.proposals()
+        self.assertEqual(len(proposals), 4)
+        self.assertEqual(len({item["id"] for item in proposals}), 4)
+        self.assertTrue(all(item["status"] == "pending_approval" for item in proposals))
+        self.assertTrue(all(item["conversation_id"] == self.chat for item in proposals))
+        self.assertEqual(self.rows(), [])
+        self.assertEqual(self.send().status_code, 200)
+        self.assertEqual(self.proposals(), proposals)
+        self.assertEqual(self.model.call_count, 1)
+        self.assertEqual(self.other.get("/actions/proposals").json()["proposals"], [])
+        for item, decision in zip(proposals[:3], ["confirm", "cancel", "confirm"]):
+            response = self.client.post(f"/actions/proposals/{item['id']}/decision", json={"decision": decision})
+            self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(self.rows()), 2)
+        statuses = {item["status"] for item in self.proposals()}
+        self.assertEqual(statuses, {"completed", "rejected", "pending_approval"})
+        repeated = self.client.post(f"/actions/proposals/{proposals[0]['id']}/decision", json={"decision": "confirm"})
+        self.assertEqual(repeated.status_code, 409)
+        self.assertEqual(len(self.rows()), 2)
+
+    def test_bad_last_batch_item_never_saves_partial_authority(self):
+        bad = native_batch()
+        bad.output[-1].arguments = json.dumps({**ARGUMENTS, "source": "Canvas"})
+        self.model.return_value = bad
+        self.assertEqual(self.send().status_code, 502)
+        self.assertEqual(self.proposals(), [])
+        self.assertEqual(self.rows(), [])
 
     def test_chat_persistence_failure_never_registers_pending_authority(self):
         with patch.object(chats.storage, "complete_request", side_effect=sqlite3.OperationalError("offline failure")):

@@ -197,7 +197,11 @@ existing observations + recent chat + user request
 `public_agent_tools()` derives all three function definitions from the existing
 schema-only registry: name, description, strict input schema, no handler or
 approval authority. `tool_choice="auto"` allows ordinary answers;
-`parallel_tool_calls=False` limits the request to zero/one call. The adapter
+`parallel_tool_calls=True` permits multiple native requests. The backend permits
+at most ten distinct `add_activity` calls per reply; edit/delete remain single
+calls, with no mixed batches. Duplicate call IDs, identical proposals, or any
+invalid batch item reject the whole response before pending authority is saved.
+This enables proposal generation only, never automatic or parallel execution. The adapter
 reads Responses `function_call` items (`name`, JSON `arguments`, `call_id`,
 completed status), not free-form text. This follows the
 [OpenAI function-calling format](https://developers.openai.com/api/docs/guides/function-calling).
@@ -335,8 +339,9 @@ can request one or several changes to a current activity:
 `name`, `category`, `subject`, `activity_type`, `date`, `weekday`, `start_time`,
 `end_time`. Changes contain a string or null value, at most eight distinct
 fields, and no extra keys. IDs, source, external IDs, active date ranges and
-UID mappings cannot be edited. Native calls remain limited to one tool request
-per reply; one edit request may contain several changes.
+UID mappings cannot be edited. Edit/delete replies remain limited to one tool
+request; one edit request may contain several changes. Multi-add replies retain
+independent approval and execution receipts for every proposed activity.
 
 `activity_service.prepare_activity_update()` checks ID/name and merges only
 the requested fields into the actual row. It reuses `prepare_new_activity()`

@@ -79,6 +79,19 @@ def describe_activity_proposals(connection, proposals):
     """Build edit/delete review cards from fresh read-only database data."""
     reviewed = []
     for proposal in proposals:
+        if proposal.tool_name == "add_activity":
+            conflicts = activity_service.check_activity_conflicts(connection, proposal.arguments)
+            description = proposal.display_description
+            if conflicts:
+                description += "\nWarning: overlaps existing activities (you may still confirm):"
+                for item in conflicts[:10]:
+                    description += f"\n{item['name']} — {item['date']} {item['start_time']}–{item['end_time']}"
+                if len(conflicts) > 10:
+                    description += f"\nAnd {len(conflicts) - 10} more conflicts."
+            if proposal.arguments["activity_type"] != "one_time":
+                description += "\nRecurring activity: availability context checks near-term dates, not every future occurrence."
+            reviewed.append(proposal.model_copy(update={"display_description": description}))
+            continue
         if proposal.tool_name not in {"delete_activity", "edit_activity"}:
             reviewed.append(proposal)
             continue

@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from backend.app.ai.actions.contracts import AddActivityAction, DeleteActivityAction, EditActivityAction
+from backend.app.ai.actions.contracts import AddActivityAction, DeleteActivityAction, EditActivityAction, MAX_ADD_ACTIVITY_PROPOSALS
 from backend.app.ai.memory.contracts import MemoryRequest
 from backend.app.files.contracts import MAX_QUERY_CHARS, validate_query
 
@@ -44,12 +44,14 @@ class AgentProposal(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     message: str | None
-    actions: list[AddActivityAction | DeleteActivityAction | EditActivityAction]
+    actions: list[AddActivityAction | DeleteActivityAction | EditActivityAction] = Field(max_length=MAX_ADD_ACTIVITY_PROPOSALS)
     memory_request: MemoryRequest | None = None
     missing_context: list[MissingContextRequest | MissingFileContextRequest] = Field(default_factory=list, max_length=2)
 
     @model_validator(mode="after")
     def validate_message(self):
+        if len(self.actions) > 1 and any(action.tool != "add_activity" for action in self.actions):
+            raise ValueError("Only add_activity supports multiple proposals per reply.")
         if self.message is not None:
             self.message = self.message.strip()
         if self.missing_context:

@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 
 WEEKDAYS = {"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"}
+MAX_ADD_ACTIVITY_PROPOSALS = 10
 
 
 class AddActivityArguments(BaseModel):

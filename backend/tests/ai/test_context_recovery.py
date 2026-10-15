@@ -457,6 +457,8 @@ class ContextRecoveryTests(unittest.TestCase):
         reader.assert_not_called()
 
     def test_normal_activity_proposal_keeps_action_arguments_and_does_not_execute(self):
+        self.router.return_value = {**NO_CONTEXT, "activities_scope": "today"}
+        self.activities.return_value = {**CLASS, "period": {"start": "2026-10-05", "end": "2026-10-05"}}
         action = {"tool": "add_activity", "arguments": {
             "name": "Revision", "category": "Study", "subject": "COMPSCI",
             "activity_type": "one_time", "date": "2026-10-05", "weekday": None,

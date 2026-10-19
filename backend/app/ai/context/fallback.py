@@ -1,6 +1,7 @@
 """Rare, high-reasoning routing fallback; never receives observations or tools."""
 
 import json
+from backend.app.infrastructure.token_usage import parse_with_usage
 
 from backend.app.ai.context.intent import (
     AgentRoutingDecision,
@@ -26,7 +27,7 @@ def classify_stage_three(client, user_message, recent_turns, stage_one, stage_tw
         "stage_1": stage_one,
         "stage_2": stage_two,
     }
-    response = client.responses.parse(
+    response = parse_with_usage(client, "stage_3",
         model=STAGE_THREE_MODEL,
         instructions=STAGE_THREE_INSTRUCTIONS + MEMORY_ROUTING_INSTRUCTIONS + EXAM_SCOPE_INSTRUCTIONS + FILE_ROUTING_INSTRUCTIONS,
         input=[{"role": "user", "content": json.dumps(routing_input, ensure_ascii=False)}],

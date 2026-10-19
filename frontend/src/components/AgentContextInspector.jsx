@@ -1,3 +1,5 @@
+import TokenUsagePanel from './TokenUsagePanel'
+
 function AgentContextInspector({ context, actions = [] }) {
   return (
     <details className="agent-context">
@@ -5,6 +7,7 @@ function AgentContextInspector({ context, actions = [] }) {
       {context ? (
         <>
           <p className="agent-context-note">{context.authority_note}</p>
+          <TokenUsagePanel usage={context.token_usage} />
           <section aria-label="Routing">
             <h3>Routing</h3>
             <p><strong>{context.routing.label || 'Routing metadata unavailable'}</strong></p>

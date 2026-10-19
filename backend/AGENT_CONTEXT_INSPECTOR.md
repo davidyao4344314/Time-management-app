@@ -102,3 +102,38 @@ backend/.venv/bin/python -B -m unittest backend.tests.ai.test_agent_transparency
 This covers all routing stages, unchanged model inputs, authority/provenance,
 redaction, bounded excerpts, no-match/unavailable states, failed follow-up
 lookups, and exclusion of metadata from saved conversation turns.
+## Token usage and context estimates
+
+New replies include `agent_context.token_usage`. The inspector shows Stage 1
+(local, zero model tokens), Stage 2, Stage 3, each main-agent/recovery call, and
+per-request totals. Skipped classifier stages are explicitly marked not used.
+All calls made during one request are counted, including failed routing calls;
+repeated main-agent input is counted again rather than deduplicated.
+
+SDK `usage` supplies reported input/output counts when available. Cached input
+and reasoning output are displayed as included subsets, never added a second
+time to totals. Without usage, the app estimates UTF-8 bytes divided by four for
+instructions, schemas, recent conversation, the request and selected context.
+Visible output can be estimated, but hidden output cannot. Unknown output stays
+unknown, not zero. Estimates are not model-tokenizer counts or dollar charges.
+
+Only numeric counts, stage/status/model labels and estimate component names are
+persisted. Prompts, file excerpts, memory text, raw responses and keys are not
+copied into usage metadata. Request-local counters use ContextVar isolation.
+The wrappers delegate the existing requests unchanged and make no counting API
+call. Older messages remain unavailable; their usage is not reconstructed.
+
+Offline checks:
+
+```bash
+backend/.venv/bin/python -B -m unittest backend.tests.ai.test_token_usage -v
+cd frontend
+npm test
+```
+
+To test manually, restart the backend, refresh AI Agent and send a new request.
+Open **How the agent used context → Token Usage**. A keyword route should show
+Stage 1 at zero and classifiers not used. Semantic/fallback/recovery calls show
+their own rows when those paths run. Expand a call's estimated input breakdown
+to compare activity, exam, file, memory and conversation context sizes. Sending
+the question uses the existing paid API request; opening the inspector does not.

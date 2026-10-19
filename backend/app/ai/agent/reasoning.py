@@ -2,6 +2,7 @@
 
 import json
 from backend.app.infrastructure.clock import observation_clock
+from backend.app.infrastructure.token_usage import parse_with_usage
 
 from backend.app.ai.config import get_max_recent_turns
 from backend.app.ai.context.policy import excluded_context_sources
@@ -107,7 +108,7 @@ def request_agent_response(client, user_request, observations, recent_turns, set
                            context_recovery_feedback=None):
     """Request structured advice/proposals only; never call an activity tool."""
     try:
-        return client.responses.parse(
+        return parse_with_usage(client, "main_agent",
             model=settings["model"],
             instructions=STUDY_PLANNING_INSTRUCTIONS,
             input=build_agent_messages(user_request, observations, recent_turns, chat_summary=chat_summary,

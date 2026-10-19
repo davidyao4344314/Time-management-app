@@ -2,6 +2,7 @@
 
 import os
 import re
+from backend.app.infrastructure.token_usage import token_usage_session
 from copy import deepcopy
 
 from openai import OpenAI
@@ -96,6 +97,7 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
                       context_recovery=recovery_trace, excluded_sources=sorted(excluded_sources),
                       model=agent_settings["model"],
                       adaptive_routing=build_adaptive_metadata(routing_evidence, adaptive_snapshot))
+        public["token_usage"] = usage_stats.snapshot()
         file_observation = context.get("files", {})
         # Keep only references and counts in persisted inspector metadata. Never
         # copy extracted text/chunks into recent/archive/durable conversation memory.
@@ -132,7 +134,8 @@ def get_agent_proposal(connection, user_request, recent_turns=None, *, session_i
             **({'activity_ids': target_ids} if target_ids else {}),
         )
 
-    with OpenAI(api_key=os.environ["OPENAI_API_KEY"].strip(), timeout=timeout, max_retries=0) as client:
+    with token_usage_session(enabled=include_context) as usage_stats, \
+            OpenAI(api_key=os.environ["OPENAI_API_KEY"].strip(), timeout=timeout, max_retries=0) as client:
         selection = select_agent_context(
             client, user_request.strip(), recent_turns, PROPOSAL_MODEL,
             **({"trace": routing_trace} if include_context else {}),

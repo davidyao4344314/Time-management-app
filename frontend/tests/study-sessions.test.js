@@ -157,3 +157,20 @@ test('session log renders accessible outcomes, date selection, minutes and saved
   assert.match(missed, /Clear record/)
   assert.match(missed, /type="number"[^>]*disabled=""/)
 })
+
+test('automatic missed outcomes are distinguished from saved records and can be corrected', () => {
+  const automaticSession = { ...session, completion: { status: 'missed', actual_minutes: 0, automatic: true } }
+  const form = renderToStaticMarkup(jsx(context.SessionForm, { session: automaticSession, date: '2026-11-10' }))
+  assert.match(form, /Missed automatically · 0 minutes/)
+  assert.match(form, /<button type="submit">Save<\/button>/)
+  assert.doesNotMatch(form, /Clear record/)
+  const originalHook = context.useStudySessions
+  context.useStudySessions = () => ({ data: { ...listing, sessions: [automaticSession] },
+    date: '2026-11-10', today: day, loading: false, error: '', savingId: null })
+  try {
+    const html = renderToStaticMarkup(jsx(context.StudySessionLog, {}))
+    assert.match(html, /0 of 1 sessions recorded/)
+    assert.match(html, /1 missed automatically/)
+    assert.match(html, /0 actual minutes/)
+  } finally { context.useStudySessions = originalHook }
+})

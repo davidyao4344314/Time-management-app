@@ -61,7 +61,8 @@ def _saved(connection, chosen):
 def _item(activity_id, details, completion=None):
     return {'activity_id': activity_id,
             **{key: details[key] for key in ('name', 'subject', 'category', 'start_time', 'end_time')},
-            'completion': ({key: completion[key] for key in ('status', 'actual_minutes', 'updated_at')}
+            'completion': ({**{key: completion[key] for key in ('status', 'actual_minutes', 'updated_at')},
+                            'automatic': False}
                            if completion else None)}
 
 
@@ -72,6 +73,13 @@ def list_sessions(connection, session_date=None):
                 for activity in get_all_activities(connection) if occurs(activity, chosen)}
     # Keep recorded history visible even if a definition was subsequently moved/edited.
     sessions.update({key: _item(key, record, record) for key, record in saved.items()})
+    if chosen < today:
+        for session in sessions.values():
+            if session['completion'] is None:
+                # Derive overdue outcomes rather than creating unlimited historical
+                # rows for daily/weekly definitions. Explicit records always win.
+                session['completion'] = {'status': 'missed', 'actual_minutes': 0,
+                                         'updated_at': None, 'automatic': True}
     return {'date': chosen.isoformat(), 'today': today.isoformat(),
             'sessions': sorted(sessions.values(), key=lambda item:
                                (item['start_time'] or '99:99', item['name'].casefold(), item['activity_id']))}
@@ -103,7 +111,7 @@ def save_session(connection, activity_id, session_date, status, actual_minutes):
                 updated_at = excluded.updated_at""",
             (activity_id, chosen.isoformat(), status, actual_minutes,
              *(details[key] for key in ('name', 'subject', 'category', 'start_time', 'end_time')), updated_at))
-    return {'status': status, 'actual_minutes': actual_minutes, 'updated_at': updated_at}
+    return {'status': status, 'actual_minutes': actual_minutes, 'updated_at': updated_at, 'automatic': False}
 
 
 def clear_session(connection, activity_id, session_date):

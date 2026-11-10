@@ -126,6 +126,50 @@ class StudySessionTests(unittest.TestCase):
         self.assertEqual(response.status_code, 500)
         self.assertNotIn('private path', response.text)
 
+    def test_past_unrecorded_sessions_are_automatically_missed_without_backfill(self):
+        for day in ('2026-11-10', '2026-11-01'):
+            with self.subTest(day=day):
+                completion = self.listing(day)['sessions'][0]['completion']
+                self.assertEqual(completion, {'status': 'missed', 'actual_minutes': 0,
+                                              'updated_at': None, 'automatic': True})
+        self.assertIsNone(self.listing()['sessions'][0]['completion'])
+        with closing(database.create_connection()) as connection:
+            self.assertEqual(connection.execute('SELECT count(*) FROM study_sessions').fetchone(), (0,))
+
+    def test_automatic_missed_starts_at_auckland_midnight_not_session_end(self):
+        for now, expected in [(datetime(2026, 11, 11, 23, 59, tzinfo=ZoneInfo('Pacific/Auckland')), False),
+                              (datetime(2026, 11, 12, 0, 0, tzinfo=ZoneInfo('Pacific/Auckland')), True)]:
+            with self.subTest(now=now), patch.object(study_sessions, 'local_now', return_value=now):
+                completion = self.listing('2026-11-11')['sessions'][0]['completion']
+                self.assertEqual(completion is not None, expected)
+                if expected:
+                    self.assertTrue(completion['automatic'])
+
+    def test_automatic_missed_can_be_corrected_and_clear_restores_default(self):
+        path = f'/study-sessions/{self.id}/2026-11-10'
+        for status, minutes in [('done', 60), ('partly_done', 25), ('missed', 0)]:
+            self.assertEqual(self.save(status, minutes, path).status_code, 200)
+            completion = self.listing('2026-11-10')['sessions'][0]['completion']
+            self.assertEqual((completion['status'], completion['actual_minutes']), (status, minutes))
+            self.assertFalse(completion['automatic'])
+        self.assertEqual(self.client.delete(path).status_code, 204)
+        self.assertTrue(self.listing('2026-11-10')['sessions'][0]['completion']['automatic'])
+
+    def test_automatic_missed_respects_one_time_dates_and_weekly_ranges(self):
+        one = self.client.post('/activities', json={
+            'name': 'Practice', 'category': 'Study', 'activity_type': 'one_time', 'date': '2026-11-10',
+        }).json()['id']
+        with closing(database.create_connection()) as connection, connection:
+            weekly = connection.execute("""INSERT INTO activities
+                (name, category, activity_type, weekday, active_start_date, active_end_date)
+                VALUES ('Weekly', 'Study', 'weekly', 'Wednesday', '2026-11-04', '2026-11-04')""").lastrowid
+        self.assertTrue(next(item for item in self.listing('2026-11-10')['sessions']
+                             if item['activity_id'] == one)['completion']['automatic'])
+        self.assertTrue(next(item for item in self.listing('2026-11-04')['sessions']
+                             if item['activity_id'] == weekly)['completion']['automatic'])
+        self.assertEqual([item['activity_id'] for item in self.listing('2026-11-03')['sessions']], [self.id])
+        self.assertEqual([item['activity_id'] for item in self.listing()['sessions']], [self.id])
+
 
 if __name__ == '__main__':
     unittest.main()

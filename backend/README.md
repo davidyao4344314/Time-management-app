@@ -11,7 +11,13 @@ date. Future dates cannot be recorded.
 
 Save persists one record per activity ID and date. Repeated saves update that
 record; recurring activities have independent daily records. Clear record
-resets the occurrence to unrecorded. The panel shows recorded session counts
+resets today's occurrence to unrecorded. Unrecorded occurrences on past dates
+automatically show **Missed** with zero minutes after their scheduled day ends
+in Auckland time. Today's occurrences remain unrecorded even after their end
+time. Saved Done, Partly done, and Missed records always take precedence.
+You can correct an automatic Missed outcome by saving the actual outcome and
+minutes. Clearing a record on a past date restores the automatic Missed outcome.
+The panel shows recorded session counts
 and actual minutes for the selected date. Recorded names, subjects and scheduled
 times are snapshots, so an existing log remains visible after schedule edits.
 Deleting an activity also deletes its completion records.
@@ -22,6 +28,12 @@ occurrences (date is optional). `PUT /study-sessions/{activity_id}/{session_date
 accepts `{"status":"done","actual_minutes":45}`; statuses are `done`,
 `partly_done`, and `missed`. `DELETE` on that same path clears a record. The
 service checks recurrence and active date ranges before creating a new record.
+Automatic Missed outcomes are calculated when records are loaded, including
+after the app has been closed; no background process or database backfill is
+needed. Responses identify these with `completion.automatic = true`; they do
+not count as manually recorded sessions. Reload records to refresh an open log
+after midnight. Unlogged historical occurrences follow the current activity
+definition, while explicitly saved records retain their snapshots.
 These records share the local planner's scope and make no AI request. Completion
 records are not yet included in AI context or automatic rescheduling.
 

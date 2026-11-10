@@ -22,7 +22,8 @@ function SessionForm({ session, date, busy, saving, onSave }) {
         <p>{session.start_time || session.end_time
           ? `${session.start_time || 'No start time'} – ${session.end_time || 'No end time'}` : 'No time set'}</p>
         <p className={`session-status ${session.completion ? `session-${session.completion.status}` : ''}`}>
-          {session.completion ? `${labels[session.completion.status]} · ${session.completion.actual_minutes} min logged` : 'Not recorded'}
+          {session.completion?.automatic ? 'Missed automatically · 0 minutes'
+            : session.completion ? `${labels[session.completion.status]} · ${session.completion.actual_minutes} min logged` : 'Not recorded'}
         </p>
       </div>
       <form className="session-form" aria-label={`Record ${session.name} on ${date}`} onSubmit={event => {
@@ -41,7 +42,7 @@ function SessionForm({ session, date, busy, saving, onSave }) {
               value={minutes} disabled={status === 'missed'} onChange={event => setMinutes(event.target.value)} />
           </label>
           <button type="submit">{saving ? 'Saving…' : 'Save'}</button>
-          {session.completion && <button type="button" onClick={() => onSave(session.activity_id, null)}>Clear record</button>}
+          {session.completion && !session.completion.automatic && <button type="button" onClick={() => onSave(session.activity_id, null)}>Clear record</button>}
         </fieldset>
       </form>
     </li>
@@ -50,13 +51,15 @@ function SessionForm({ session, date, busy, saving, onSave }) {
 
 export default function StudySessionLog() {
   const { data, date, today, loading, error, savingId, selectDate, refresh, save } = useStudySessions()
-  const logged = data?.sessions.filter(item => item.completion) || []
+  const logged = data?.sessions.filter(item => item.completion && !item.completion.automatic) || []
+  const automaticallyMissed = data?.sessions.filter(item => item.completion?.automatic).length || 0
   const minutes = logged.reduce((sum, item) => sum + item.completion.actual_minutes, 0)
 
   return (
     <section className="session-log" aria-labelledby="session-log-heading">
       <h3 id="session-log-heading">Study session log</h3>
       <p>Record what you completed and how long you spent. Each recurring session is tracked separately.</p>
+      <p>Unrecorded sessions are marked Missed after their scheduled day ends in Auckland time. You can correct them later.</p>
       <div className="session-toolbar">
         <label>Session date
           <input type="date" value={date} max={today || undefined} disabled={savingId !== null}
@@ -66,7 +69,8 @@ export default function StudySessionLog() {
       </div>
       {error && <p role="alert">{error}</p>}
       {loading ? <p role="status">Loading session records…</p> : data && <>
-        <p role="status">{logged.length} of {data.sessions.length} sessions recorded · {minutes} actual minutes</p>
+        <p role="status">{logged.length} of {data.sessions.length} sessions recorded · {minutes} actual minutes
+          {automaticallyMissed > 0 && ` · ${automaticallyMissed} missed automatically`}</p>
         {data.sessions.length === 0 ? <p>No activities scheduled or recorded for this date.</p> :
           <ul className="session-list">{data.sessions.map(session => (
             <SessionForm key={`${date}-${session.activity_id}-${session.completion?.status}-${session.completion?.actual_minutes}`}

@@ -19,16 +19,17 @@ class FolderLayoutTests(unittest.TestCase):
             ("uoa_timetable_import", "integrations.uoa_timetable_import"),
             ("ical_import", "integrations.ical_import"),
             ("ai_config", "ai.config"),
-            ("agent.service", "ai.agent.service"),
-            ("context.selection", "ai.context.selection"),
-            ("observations.activities", "ai.observations.activities"),
-            ("memory.recent", "ai.memory.recent"),
-            ("actions.contracts", "ai.actions.contracts"),
         )
         for old, new in pairs:
             with self.subTest(old=old):
                 self.assertIs(importlib.import_module("backend.app." + old),
                               importlib.import_module("backend.app." + new))
+
+    def test_ai_subpackages_have_one_source_location(self):
+        for name in ("agent", "context", "observations", "memory", "actions"):
+            with self.subTest(package=name):
+                self.assertFalse(list((BACKEND_DIRECTORY / "app" / name).glob("*.py")))
+                importlib.import_module(f"backend.app.ai.{name}")
 
     def test_data_and_configuration_paths_have_not_moved(self):
         from backend.app import database

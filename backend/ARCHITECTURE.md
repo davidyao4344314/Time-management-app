@@ -52,9 +52,9 @@ backend/
 │   ├── test_refactor_boundaries.py
 │   └── test_folder_layout.py   # Relocation/entry point/path compatibility
 └── app/
-    ├── server.py               # FastAPI assembly, no business logic
+    ├── server.py               # FastAPI assembly and versioned startup migration list
     ├── cli.py                  # Existing interactive planner CLI
-    ├── database.py             # Planner connection/schema setup
+    ├── database.py             # SQLite connections and transactional migration runner
     ├── conversations/
     │   ├── contracts.py        # Chat requests, responses and safe errors
     │   ├── storage.py          # All chat SQL, summary reservations, export receipts
@@ -117,6 +117,7 @@ backend/
     │   └── compat/             # Name forwarding for older split facades
     ├── planner/
     │   ├── activities.py       # Existing activity SQL/CRUD
+    │   ├── records.py          # Named activity/exam rows and cursor mapping
     │   ├── activity_service.py # Existing add/edit validation/use cases
     │   ├── exams.py            # Existing exam SQL/CRUD
     │   ├── exam_service.py     # Exam preparation/edit validation and updates
@@ -192,6 +193,11 @@ handlers. `ai/memory/contracts.py` also owns the durable-memory models; their
 validation semantics were retained.
 
 ## Moves and compatibility
+
+Use `backend.app.ai.*` for AI modules. The old parallel `app/agent`,
+`app/context`, `app/observations`, `app/memory`, and `app/actions` packages
+had no in-repo consumers and have been removed. The documented entry points
+and remaining flat adapters below are still supported.
 
 | Previous module | Canonical implementation |
 | --- | --- |

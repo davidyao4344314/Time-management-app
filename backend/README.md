@@ -194,7 +194,7 @@ Open `http://127.0.0.1:8001/docs` for the API documentation. Press `Ctrl+C` in
 the terminal to stop the server. The FastAPI `app` is in
 `backend/app/server.py`. The old `backend.fastapi_test:app` command remains
 compatible. `backend/app/cli.py` is the interactive Python program, not the
-ASGI app; the old `backend/app/main.py` script forwards to it. The frontend's Vite `/api` proxy targets port 8001.
+ASGI app; the old `backend/app/main.py` script runs that CLI. The frontend's Vite `/api` proxy targets port 8001.
 
 API startup initializes the existing SQLite database and records completed
 schema upgrades in `schema_migrations`. A pending upgrade is transactional;
@@ -257,9 +257,10 @@ See [Backend architecture](ARCHITECTURE.md) for detailed ownership and import
 rules. The reorganized files do not add new behavior. API paths, prompts,
 recurrence and import rules are unchanged.
 
-Old flat modules and former package paths remain small compatibility wrappers,
-not second implementations. Existing scripts and the old server command still
-work. New code should use the grouped modules, for example:
+The former mirror packages `app/agent`, `app/context`, `app/observations`,
+`app/memory` and `app/actions` have been retired. Use the corresponding packages
+under `app/ai`. Documented scripts, the old server command and the remaining
+flat compatibility modules still work. New code should use the grouped modules:
 
 ```python
 from backend.app.planner.activities import add_activity

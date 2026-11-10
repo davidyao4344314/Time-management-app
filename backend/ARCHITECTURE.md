@@ -19,7 +19,10 @@ React -> api/conversations.py -> conversations/service.py
                         |
                         +-> ai/context/selection.py -> keywords / intent / fallback
                         +-> ai/observations/collect.py -> activities / exams -> existing CRUD/calendar
-                        +-> ai/agent/reasoning.py -> OpenAI -> validated proposal
+                        +-> ai/agent/reasoning.py -> OpenAI -> validated draft
+                        +-> ai/agent/followup.py -> optional read-only recovery plan
+                        |                         (service may ask the model once more)
+                        +-> ai/agent/transparency.py -> final proposal's inspector metadata
 conversations/service.py -> memory_export.py -> archive_store.py for opted-in older turns
 
 Compatibility only: api/ai.py -> ai/memory/recent.py -> archive_store.py
@@ -79,6 +82,8 @@ backend/
     │   ├── agent/
     │   │   ├── contracts.py    # AgentProposal and validation
     │   │   ├── service.py      # Coordinate a proposal request
+    │   │   ├── followup.py     # Read-only context recovery and second-answer validation
+    │   │   ├── transparency.py # Public inspector and separate routing evidence
     │   │   ├── tool_calls.py   # Native Responses calls -> schema-validated requests; no execution
     │   │   └── reasoning.py    # Prompt, model messages and response
     │   ├── context/

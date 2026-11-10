@@ -1,5 +1,8 @@
 """Public request metadata, never model reasoning, prompts or session secrets."""
 
+import re
+from copy import deepcopy
+
 from backend.app.infrastructure.privacy import redact_secrets
 
 SOURCE_INFO = {
@@ -133,3 +136,72 @@ def build_agent_context(routing, selection, recent_count, lookups):
         "memory_message": memory_message,
         "authority_note": "Current app observations take priority over historical memory for current state.",
     }
+
+
+def record_routing_outcome(routing_evidence, *, classifier_model, selection, initial_status,
+                           context_status, excluded_sources, target_ids, recent_turns,
+                           user_request, recovery_trace, memory_requested):
+    """Record private routing evidence separately from the public inspector."""
+    if routing_evidence is not None:
+        routing_evidence.update(
+            classifier_model=classifier_model,
+            final_selection=deepcopy(selection), initial_status=initial_status, final_status=context_status,
+            excluded_sources=sorted(excluded_sources),
+            context_dependent=bool(
+                target_ids or selection.get("files") or (recent_turns and re.search(
+                    r"\b(it|that|those|same|earlier|previously)\b", user_request.casefold(),
+                ))
+            ),
+            recovery_requested=bool(recovery_trace["attempts"] or memory_requested),
+            recovery_completed=recovery_trace["status"] == "completed",
+        )
+
+
+def build_proposal_context(*, routing_trace, selection, recent_count, lookups, context,
+                           coverage, chat_summary, initial_status, context_status,
+                           recovery_trace, excluded_sources, model, routing_evidence,
+                           adaptive_snapshot, token_usage, file_reference, target_ids):
+    """Compose the public inspector from the request's actual inputs and outcomes."""
+    public = build_agent_context(
+        routing_trace, selection, recent_count, lookups,
+    )
+    checked_dates = context.get("activities", {}).get("checked_dates")
+    if checked_dates:
+        for source in public["context_sources"]:
+            if source["source"] == "activities":
+                source.update(selected=True, reason="Fresh calendar check for proposed dates: " + ", ".join(checked_dates))
+    if coverage is not None:
+        public["exam_coverage"] = coverage
+        for source in public["context_sources"]:
+            if source["source"] == "exams" and source["selected"]:
+                source["reason"] += " " + coverage["notice"]
+    if chat_summary:
+        public['context_sources'].append({'source':'chat_summary','label':'Current-chat summary',
+            'selected':True,'authority':'historical_summary','reason':'Bounded summary of older completed messages in this chat.'})
+    public.update(initial_context_status=initial_status, context_status=context_status,
+                  context_recovery=recovery_trace, excluded_sources=sorted(excluded_sources),
+                  model=model,
+                  adaptive_routing=build_adaptive_metadata(routing_evidence, adaptive_snapshot))
+    public["token_usage"] = token_usage
+    file_observation = context.get("files", {})
+    # Keep only references and counts in persisted inspector metadata. Never
+    # copy extracted text/chunks into recent/archive/durable conversation memory.
+    public["file_context"] = {
+        "status": context_status["files"],
+        "detection": file_reference["method"] if file_reference else "context_selection",
+        "chunk_count": file_observation.get("count", 0),
+        "truncated": bool(file_observation.get("truncated")),
+        "ambiguous": bool(file_observation.get("ambiguous")),
+        "reference_matched": bool(file_reference and file_reference["method"] != "unknown_filename"
+                                  and file_observation.get("files")),
+        "requested_filenames": file_reference.get("filenames", []) if file_reference else [],
+        "resolved_file_ids": (selection.get("files") or {}).get("file_ids", []),
+        "files": [{key: item.get(key) for key in ("file_id", "filename", "file_type", "created_at", "chunk_count")}
+                  for item in file_observation.get("files", [])],
+    }
+    public["file_refs"] = ([item["file_id"] for item in file_observation.get("files", [])][:3]
+                           if context_status["files"] == "provided" else [])
+    if target_ids:
+        public['activity_target_lookup'] = {'requested_ids': target_ids,
+            'matched_count': context.get('activities', {}).get('requested_activity_count', 0)}
+    return public

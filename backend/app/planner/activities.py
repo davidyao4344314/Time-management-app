@@ -1,5 +1,7 @@
 from datetime import date
 
+from backend.app.planner.records import ActivityRecord, record_cursor
+
 
 """
 this function gets the clomun the table and put it into an list got columns
@@ -126,8 +128,8 @@ def search_activity(connection, value_name):
         print(f"No activity found for {value_name}")
 
 def get_activities_by_name(connection, value_name):
-    cursor = connection.execute(
-        "SELECT * FROM activities WHERE name = ? ORDER BY id",
+    cursor = record_cursor(
+        connection, "SELECT * FROM activities WHERE name = ? ORDER BY id", ActivityRecord,
         (value_name,),
     )
 
@@ -224,19 +226,15 @@ def get_activity_name_by_id(connection, activity_id):
     return result[0]
 
 def get_activity_by_id(connection, activity_id):
-    cursor = connection.execute(
-        "SELECT * FROM activities WHERE id = ?",
+    cursor = record_cursor(
+        connection, "SELECT * FROM activities WHERE id = ?", ActivityRecord,
         (activity_id,),
     )
 
     return cursor.fetchone()
 
 def get_all_activities(connection):
-    cursor = connection.execute(
-        "SELECT * FROM activities"
-    )
-
-    return cursor.fetchall()
+    return record_cursor(connection, "SELECT * FROM activities", ActivityRecord).fetchall()
 
 
 def move_activity(
@@ -246,16 +244,12 @@ def move_activity(
     destination_date,
     destination_weekday,
 ):
-    cursor = connection.execute(
-        "SELECT id, activity_type, date, weekday FROM activities WHERE id = ?",
-        (activity_id,),
-    )
-    activity = cursor.fetchone()
+    activity = get_activity_by_id(connection, activity_id)
 
     if activity is None:
         return None
 
-    stored_activity_type = activity[1].strip().lower()
+    stored_activity_type = activity.activity_type.strip().lower()
     requested_activity_type = activity_type.strip().lower()
 
     if requested_activity_type != stored_activity_type:

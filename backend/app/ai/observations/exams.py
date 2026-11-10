@@ -4,6 +4,7 @@ from datetime import date, timedelta
 
 from backend.app.planner.calendar import get_current_date, get_current_time
 from backend.app.planner.exams import get_all_exams
+from backend.app.planner.records import as_exam_record
 from backend.app.planner.assessment_types import classify_assessment_name
 from backend.app.ai.observations.formatting import (
     chronological_key, compact_time, observation_date_range, bounded_details,
@@ -34,14 +35,15 @@ def build_exam_observation(connection, scope="upcoming", *, assessment_filter="a
     seen = set()
     unknown_count = 0
 
-    for exam in get_all_exams(connection):
-        exam_date = _exam_date(exam[4])
+    for row in get_all_exams(connection):
+        exam = as_exam_record(row)
+        exam_date = _exam_date(exam.date)
         if exam_date is None or not first_date <= exam_date <= end_date:
             continue
 
         # A date-only exam remains relevant all day. A timed exam that has
         # already ended today is no longer upcoming.
-        end_time = compact_time(exam[6])
+        end_time = compact_time(exam.end_time)
         if exam_date == today and end_time is not None and end_time <= current_time:
             continue
 
@@ -51,7 +53,7 @@ def build_exam_observation(connection, scope="upcoming", *, assessment_filter="a
         if exam_fields in seen:
             continue
         seen.add(exam_fields)
-        assessment_type = classify_assessment_name(exam[1])
+        assessment_type = classify_assessment_name(exam.name)
         unknown_count += assessment_type == "unknown"
         if assessment_filter == "formal_exams" and assessment_type != "exam":
             continue
@@ -63,13 +65,13 @@ def build_exam_observation(connection, scope="upcoming", *, assessment_filter="a
 
     detailed = bounded_details(
             {
-                "name": exam[1],
-                "subject": exam[3],
+                "name": exam.name,
+                "subject": exam.subject,
                 "date": exam_date.isoformat(),
-                "start": compact_time(exam[5]),
-                "end": compact_time(exam[6]),
+                "start": compact_time(exam.start_time),
+                "end": compact_time(exam.end_time),
                 "days_left": (exam_date - today).days,
-                "assessment_type": classify_assessment_name(exam[1]),
+                "assessment_type": classify_assessment_name(exam.name),
             }
             for exam, exam_date in relevant
         )

@@ -2,6 +2,7 @@ from datetime import date, datetime, timedelta
 from backend.app.planner.activities import get_activity_schedule, get_activity_name_by_id, get_all_activities
 from backend.app.planner.exams import get_all_exams, exam_to_dict
 from backend.app.infrastructure.clock import local_now
+from backend.app.planner.records import as_activity_record
 
 
 def get_calendar_week(connection, week_start=None, *, include_exams=False):
@@ -37,16 +38,17 @@ def get_current_day():
     return local_now().strftime("%A")
 
 def print_all_dailies(connection, activit_list):
-    for activity in activit_list:
-        print(f"ID: {activity[0]}")
-        print(f"Name: {activity[1]}")
-        print(f"Category: {activity[2]}")
-        print(f"Subject: {activity[3]}")
-        print(f"Type: {activity[4]}")
-        print(f"Date: {activity[5]}")
-        print(f"Weekday: {activity[6]}")
-        print(f"Start time: {activity[7]}")
-        print(f"End time: {activity[8]}")
+    for row in activit_list:
+        activity = as_activity_record(row)
+        print(f"ID: {activity.id}")
+        print(f"Name: {activity.name}")
+        print(f"Category: {activity.category}")
+        print(f"Subject: {activity.subject}")
+        print(f"Type: {activity.activity_type}")
+        print(f"Date: {activity.date}")
+        print(f"Weekday: {activity.weekday}")
+        print(f"Start time: {activity.start_time}")
+        print(f"End time: {activity.end_time}")
 
 
 def is_activity_today(activity_type, activity_date, activity_day,
@@ -66,16 +68,16 @@ def get_todays_activities(connection):
     activities_today = []
 
     for activity in activities:
-        activity_type = activity[4]
-        activity_date = activity[5]
-        activity_day = activity[6]
+        activity_type = activity.activity_type
+        activity_date = activity.date
+        activity_day = activity.weekday
 
         if is_activity_today(
             activity_type,
             activity_date,
             activity_day,
-            activity[9] if len(activity) > 9 else None,
-            activity[10] if len(activity) > 10 else None,
+            activity.active_start_date,
+            activity.active_end_date,
         ):
             activities_today.append(activity)
 
@@ -85,9 +87,10 @@ def check_activity_current(activities_today, current_time):
     current_activities = []
     now = datetime.strptime(current_time, "%H:%M").time()
 
-    for activity in activities_today:
-        start_time = activity[7]
-        end_time = activity[8]
+    for row in activities_today:
+        activity = as_activity_record(row)
+        start_time = activity.start_time
+        end_time = activity.end_time
 
         if not is_valid_activity_time(start_time, end_time):
             continue
@@ -95,7 +98,7 @@ def check_activity_current(activities_today, current_time):
         start = datetime.strptime(start_time.strip(), "%H:%M").time()
         end = datetime.strptime(end_time.strip(), "%H:%M").time()
         if start <= now < end:
-            current_activities.append(activity[0])
+            current_activities.append(activity.id)
 
     return current_activities
 
@@ -104,22 +107,22 @@ def get_current_and_next_activities(connection):
     activities_today = get_todays_activities(connection)
     current_time = get_current_time()
     current_ids = set(check_activity_current(activities_today, current_time))
-    current = [activity for activity in activities_today if activity[0] in current_ids]
+    current = [activity for activity in activities_today if activity.id in current_ids]
 
     now = datetime.strptime(current_time, "%H:%M").time()
     upcoming = []
     for activity in activities_today:
-        if not is_valid_activity_time(activity[7], activity[8]):
+        if not is_valid_activity_time(activity.start_time, activity.end_time):
             continue
-        start = datetime.strptime(activity[7].strip(), "%H:%M").time()
+        start = datetime.strptime(activity.start_time.strip(), "%H:%M").time()
         if start > now:
             upcoming.append(activity)
 
     next_activity = min(
         upcoming,
         key=lambda activity: (
-            datetime.strptime(activity[7].strip(), "%H:%M").time(),
-            activity[0],
+            datetime.strptime(activity.start_time.strip(), "%H:%M").time(),
+            activity.id,
         ),
         default=None,
     )
@@ -225,28 +228,28 @@ def get_week_activities(connection, week_start=None):
             if len(activity) < 9:
                 continue
 
-            activity_type = activity[4]
-            stored_date = activity[5]
-            stored_weekday = activity[6]
-            start_time = activity[7]
-            end_time = activity[8]
+            activity_type = activity.activity_type
+            stored_date = activity.date
+            stored_weekday = activity.weekday
+            start_time = activity.start_time
+            end_time = activity.end_time
 
             if not is_activity_on_date(
                 activity_type,
                 stored_date,
                 stored_weekday,
                 calendar_date,
-                activity[9] if len(activity) > 9 else None,
-                activity[10] if len(activity) > 10 else None,
+                activity.active_start_date,
+                activity.active_end_date,
             ):
                 continue
 
             week_activities.append({
-                "id": activity[0],
-                "name": activity[1],
-                "category": activity[2],
-                "subject": activity[3],
-                "source": activity[11] if len(activity) > 11 else "Manual",
+                "id": activity.id,
+                "name": activity.name,
+                "category": activity.category,
+                "subject": activity.subject,
+                "source": activity.source,
                 "activity_type": activity_type.strip().lower(),
                 "calendar_date": str(calendar_date),
                 "start_time": start_time.strip()

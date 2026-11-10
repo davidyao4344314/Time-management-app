@@ -1,15 +1,8 @@
+from backend.app.planner.records import ExamRecord, as_exam_record, record_cursor
+
+
 def exam_to_dict(exam):
-    return {
-        "id": exam[0],
-        "name": exam[1],
-        "category": exam[2],
-        "subject": exam[3],
-        "date": exam[4],
-        "start_time": exam[5],
-        "end_time": exam[6],
-        "source": exam[7],
-        "external_id": exam[8],
-    }
+    return as_exam_record(exam)._asdict()
 
 
 def exam_exists(connection, columns, values):
@@ -26,34 +19,7 @@ def exam_exists(connection, columns, values):
 
 
 def get_all_exams(connection):
-    cursor = connection.execute("SELECT * FROM exams")
-    return cursor.fetchall()
-
-def add_exam(connection, columns, values):
-    column_names = ", ".join(columns)
-    placeholders = ", ".join(["?"] * len(columns))
-
-    sql = f"""
-        INSERT INTO exams ({column_names})
-        VALUES ({placeholders})
-    """
-
-    connection.execute(sql, values)
-    connection.commit()
-
-def delete_exam(connection, exam_id):
-    connection.execute(
-        "DELETE FROM exams WHERE id = ?",
-        (exam_id,)
-    )
-    connection.commit()
-
-def get_all_exams(connection):
-    cursor = connection.execute(
-        "SELECT * FROM exams"
-    )
-
-    return cursor.fetchall()
+    return record_cursor(connection, "SELECT * FROM exams", ExamRecord).fetchall()
 
 
 def add_exam(connection, columns, values, *, commit=True):
@@ -119,12 +85,9 @@ def search_exam(connection, value_name):
 
 
 def search_exams_by_name(connection, value_name):
-    cursor = connection.execute(
-        "SELECT * FROM exams WHERE name = ?",
-        (value_name,)
-    )
-
-    return cursor.fetchall()
+    return record_cursor(
+        connection, "SELECT * FROM exams WHERE name = ?", ExamRecord, (value_name,),
+    ).fetchall()
 
 
 def delete_exam(connection, exam_id):

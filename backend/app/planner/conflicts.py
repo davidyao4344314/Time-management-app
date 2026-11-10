@@ -89,15 +89,9 @@ def find_activity_conflicts(connection, candidate_activity, exclude_activity_id=
     today = calendar.get_current_date()
     conflicts = []
     for row in get_all_activities(connection):
-        if row[0] == exclude_activity_id:
+        if row.id == exclude_activity_id:
             continue
-        # The inspected schema keeps schedule fields at positions 4–10.
-        # Later source/external metadata is intentionally not part of a check.
-        existing = dict(zip(
-            ("activity_type", "date", "weekday", "start_time", "end_time",
-             "active_start_date", "active_end_date"),
-            row[4:11],
-        ))
+        existing = row._asdict()
         existing_times = _time_range(existing)
         existing_bounds = _date_bounds(existing)
         if existing_times is None or existing_bounds is None:
@@ -110,8 +104,8 @@ def find_activity_conflicts(connection, candidate_activity, exclude_activity_id=
         )
         if shared_date is not None:
             conflicts.append({
-                "activity_id": row[0],
-                "name": row[1],
+                "activity_id": row.id,
+                "name": row.name,
                 "date": shared_date.isoformat(),
                 "start_time": existing_start.strftime("%H:%M"),
                 "end_time": existing_end.strftime("%H:%M"),

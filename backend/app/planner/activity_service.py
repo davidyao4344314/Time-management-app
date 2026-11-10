@@ -147,11 +147,9 @@ def get_activity_target(connection, activity_id, expected_name):
     activity = get_activity_by_id(connection, activity_id)
     if activity is None:
         raise ActivityValidationError(status_code=404, detail="Activity no longer exists. Request a new proposal.")
-    if activity[1] != expected_name:
+    if activity.name != expected_name:
         raise ActivityValidationError(status_code=409, detail="Activity name no longer matches. Request a new proposal.")
-    columns = ("id", "name", "category", "subject", "activity_type", "date", "weekday",
-               "start_time", "end_time", "active_start_date", "active_end_date", "source", "external_id")
-    return dict(zip(columns, activity))
+    return activity._asdict()
 
 
 def verify_activity_snapshot(connection, activity_id, expected_name, snapshot):
@@ -270,7 +268,7 @@ def update_activity_record(connection, activity_id, fields):
     if activity is None:
         raise ActivityValidationError(status_code=404, detail="Activity ID not found.")
 
-    current_activity_type = activity[4]
+    current_activity_type = activity.activity_type
     new_value = fields.get("new_value")
 
     if column_name in {"name", "category"}:
@@ -294,12 +292,12 @@ def update_activity_record(connection, activity_id, fields):
 
         if new_value == "one_time":
             try:
-                selected_date = fields.get("date") if fields.get("date") is not None else activity[5]
+                selected_date = fields.get("date") if fields.get("date") is not None else activity.date
                 selected_date = date.fromisoformat(selected_date.strip()).isoformat()
             except (AttributeError, ValueError):
                 raise ActivityValidationError(status_code=400, detail="Choose a date for the one-time activity.") from None
         elif new_value == "weekly":
-            selected_weekday = fields.get("weekday") if fields.get("weekday") is not None else activity[6]
+            selected_weekday = fields.get("weekday") if fields.get("weekday") is not None else activity.weekday
             weekdays = {day.lower(): day for day in ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")}
             selected_weekday = weekdays.get(selected_weekday.strip().lower()) if selected_weekday else None
             if selected_weekday is None:
@@ -351,8 +349,8 @@ def update_activity_record(connection, activity_id, fields):
                 detail="Time must use HH:MM format.",
             ) from None
 
-        start_time_value = new_value if column_name == "start_time" else activity[7]
-        end_time_value = new_value if column_name == "end_time" else activity[8]
+        start_time_value = new_value if column_name == "start_time" else activity.start_time
+        end_time_value = new_value if column_name == "end_time" else activity.end_time
 
         try:
             start_time_value = normalize_optional_time(start_time_value)

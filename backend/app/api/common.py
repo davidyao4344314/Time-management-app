@@ -4,24 +4,11 @@ from fastapi import HTTPException
 from backend.app.database import create_connection
 from backend.app.planner import activity_service
 from backend.app.planner.exams import exam_to_dict
+from backend.app.planner.records import as_activity_record
 
 
 def activity_to_dict(activity):
-    return {
-        "id": activity[0],
-        "name": activity[1],
-        "category": activity[2],
-        "subject": activity[3],
-        "activity_type": activity[4],
-        "date": activity[5],
-        "weekday": activity[6],
-        "start_time": activity[7],
-        "end_time": activity[8],
-        "active_start_date": activity[9],
-        "active_end_date": activity[10],
-        "source": activity[11],
-        "external_id": activity[12],
-    }
+    return as_activity_record(activity)._asdict()
 
 
 def normalize_optional_time(value):

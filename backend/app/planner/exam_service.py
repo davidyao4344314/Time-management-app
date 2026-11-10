@@ -121,8 +121,8 @@ def update_exam_record(connection, exam_id, fields):
                 detail="Time must use HH:MM format.",
             ) from None
 
-        start_time_value = new_value if column_name == "start_time" else exam[5]
-        end_time_value = new_value if column_name == "end_time" else exam[6]
+        start_time_value = new_value if column_name == "start_time" else exam.start_time
+        end_time_value = new_value if column_name == "end_time" else exam.end_time
 
         try:
             start_time_value = normalize_optional_time(start_time_value)

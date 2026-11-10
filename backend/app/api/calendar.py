@@ -60,7 +60,7 @@ def current_activities():
     activities_current = [
         activity
         for activity in activities_today
-        if activity[0] in current_activity_ids
+        if activity.id in current_activity_ids
     ]
 
     connection.close()

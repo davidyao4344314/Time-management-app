@@ -3,6 +3,7 @@
 from datetime import datetime, timedelta
 
 from backend.app.planner.activities import get_all_activities, get_activity_by_id
+from backend.app.planner.records import as_activity_record
 from backend.app.planner.calendar import (
     get_current_and_next_activities,
     get_current_date,
@@ -19,13 +20,14 @@ from backend.app.ai.observations.formatting import (
 
 
 def _brief_activity(activity):
-    """Keep only schedule fields from a database activity tuple."""
+    """Keep only schedule fields from a database activity record."""
+    activity = as_activity_record(activity)
     return {
-        "id": activity[0],
-        "name": activity[1],
-        "activity_type": activity[4],
-        "start": _time_or_none(activity[7]),
-        "end": _time_or_none(activity[8]),
+        "id": activity.id,
+        "name": activity.name,
+        "activity_type": activity.activity_type,
+        "start": _time_or_none(activity.start_time),
+        "end": _time_or_none(activity.end_time),
     }
 
 
@@ -54,18 +56,19 @@ def _occurrences_in_range(connection, first_date, last_date):
 
 def _brief_activity_definition(activity):
     """Include stable IDs for exact tool targeting, but no import identifiers."""
+    activity = as_activity_record(activity)
     return {
-        "id": activity[0],
-        "name": activity[1],
-        "category": activity[2],
-        "subject": activity[3],
-        "activity_type": activity[4],
-        "date": activity[5],
-        "weekday": activity[6],
-        "start": _time_or_none(activity[7]),
-        "end": _time_or_none(activity[8]),
-        "active_start_date": activity[9] if len(activity) > 9 else None,
-        "active_end_date": activity[10] if len(activity) > 10 else None,
+        "id": activity.id,
+        "name": activity.name,
+        "category": activity.category,
+        "subject": activity.subject,
+        "activity_type": activity.activity_type,
+        "date": activity.date,
+        "weekday": activity.weekday,
+        "start": _time_or_none(activity.start_time),
+        "end": _time_or_none(activity.end_time),
+        "active_start_date": activity.active_start_date,
+        "active_end_date": activity.active_end_date,
     }
 
 
@@ -164,8 +167,8 @@ def _build_activity_observation(connection, scope):
     }
     if includes_today:
         current, next_activity = get_current_and_next_activities(connection)
-        current.sort(key=lambda activity: (
-            _time_or_none(activity[7]) or "", activity[1], activity[0]
+        current = sorted(map(as_activity_record, current), key=lambda activity: (
+            _time_or_none(activity.start_time) or "", activity.name, activity.id
         ))
         today_items = [_brief_occurrence(item) for item in relevant
                        if item['calendar_date'] == today_string]

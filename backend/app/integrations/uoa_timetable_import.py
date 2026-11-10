@@ -189,15 +189,16 @@ def backfill_uoa_activity_ranges(connection, events):
     unmatched_ids = []
     with connection:
         for activity in get_all_activities(connection):
-            if activity[2] != "University" or activity[4] != "weekly":
+            if activity.category != "University" or activity.activity_type != "weekly":
                 continue
-            if activity[9] is not None or activity[10] is not None:
+            if activity.active_start_date is not None or activity.active_end_date is not None:
                 continue
-            bounds = ranges.get(tuple(activity[1:9]))
+            bounds = ranges.get((activity.name, activity.category, activity.subject, activity.activity_type,
+                                 activity.date, activity.weekday, activity.start_time, activity.end_time))
             if bounds is None:
-                unmatched_ids.append(activity[0])
+                unmatched_ids.append(activity.id)
                 continue
-            updated += backfill_activity_date_range(connection, activity[0], *bounds)
+            updated += backfill_activity_date_range(connection, activity.id, *bounds)
     return {"updated": updated, "unmatched_ids": unmatched_ids, "skipped": skipped}
 
 

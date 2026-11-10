@@ -58,13 +58,13 @@ class SourceTests(unittest.TestCase):
         for table in ('activities', 'exams'):
             after = self.connection.execute(f'SELECT * FROM {table}').fetchall()
             self.assertEqual([row[:-1] for row in after], before[table])
-        self.assertEqual([r[-1] for r in activities.get_all_activities(self.connection)], ['Manual', 'Canvas', 'UoA', 'Manual'])
-        self.assertEqual([r[-1] for r in exams.get_all_exams(self.connection)], ['Canvas', 'Manual'])
+        self.assertEqual([r.source for r in activities.get_all_activities(self.connection)], ['Manual', 'Canvas', 'UoA', 'Manual'])
+        self.assertEqual([r.source for r in exams.get_all_exams(self.connection)], ['Canvas', 'Manual'])
         # Running the migration again must never reclassify a Manual record.
         self.connection.execute("UPDATE activities SET source='Manual' WHERE category='Canvas'")
         self.connection.commit()
         database.add_record_sources(self.connection)
-        self.assertEqual(activities.get_all_activities(self.connection)[1][-1], 'Manual')
+        self.assertEqual(activities.get_all_activities(self.connection)[1].source, 'Manual')
 
     def test_existing_empty_sources_use_manual_without_name_guessing(self):
         schema = database.sql_file.read_text().replace("source TEXT NOT NULL DEFAULT 'Manual'", 'source TEXT')

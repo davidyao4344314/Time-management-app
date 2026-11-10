@@ -1,0 +1,24 @@
+.session-log { max-width: 48rem; margin-top: 2rem; }
+.session-log > p { line-height: 1.5; }
+.session-toolbar, .session-form fieldset { display: flex; flex-wrap: wrap; align-items: end; gap: 0.75rem; }
+.session-toolbar { margin: 1rem 0; }
+.session-log label { display: grid; gap: 0.35rem; font-weight: 600; }
+.session-log input, .session-log select, .session-log button { min-height: 2.5rem; padding: 0.45rem 0.65rem; border: 1px solid #bbb; border-radius: 0.3rem; background: #fff; color: #222; }
+.session-log button { cursor: pointer; }
+.session-log button[type='submit'] { background: #4338ca; color: #fff; border-color: #4338ca; }
+.session-log :disabled { opacity: 0.6; cursor: default; }
+.session-list { display: grid; gap: 0.75rem; padding: 0; list-style: none; }
+.session-card { padding: 1rem; border: 1px solid #ddd; border-radius: 0.4rem; background: #fff; }
+.session-details h4 { margin: 0; overflow-wrap: anywhere; }
+.session-details p { margin: 0.35rem 0; }
+.session-status { width: fit-content; padding: 0.25rem 0.5rem; background: #f3f4f6; border-radius: 0.25rem; }
+.session-done { color: #166534; background: #dcfce7; }
+.session-partly_done { color: #854d0e; background: #fef9c3; }
+.session-missed { color: #991b1b; background: #fee2e2; }
+.session-form fieldset { margin: 1rem 0 0; padding: 0; border: 0; min-width: 0; }
+.session-form input { width: 8rem; }
+.session-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@media (max-width: 36rem) {
+  .session-form label { flex: 1 1 100%; }
+  .session-form input, .session-form select { width: 100%; }
+}

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import './Home.css'
+import StudySessionLog from '../components/StudySessionLog'
 
 function Home() {
   const [schedule, setSchedule] = useState(null)
@@ -93,6 +94,8 @@ function Home() {
           </section>
         </>
       )}
+
+      <StudySessionLog />
 
       <section className="today-activities">
         <h3>Today's Activities</h3>

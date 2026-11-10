@@ -62,7 +62,8 @@ class FolderLayoutTests(unittest.TestCase):
             '/conversations/{conversation_id}/settings', '/conversations/{conversation_id}/memory/export',
             '/conversations/{conversation_id}/summary', '/files', '/files/context', '/files/{file_id}',
             '/actions/proposals', '/actions/proposals/{proposal_id}',
-            '/actions/proposals/{proposal_id}/decision', '/actions/dev/proposals'})
+            '/actions/proposals/{proposal_id}/decision', '/actions/dev/proposals',
+            '/study-sessions', '/study-sessions/{activity_id}/{session_date}'})
         self.assertIn('/conversations/{conversation_id}/summary', app.openapi()['paths'])
         route_pairs = [(route.path, tuple(sorted(route.methods)))
                        for route in app.routes if hasattr(route, "methods")]

@@ -25,9 +25,10 @@ class DatabaseStartupTests(unittest.TestCase):
         with TestClient(app) as client:
             self.assertEqual(client.get("/activities").json(), [])
             with closing(database.create_connection()) as connection:
-                self.assertEqual(connection.execute("SELECT count(*) FROM schema_migrations").fetchone(), (7,))
+                self.assertEqual(connection.execute("SELECT count(*) FROM schema_migrations").fetchone(), (8,))
                 connection.execute("SELECT * FROM conversation_memory_exports")
                 connection.execute("SELECT * FROM action_proposals")
+                connection.execute("SELECT * FROM study_sessions")
         with patch.object(database, "_prepare_planner_schema", side_effect=AssertionError("already migrated")):
             with TestClient(app) as client:
                 self.assertEqual(client.get("/exams").json(), [])

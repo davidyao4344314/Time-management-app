@@ -150,6 +150,7 @@ test('Home shows real daily data and handles untimed activities', async () => {
   let cursor = 0, mount
   const values = [], calls = []
   const context = await component('pages/Home.jsx', {
+    StudySessionLog: () => jsx('section', { children: 'Study session log' }),
     AbortController,
     useState(initial) { const index = cursor++; if (!(index in values)) values[index] = initial
       return [values[index], value => { values[index] = value }] },

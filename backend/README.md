@@ -1,5 +1,38 @@
 # Study Planning App
 
+## Study session completion tracking
+
+Open **Home → Study session log** to record an activity occurrence as **Done**,
+**Partly done**, or **Missed**. Choose today or a past date to enter or correct
+records. All scheduled activities are available so tracking does not depend on
+a particular category name. Enter actual whole minutes (1–1,440 for completed
+work); Missed uses zero minutes. The date defaults to the backend's Auckland
+date. Future dates cannot be recorded.
+
+Save persists one record per activity ID and date. Repeated saves update that
+record; recurring activities have independent daily records. Clear record
+resets the occurrence to unrecorded. The panel shows recorded session counts
+and actual minutes for the selected date. Recorded names, subjects and scheduled
+times are snapshots, so an existing log remains visible after schedule edits.
+Deleting an activity also deletes its completion records.
+
+API startup adds migration `008_study_sessions` without changing planner rows.
+`GET /study-sessions?session_date=YYYY-MM-DD` lists scheduled and recorded
+occurrences (date is optional). `PUT /study-sessions/{activity_id}/{session_date}`
+accepts `{"status":"done","actual_minutes":45}`; statuses are `done`,
+`partly_done`, and `missed`. `DELETE` on that same path clears a record. The
+service checks recurrence and active date ranges before creating a new record.
+These records share the local planner's scope and make no AI request. Completion
+records are not yet included in AI context or automatic rescheduling.
+
+Offline checks use disposable storage:
+
+```bash
+backend/.venv/bin/python -B -m unittest backend.tests.planner.test_study_sessions -v
+cd frontend
+node --test tests/study-sessions.test.js
+```
+
 This README explains how to run the project and describes the backend as it
 currently works. The AI agent can **propose** up to ten new activities in one
 reply, or delete/edit one activity. Mixed-tool and bulk edit/delete replies are rejected.

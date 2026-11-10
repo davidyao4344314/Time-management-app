@@ -9,11 +9,11 @@ if not __package__:
 
 
 def main():
-    from backend.app.database import create_connection, create_tables
+    from backend.app.database import create_connection, initialize_database
     from backend.app.planner.activities import print_all_activities , search_activity, get_user_values, get_clomuns,add_activity,delete_activity, edit_activity,get_activity_schedule, search_by_id
     from backend.app.planner.calendar import get_current_date, get_current_time ,print_all_dailies, get_current_day,get_todays_activities, check_activity_current
-    conection =create_connection()
-    create_tables(conection)
+    initialize_database()
+    conection = create_connection()
     from backend.app.integrations.canvas_import import get_canvas_events, classify_canvas_event
 
     current_activity = []

@@ -1,12 +1,13 @@
 """Durable owner-scoped proposals and receipts in the existing SQLite database."""
 import json
+from contextlib import nullcontext
 from datetime import datetime, timezone
 
 from backend.app.ai.actions.contracts import ActionProposal
 
 
-def migrate(connection):
-    with connection:
+def migrate(connection, *, commit=True):
+    with (connection if commit else nullcontext()):
         connection.execute('''CREATE TABLE IF NOT EXISTS action_proposals (
             proposal_id TEXT PRIMARY KEY,
             owner_id TEXT NOT NULL,

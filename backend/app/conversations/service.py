@@ -1,6 +1,6 @@
 """Conversation operations; the trusted owner is supplied by the HTTP adapter."""
 import sqlite3
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 
 from backend.app import database
 from backend.app.conversations import storage
@@ -16,7 +16,6 @@ from backend.app.conversations.legacy import link_legacy_chat
 from backend.app.ai.context.adaptive import store as routing_store
 from backend.app.ai.context.adaptive.settings import get_adaptive_settings
 from backend.app.ai.context.adaptive.learning import make_completed_event, load_snapshot
-from backend.app.files import storage as file_storage
 from backend.app.files.retrieval import detect_file_reference, retrieve_file_context
 from backend.app.ai.actions.registry import create_proposal_tool_registry
 from backend.app.ai.actions.routing import prepare_tool_proposals
@@ -27,17 +26,8 @@ from backend.app.ai.actions import storage as action_storage
 
 @contextmanager
 def open_store():
-    connection = sqlite3.connect(database.db_file, timeout=10)
-    try:
-        connection.execute('PRAGMA foreign_keys=ON')
-        storage.migrate(connection)
-        summary.migrate(connection)
-        routing_store.migrate(connection)
-        file_storage.migrate(connection)
-        action_storage.migrate(connection)
+    with closing(database.create_connection(timeout=10)) as connection:
         yield connection
-    finally:
-        connection.close()
 
 
 def create_chat(owner_id, title=None):

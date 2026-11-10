@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 from uuid import uuid4
 
 from backend.app import database
+from backend.app.server import initialize_application_database
 from backend.app.conversations import service
 from backend.app.ai.context import selection
 from backend.app.ai.context.contracts import AgentIntentClassification, AgentRoutingDecision
@@ -38,6 +39,7 @@ class AdaptiveEvidenceTests(unittest.TestCase):
                     patch.object(service, "is_openai_api_key_configured", return_value=True), \
                     patch.object(service, "get_adaptive_settings", return_value=AdaptiveSettings(mode="observe")), \
                     patch.object(service, "get_agent_proposal", side_effect=fake_agent) as model:
+                initialize_application_database()
                 chat = service.create_chat("owner")["conversation_id"]
                 request = str(uuid4())
                 if fail:

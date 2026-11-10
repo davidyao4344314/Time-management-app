@@ -75,8 +75,8 @@ feature in this stage.
 
 ## Exact SQLite schema
 
-Stored in the existing ignored `backend/study_app.db`. The existing conversation
-store's additive migration creates these tables without replacing any records:
+Stored in the existing ignored `backend/study_app.db`. The additive API startup
+migration creates these tables without replacing any records:
 
 ```sql
 CREATE TABLE IF NOT EXISTS imported_files(

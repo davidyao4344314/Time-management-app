@@ -8,12 +8,8 @@ from backend.app.ai.memory.selection import report_archive_size
 from backend.app.conversations import storage
 
 
-migrate = storage.migrate_memory_exports
-
-
 def export_eligible_turns(connection, owner_id, conversation_id):
     chat = storage.require_conversation(connection,conversation_id,owner_id)
-    migrate(connection)
     if not chat['memory_sharing_enabled']:
         return {'exported':0}
     rows = storage.export_candidates(connection, conversation_id, owner_id, get_max_recent_turns())

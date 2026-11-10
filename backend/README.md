@@ -52,7 +52,7 @@ Activities or Calendar loads the saved planner state.
   20-item/6,000-character detail window, without exposing external identifiers.
 
 The additive action-storage migration preserves existing planner/chat records and
-runs when conversation/action storage opens. Older process-local proposals are
+runs at API startup. Older process-local proposals are
 not reconstructed from old assistant text. Existing standalone CRUD functions
 still commit by default; approved actions share a caller-owned transaction.
 
@@ -195,6 +195,11 @@ the terminal to stop the server. The FastAPI `app` is in
 `backend/app/server.py`. The old `backend.fastapi_test:app` command remains
 compatible. `backend/app/cli.py` is the interactive Python program, not the
 ASGI app; the old `backend/app/main.py` script forwards to it. The frontend's Vite `/api` proxy targets port 8001.
+
+API startup initializes the existing SQLite database and records completed
+schema upgrades in `schema_migrations`. A pending upgrade is transactional;
+ordinary connections do not run migrations. The planner CLI and timetable
+importer's `--save` command initialize the planner tables before using them.
 
 ## Run the frontend
 

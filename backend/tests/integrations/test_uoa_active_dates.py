@@ -122,6 +122,7 @@ class TimetableDateTests(unittest.TestCase):
             connection.close()
             with patch.object(database, "db_file", path):
                 for _ in range(2):
+                    database.initialize_database()
                     connection = database.create_connection()
                     row = connection.execute("SELECT * FROM activities").fetchone()
                     self.assertEqual(row[:9], old_row)

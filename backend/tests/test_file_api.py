@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from backend.app import database
 from backend.app.api.files import router
 from backend.app.infrastructure import identity
+from backend.app.server import initialize_application_database
 
 
 class FileAPITests(unittest.TestCase):
@@ -21,6 +22,7 @@ class FileAPITests(unittest.TestCase):
             patcher = patch.object(target, name, value)
             patcher.start()
             self.addCleanup(patcher.stop)
+        initialize_application_database()
         app = FastAPI()
         app.include_router(router)
         self.client = TestClient(app)

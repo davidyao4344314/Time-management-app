@@ -17,6 +17,7 @@ from openai.lib._parsing._responses import parse_response
 from openai.types.responses import Response, ResponseFunctionToolCall
 
 from backend.app import database
+from backend.app.server import initialize_application_database
 from backend.app.api import actions, action_runtime, conversations
 from backend.app.ai.actions.registry import create_proposal_tool_registry
 from backend.app.ai.actions.persistent_service import PersistentActionProposalService
@@ -227,6 +228,7 @@ class ModelChatApprovalTests(unittest.TestCase):
         with closing(sqlite3.connect(self.path)) as connection:
             database.create_tables(connection)
         self.stack.enter_context(patch.object(database, "db_file", self.path))
+        initialize_application_database()
         self.stack.enter_context(patch.object(identity, "IDENTITY_KEY_FILE", Path(directory.name) / "key"))
         self.stack.enter_context(patch.dict(os.environ, {"OPENAI_API_KEY": "offline-placeholder", "ACTION_LAYER_DEV_MODE": "0"}))
         self.stack.enter_context(patch.object(chats, "is_openai_api_key_configured", return_value=True))

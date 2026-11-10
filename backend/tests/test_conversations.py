@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from backend.app.conversations import storage
+from backend.app.server import initialize_application_database
 from backend.app.conversations.contracts import ConversationConflict, ConversationNotFound
 
 
@@ -71,6 +72,7 @@ class ConversationAPITests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, \
                 patch.object(database, 'db_file', Path(directory)/'db.sqlite'), \
                 patch.object(identity, 'IDENTITY_KEY_FILE', Path(directory)/'key'):
+            initialize_application_database()
             app = FastAPI()
             app.include_router(router)
             first, second = TestClient(app), TestClient(app)
@@ -91,6 +93,7 @@ class ConversationAPITests(unittest.TestCase):
                 patch.object(database, 'db_file', Path(directory)/'db.sqlite'), \
                 patch.object(service, 'is_openai_api_key_configured', return_value=True), \
                 patch.object(service, 'get_agent_proposal', return_value={'message':'Try COMPSCI.','actions':[]}) as model:
+            initialize_application_database()
             chat = service.create_chat('owner')['conversation_id']
             request = str(uuid4())
             first = service.send_message('owner',chat,request,'Study tonight')
@@ -111,6 +114,7 @@ class ConversationAPITests(unittest.TestCase):
                 patch.object(database, 'db_file', Path(directory)/'db.sqlite'), \
                 patch.object(service, 'is_openai_api_key_configured', return_value=True), \
                 patch.object(service, 'get_agent_proposal', side_effect=RuntimeError('offline failure')) as model:
+            initialize_application_database()
             chat = service.create_chat('owner')['conversation_id']
             request = str(uuid4())
             with self.assertRaises(RuntimeError):
@@ -129,6 +133,7 @@ class ConversationMemoryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, patch.object(database,'db_file',Path(directory)/'test.db'), \
                 patch.object(legacy_adapter.recent,'get_recent_turns',return_value=[{'timestamp':'2026-09-01T12:00:00+12:00','user':'Earlier discussion','assistant':{'message':'A proposal','actions':[]}}]), \
                 patch.object(legacy_adapter.archive_store,'iter_archive_records',return_value=iter([])):
+            initialize_application_database()
             service.link_verified_legacy_chat(legacy,legacy)
             service.link_verified_legacy_chat(legacy,legacy)
             self.assertEqual(len(service.list_chats(legacy)),1)
@@ -160,6 +165,7 @@ class ConversationMemoryTests(unittest.TestCase):
             connection = sqlite3.connect(':memory:')
             self.addCleanup(connection.close)
             storage.migrate(connection)
+            storage.migrate_memory_exports(connection)
             chat = storage.create_conversation(connection,'owner')['conversation_id']
             for number in range(7):
                 request = str(uuid4())

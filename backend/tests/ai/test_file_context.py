@@ -241,9 +241,11 @@ class FileAgentTests(unittest.TestCase):
     def test_conversation_keeps_reference_not_document_text_and_followup_resolves(self):
         from backend.app.conversations import service as chats
         from backend.app.conversations.context import build_chat_context
+        from backend.app.server import initialize_application_database
         self.client.responses.parse.return_value = response(ANSWER)
         with tempfile.TemporaryDirectory() as folder, patch.object(database, "db_file", Path(folder) / "test.db"), \
                 patch.object(chats, "is_openai_api_key_configured", return_value=True):
+            initialize_application_database()
             chat = chats.create_chat("owner")["conversation_id"]
             with chats.open_store() as connection:
                 saved = ingest_file(connection, "owner", "assignment2.txt", b"PRIVATE EXCERPT: recursion")

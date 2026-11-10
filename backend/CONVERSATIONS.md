@@ -15,9 +15,9 @@ stores an optional local summary and its exact message boundary.
 `action_proposals` stores owner/chat/request links, backend review snapshots,
 approval status and terminal tool receipts. Assistant text is not approval authority.
 
-Conversation tables are initialized by the conversation service's `open_store`,
-independently of planner connection setup. Migrations only add tables.
-Activities, exams and imports are preserved.
+Conversation tables are initialized at API startup by the versioned database
+migrations. The conversation service's `open_store` only opens a connection.
+Existing conversations, activities, exams and imports are preserved.
 The previously tracked database files are kept locally but removed from the Git
 index. `.env`, SQLite runtime files and archive/durable stores remain ignored.
 Old database contents remain in earlier Git commits; this change does not rewrite

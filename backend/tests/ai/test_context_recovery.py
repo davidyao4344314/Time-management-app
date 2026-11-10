@@ -500,11 +500,13 @@ class ContextRecoveryTests(unittest.TestCase):
     def test_conversation_stores_only_the_final_reply(self):
         from backend.app import database
         from backend.app.conversations import service as conversations
+        from backend.app.server import initialize_application_database
 
         self.respond(missing(), answer())
         with tempfile.TemporaryDirectory() as directory, \
                 patch.object(database, "db_file", Path(directory) / "fixture.sqlite"), \
                 patch.object(conversations, "is_openai_api_key_configured", return_value=True):
+            initialize_application_database()
             chat = conversations.create_chat("fixture-owner")["conversation_id"]
             result = conversations.send_message("fixture-owner", chat, str(uuid4()),
                                                 "What time should I set my alarm tomorrow?")

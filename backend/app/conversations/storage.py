@@ -1,6 +1,7 @@
 """SQLite chat storage. No agent calls, archive access or HTTP dependencies."""
 
 import json
+from contextlib import nullcontext
 from datetime import datetime, timezone, timedelta
 from uuid import uuid4, UUID, uuid5
 
@@ -23,9 +24,9 @@ def conversation_results(connection, conversation_id, request_id):
            ORDER BY p.created_at,p.proposal_id''', (conversation_id, request_id))]
 
 
-def migrate(connection):
+def migrate(connection, *, commit=True):
     """Add tables without replacing any existing application data."""
-    with connection:
+    with (connection if commit else nullcontext()):
         connection.execute('''CREATE TABLE IF NOT EXISTS conversations(
             conversation_id TEXT PRIMARY KEY,
             owner_id TEXT NOT NULL,
@@ -202,8 +203,8 @@ def set_memory_sharing(connection, conversation_id, owner_id, enabled):
     return require_conversation(connection, conversation_id, owner_id)
 
 
-def migrate_summaries(connection):
-    with connection:
+def migrate_summaries(connection, *, commit=True):
+    with (connection if commit else nullcontext()):
         connection.execute('''CREATE TABLE IF NOT EXISTS conversation_summaries(
             conversation_id TEXT PRIMARY KEY REFERENCES conversations(conversation_id),
             content TEXT,
@@ -284,8 +285,8 @@ def release_summary(connection, conversation_id):
         connection.execute('UPDATE conversation_summaries SET updating=0 WHERE conversation_id=?', (conversation_id,))
 
 
-def migrate_memory_exports(connection):
-    with connection:
+def migrate_memory_exports(connection, *, commit=True):
+    with (connection if commit else nullcontext()):
         connection.execute('''CREATE TABLE IF NOT EXISTS conversation_memory_exports(
             conversation_id TEXT NOT NULL REFERENCES conversations(conversation_id),
             request_id TEXT NOT NULL,

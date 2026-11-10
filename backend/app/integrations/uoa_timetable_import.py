@@ -16,7 +16,7 @@ if not __package__:
 from backend.app.infrastructure.paths import PROJECT_DIRECTORY
 from backend.app.integrations.ical_import import get_ical_events
 from backend.app.planner.activities import add_activity, backfill_activity_date_range, find_equivalent_activity_id, get_all_activities, save_uoa_external_ids
-from backend.app.database import create_connection
+from backend.app.database import create_connection, initialize_database
 
 
 UOA_ENV_FILE = PROJECT_DIRECTORY / ".env"
@@ -246,6 +246,7 @@ def main():
             print(f"Skipped timetable event {event_number}: {error}")
 
     if args.save:
+        initialize_database()
         connection = create_connection()
         try:
             import_uoa_timetable_to_activities(connection, events)

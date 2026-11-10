@@ -1,12 +1,13 @@
 """Owner-scoped normalized files in the existing SQLite database."""
 
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from uuid import uuid4
 
 
-def migrate(connection):
+def migrate(connection, *, commit=True):
     """Additive migration; never replace planner, conversation or memory data."""
-    with connection:
+    with (connection if commit else nullcontext()):
         connection.execute('''CREATE TABLE IF NOT EXISTS imported_files(
             file_id TEXT PRIMARY KEY,
             owner_id TEXT NOT NULL,

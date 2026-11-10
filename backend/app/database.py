@@ -1,4 +1,5 @@
 import sqlite3
+from contextlib import closing, nullcontext
 from pathlib import Path
 
 
@@ -24,20 +25,20 @@ db_file = backend_dir / "study_app.db"
 sql_file = project_dir / "activities.sql"
 
 
-def add_activity_date_ranges(connection):
+def add_activity_date_ranges(connection, *, commit=True):
     """Append optional range fields without changing existing rows or indexes."""
     columns = {row[1] for row in connection.execute("PRAGMA table_info(activities)")}
     if not columns:
         return
-    with connection:
+    with (connection if commit else nullcontext()):
         for name in ("active_start_date", "active_end_date"):
             if name not in columns:
                 connection.execute(f"ALTER TABLE activities ADD COLUMN {name} TEXT")
 
 
-def add_record_sources(connection):
+def add_record_sources(connection, *, commit=True):
     """Append source once, retaining every existing row and column position."""
-    with connection:
+    with (connection if commit else nullcontext()):
         for table in ("activities", "exams"):
             columns = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
             if not columns:
@@ -57,9 +58,9 @@ def add_record_sources(connection):
                 connection.execute(f"UPDATE {table} SET source = 'Manual' WHERE source IS NULL OR trim(source) = ''")
 
 
-def add_external_id_storage(connection):
+def add_external_id_storage(connection, *, commit=True):
     """Keep old records intact; their new external_id remains NULL."""
-    with connection:
+    with (connection if commit else nullcontext()):
         for table in ("activities", "exams"):
             columns = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
             if columns and "external_id" not in columns:
@@ -84,7 +85,7 @@ def times_are_required(connection, table_name):
     )
 
 
-def allow_null_times(connection):
+def allow_null_times(connection, *, commit=True):
     table_migrations = {
         "activities": {
             "columns": (
@@ -137,8 +138,11 @@ def allow_null_times(connection):
         new_table_name = f"{table_name}_new"
         columns = migration["columns"]
 
-        with connection:
+        with (connection if commit else nullcontext()):
             connection.execute(migration["create_sql"])
+            previous_sequence = connection.execute(
+                "SELECT seq FROM sqlite_sequence WHERE name = ?", (table_name,),
+            ).fetchone()
             connection.execute(
                 f"INSERT INTO {new_table_name} ({columns}) "
                 f"SELECT {columns} FROM {table_name}"
@@ -147,11 +151,17 @@ def allow_null_times(connection):
             connection.execute(
                 f"ALTER TABLE {new_table_name} RENAME TO {table_name}"
             )
+            if previous_sequence is not None:
+                connection.execute("DELETE FROM sqlite_sequence WHERE name = ?", (table_name,))
+                connection.execute(
+                    "INSERT INTO sqlite_sequence (name, seq) VALUES (?, ?)",
+                    (table_name, previous_sequence[0]),
+                )
 
 
-def add_screen_time_storage(connection):
+def add_screen_time_storage(connection, *, commit=True):
     """Create Screen Time storage in existing databases without changing their rows."""
-    with connection:
+    with (connection if commit else nullcontext()):
         connection.execute("""
             CREATE TABLE IF NOT EXISTS screen_time_daily(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -165,22 +175,44 @@ def add_screen_time_storage(connection):
         """)
 
 
-def create_connection():
-    """
-    Open the SQLite database and return the connection.
+def _prepare_planner_schema(connection, *, commit=False):
+    # executescript would commit the caller's transaction. The bootstrap SQL
+    # file contains one complete CREATE statement at a time.
+    statement = ""
+    for line in sql_file.read_text().splitlines(keepends=True):
+        statement += line
+        if sqlite3.complete_statement(statement):
+            connection.execute(statement)
+            statement = ""
+    if statement.strip():
+        raise ValueError("Incomplete planner schema statement.")
+    add_activity_date_ranges(connection, commit=commit)
+    add_record_sources(connection, commit=commit)
+    add_external_id_storage(connection, commit=commit)
+    allow_null_times(connection, commit=commit)
+    add_screen_time_storage(connection, commit=commit)
 
-    If study_app.db does not exist, SQLite creates it.
-    If it already exists, SQLite opens it.
-    """
 
-    connection = sqlite3.connect(db_file)
-    add_activity_date_ranges(connection)
-    add_record_sources(connection)
-    add_external_id_storage(connection)
-    allow_null_times(connection)
-    add_screen_time_storage(connection)
+def initialize_database(extra_migrations=()):
+    """Apply versioned migrations once, before the app opens regular connections."""
+    migrations = (("001_planner", _prepare_planner_schema), *extra_migrations)
+    # Keep FK checks disabled only on this connection while legacy tables are
+    # rebuilt, so SQLite does not cascade-delete existing UoA UID mappings.
+    with closing(sqlite3.connect(db_file, timeout=10)) as connection, connection:
+        connection.execute("PRAGMA foreign_keys = OFF")
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute("CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY)")
+        applied = {name for (name,) in connection.execute("SELECT name FROM schema_migrations")}
+        for name, migrate in migrations:
+            if name not in applied:
+                migrate(connection, commit=False)
+                connection.execute("INSERT INTO schema_migrations (name) VALUES (?)", (name,))
+
+
+def create_connection(*, timeout=5):
+    """Open a prepared database without running schema or data migrations."""
+    connection = sqlite3.connect(db_file, timeout=timeout)
     connection.execute("PRAGMA foreign_keys = ON")
-
     return connection
 
 

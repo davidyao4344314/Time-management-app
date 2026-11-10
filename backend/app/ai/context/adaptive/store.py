@@ -2,6 +2,7 @@
 
 import json
 import re
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -13,8 +14,8 @@ def now_iso():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def migrate(connection):
-    with connection:
+def migrate(connection, *, commit=True):
+    with (connection if commit else nullcontext()):
         connection.execute("""CREATE TABLE IF NOT EXISTS routing_events(
             event_id TEXT PRIMARY KEY,
             owner_id TEXT NOT NULL,

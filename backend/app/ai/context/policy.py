@@ -17,7 +17,8 @@ _NEGATED_EXCLUSION = re.compile(r"\b(?:don't|dont|do not|never)\s+$")
 _SOURCE_OBJECT = re.compile(
     r"\s+(?:(?:me|my|the|any|all|our|your|personal|scheduled|upcoming|"
     r"current|existing|stored|uploaded|imported|daily|weekly|formal|final|of)\s+)*"
-    r"(?P<source>calendar|schedule|timetable|activity|activities|exam|exams|"
+    r"(?P<source>study history|study sessions|study log|session log|completion records|"
+    r"calendar|schedule|timetable|activity|activities|exam|exams|"
     r"test|tests|assessment|assessments|deadline|deadlines|quiz|quizzes|file|files|document|documents|"
     r"global memory|shared memory|cross-chat memory)\b"
 )
@@ -53,7 +54,7 @@ def excluded_context_sources(user_message):
                 source = source_match.group("source")
                 if source in {"calendar", "schedule", "timetable"}:
                     excluded.update(("activities", "exams"))
-                elif source in {"activity", "activities"}:
+                elif source in {"activity", "activities", "study history", "study sessions", "study log", "session log", "completion records"}:
                     excluded.add("activities")
                 elif source in {"file", "files", "document", "documents"}:
                     excluded.add("files")

@@ -18,11 +18,13 @@ from backend.app.ai.context.selection import select_agent_context
 from backend.app.ai.context.policy import apply_context_exclusions, excluded_context_sources
 from backend.app.ai.context.exam_policy import choose_exam_filter
 from backend.app.ai.context.activity_targets import requested_activity_ids
+from backend.app.ai.context.study_history import requests_study_history
 from backend.app.ai.observations.activities import build_activity_observation
 from backend.app.ai.observations.collect import collect_agent_observations
 from backend.app.ai.observations.exams import build_exam_observation
 from backend.app.ai.observations.memory import build_memory_observation
 from backend.app.ai.observations.proposal_schedule import build_proposal_schedule_observation
+from backend.app.ai.observations.study_sessions import build_study_session_observation
 from backend.app.ai.agent.followup import prepare_followup, validate_followup
 from backend.app.ai.agent.transparency import build_proposal_context, record_routing_outcome
 from backend.app.ai.agent.context_recovery import (
@@ -87,6 +89,9 @@ def get_agent_proposal(
         return collect_agent_observations(
             connection, selected,
             activity_builder=lambda *args, **kwargs: read_observation(build_activity_observation, *args, **kwargs),
+            study_history_builder=lambda connection: read_observation(
+                build_study_session_observation, connection,
+                user_request if requests_study_history(user_request) else ''),
             exam_builder=lambda *args, **kwargs: read_observation(build_exam_observation, *args, **kwargs),
             session_id=session_id,
             **({"exam_filter": exam_filter} if exam_filter != "all" else {}),

@@ -183,6 +183,15 @@ def build_proposal_context(*, routing_trace, selection, recent_count, lookups, c
                   model=model,
                   adaptive_routing=build_adaptive_metadata(routing_evidence, adaptive_snapshot))
     public["token_usage"] = token_usage
+    history = context.get('activities', {}).get('study_sessions')
+    if history is not None:
+        public['study_session_context'] = {
+            'status': history.get('status', 'unavailable'), 'period': history.get('period'),
+            'count': history.get('count', 0), 'recorded_count': history.get('recorded_count', 0),
+            'automatic_missed_count': history.get('automatic_missed_count', 0),
+            'actual_minutes': history.get('actual_minutes'),
+            'truncated': bool(history.get('truncated')), 'period_limited': bool(history.get('period_limited')),
+        }
     file_observation = context.get("files", {})
     # Keep only references and counts in persisted inspector metadata. Never
     # copy extracted text/chunks into recent/archive/durable conversation memory.

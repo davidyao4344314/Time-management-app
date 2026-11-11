@@ -86,6 +86,20 @@ function AgentContextInspector({ context, actions = [] }) {
             </section>
           )}
 
+          {context.study_session_context && <section aria-label="Study session observations">
+            <h3>Study Session Context</h3>
+            <p>{context.study_session_context.status}</p>
+            {context.study_session_context.period && <>
+              <p>{context.study_session_context.period.start} – {context.study_session_context.period.end}</p>
+              <p>{context.study_session_context.count} sessions · {context.study_session_context.recorded_count} recorded
+                {' · '}{context.study_session_context.automatic_missed_count} automatically missed
+                {' · '}{context.study_session_context.actual_minutes} actual minutes</p>
+              {context.study_session_context.truncated && <p>Session details are limited; totals include the full period.</p>}
+              {context.study_session_context.period_limited && <p>The requested date range was limited to available history and at most 31 days.</p>}
+              <p className="agent-context-note">Automatic Missed means no outcome was recorded for a past scheduled session. It does not prove you skipped it. Totals include all activity categories.</p>
+            </>}
+          </section>}
+
           {context.file_context && <section aria-label="Retrieved files">
             <h3>File Context</h3>
             <p>{context.file_context.status} · {context.file_context.chunk_count} chunks

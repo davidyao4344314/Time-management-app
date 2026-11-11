@@ -41,6 +41,9 @@ def prepare_followup(proposal, *, context, context_status, selection, session_id
         if context_status["activities"] == "unavailable":
             return Followup(clarification=_schedule_clarification("I couldn't read your current calendar. Please try again before I propose study times."))
         schedule = read_schedule(schedule_dates)
+        history = context.get('activities', {}).get('study_sessions')
+        if history is not None:
+            schedule = {**schedule, 'study_sessions': history}
         before = context_status["activities"]
         context["activities"] = schedule
         context_status = build_context_status(context, memory_available=session_id is not None)

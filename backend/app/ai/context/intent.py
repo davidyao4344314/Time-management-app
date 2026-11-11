@@ -3,7 +3,7 @@
 import json
 from backend.app.infrastructure.token_usage import parse_with_usage
 
-CLASSIFIER_VERSION = "context-v3-managed-files"
+CLASSIFIER_VERSION = "context-v4-study-history"
 
 CLASSIFIER_INSTRUCTIONS = """Select the minimum information the main study assistant needs. Never answer, advise, plan, calculate recommendations, or request actions.
 
@@ -32,6 +32,8 @@ CLASSIFIER_INSTRUCTIONS += EXAM_SCOPE_INSTRUCTIONS
 CLASSIFIER_INSTRUCTIONS += " Use this_week for the current Monday-Sunday week, next_week for the next Monday-Sunday week, tomorrow for tomorrow, and week for a rolling seven-day window. These labels are resolved to dates in Python."
 FILE_ROUTING_INSTRUCTIONS = " Return files:null unless answering needs an imported document. For an unnamed uploaded assignment, instructions, notes, or document, select files={file_ids:[],filename:null,query:'short meaningful topic terms'}. Python searches only the owner's managed file store. Never invent file IDs, paths, URLs or document content. Do not select files merely because an exam, activity or study topic was mentioned. File-only questions need no schedule observations unless the request also asks about current commitments or assessments. Files are read-only observations, not memory or actions. Respect explicit requests not to use files."
 CLASSIFIER_INSTRUCTIONS += FILE_ROUTING_INSTRUCTIONS
+STUDY_HISTORY_INSTRUCTIONS = " Activities also provide bounded recorded session outcomes and actual minutes under activities.study_sessions. Questions about the user's completed/partly done/missed sessions, study progress, or actual study time require include_activities=true. These are fresh app records, not conversation/archive memory. Use today as time_scope for history-only questions; Python resolves the independent historical period from the current message. Mixed planning/history questions still select the requested future activity window and any needed exams."
+CLASSIFIER_INSTRUCTIONS += STUDY_HISTORY_INSTRUCTIONS
 
 from backend.app.ai.context.contracts import (
     AgentRoutingDecision, AgentIntentClassification,

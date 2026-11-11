@@ -35,6 +35,7 @@ def activity_action(**changes):
 
 class AIProposalTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch('backend.app.ai.agent.service.build_study_session_observation', return_value={'status': 'unavailable'}))
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         archive_patch = patch.object(ai_memory, "ARCHIVE_FILE", Path(directory.name) / "archive.jsonl")
@@ -481,7 +482,7 @@ class AIProposalTests(unittest.TestCase):
         self.assertEqual(json.loads(main_messages[1]["content"])["message"], "Reply 1")
         main_input = json.loads(main_messages[-1]["content"])
         self.assertEqual(main_input["request"], message)
-        self.assertEqual(main_input["observations"], {"activities": {"today": []}})
+        self.assertEqual(main_input["observations"], {"activities": {"today": [], 'study_sessions': {'status': 'unavailable'}}})
         activities.assert_called_once_with(ANY, scope="today")
         exams.assert_not_called()
 
@@ -969,7 +970,7 @@ class AIProposalTests(unittest.TestCase):
         model_input = json.loads(request["input"][0]["content"])
         self.assertEqual(model_input["request"], "Help me plan tonight")
         self.assertEqual(model_input["observations"], {
-            "activities": {"today": []}, "exams": {"upcoming": []},
+            "activities": {"today": [], 'study_sessions': {'status': 'unavailable'}}, "exams": {"upcoming": []},
         })
 
     def test_saved_model_and_effort_apply_only_to_main_agent(self):
@@ -1025,7 +1026,7 @@ class AIProposalTests(unittest.TestCase):
         self.assertEqual(earlier_reply["proposed_actions_not_executed"][0]["arguments"]["start_time"], "19:00")
         latest_request = json.loads(messages[2]["content"])
         self.assertEqual(latest_request["request"], "Make it later.")
-        self.assertEqual(latest_request["observations"]["activities"], updated_observations)
+        self.assertEqual(latest_request["observations"]["activities"], {**updated_observations, 'study_sessions': {'status': 'unavailable'}})
         self.assertIn("trust the latest observations", ai_proposal.STUDY_PLANNING_INSTRUCTIONS)
         self.assertEqual(client.responses.parse.call_count, 3)
 

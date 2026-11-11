@@ -34,13 +34,35 @@ needed. Responses identify these with `completion.automatic = true`; they do
 not count as manually recorded sessions. Reload records to refresh an open log
 after midnight. Unlogged historical occurrences follow the current activity
 definition, while explicitly saved records retain their snapshots.
-These records share the local planner's scope and make no AI request. Completion
-records are not yet included in AI context or automatic rescheduling.
+These records share the local planner's scope. Saving and reading the log make
+no AI request. When activities are selected for an AI question, the observation
+stage now includes completion history under `observations.activities.study_sessions`.
+The default covers today and the previous six dates. History questions can select
+today, yesterday, this/last week, this/last month, a number of past days, or ISO
+dates/ranges. At most 31 dates are read; any clipped range is explicitly reported.
+The historical period is separate from the forward calendar window.
+
+The observation includes Done/Partly done/Missed/unrecorded counts, saved actual
+minutes, totals by subject and category, and up to 20 session details within a
+6,000-character budget. Totals still cover all sessions in the stated period.
+Automatic Missed outcomes remain distinguishable from explicitly saved outcomes;
+unknown minutes are null. The agent is instructed that automatic Missed does not
+prove nonattendance and that all activity categories are included. Missing storage
+is unavailable history, never an empty log. Observations use the existing read-only
+connection and cannot update session outcomes. Existing activity/calendar exclusions,
+including explicit exclusions of study history, prevent these reads.
+
+Try **AI Agent** questions such as “Which activities did I complete yesterday?”,
+“Show my missed sessions last week”, or “How much time did I study this month?”.
+**How the agent used context → Study Session Context** shows the period, counts,
+actual minutes and truncation metadata. Sending a question uses the configured AI
+key as usual. This adds no new model-call stage or automatic rescheduling.
 
 Offline checks use disposable storage:
 
 ```bash
 backend/.venv/bin/python -B -m unittest backend.tests.planner.test_study_sessions -v
+backend/.venv/bin/python -B -m unittest backend.tests.ai.test_study_session_observation -v
 cd frontend
 node --test tests/study-sessions.test.js
 ```

@@ -32,6 +32,8 @@ def observation_status(source, observation):
         return "empty" if observation.get("status") == "empty" else "unavailable"
     if source == 'activities' and observation.get('requested_activity_count', 0) > 0:
         return 'provided'
+    if source == 'activities' and observation.get('study_sessions', {}).get('count', 0) > 0:
+        return 'provided'
     # Full counts remain authoritative when the detailed list is truncated.
     if type(observation.get("count")) is int:
         if observation["count"] < 0:

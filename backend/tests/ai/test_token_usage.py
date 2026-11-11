@@ -155,6 +155,7 @@ class TokenUsageTests(unittest.TestCase):
 
 class AgentTokenUsageTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch.object(service, 'build_study_session_observation', return_value={'status': 'unavailable'}))
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
         for patcher in (

@@ -11,6 +11,7 @@ from backend.app.ai.context.adaptive.patterns import match_pattern, profile_key
 from backend.app.ai.context.adaptive.metrics import high_confidence_reliability
 from backend.app.ai.context.adaptive.examples import validate_examples, example_version_suffix
 from backend.app.files.contracts import FileSelection
+from backend.app.ai.context.study_history import requests_study_history
 
 
 SAFE_MINIMAL_CONTEXT = {
@@ -70,6 +71,8 @@ def select_agent_context(client, user_message, recent_turns, stage_two_model, *,
             })
 
     def finish(selected, stage, status, reason, decision=None):
+        if requests_study_history(user_message) and selected.get('activities_scope') is None:
+            selected = {**selected, 'activities_scope': 'today'}
         if explicit_files is not None:
             # Exact managed references take precedence over classifier guesses,
             # but never replace independent activity/exam/memory selections.

@@ -3,6 +3,7 @@
 import re
 
 from backend.app.ai.context.policy import apply_context_exclusions, excluded_context_sources
+from backend.app.ai.context.study_history import narrow_study_history_request
 
 
 TODAY_PHRASES = (
@@ -48,6 +49,8 @@ def _choose_keyword_context(user_message, excluded_sources):
     The default is deliberately small: today's activities and upcoming exams.
     """
     message = user_message.casefold().replace("’", "'")
+    if narrow_study_history_request(message):
+        return {"activities_scope": "today", "include_exams": False, "exam_scope": None}
     if re.fullmatch(r"\s*what did i just say[?.!\s]*", message):
         return {"activities_scope": None, "include_exams": False, "exam_scope": None}
     memory = _memory_selection(message)
@@ -112,6 +115,8 @@ def assess_stage_one(user_message, recent_turns=None):
     """Keep the keyword router, but distinguish a clear match from its default."""
     message = user_message.casefold().replace("’", "'")
     selection = choose_agent_context(user_message)
+    if narrow_study_history_request(message):
+        return {"selection": selection, "confident": True, "reason": None}
     if re.fullmatch(r"\s*what did i just say[?.!\s]*", message):
         return {"selection": selection, "confident": True, "reason": None}
     phrase_groups = (

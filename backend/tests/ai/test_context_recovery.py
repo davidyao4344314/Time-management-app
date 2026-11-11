@@ -155,6 +155,7 @@ class RecoveryWindowTests(unittest.TestCase):
 
 class ContextRecoveryTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch.object(service, 'build_study_session_observation', return_value={'status': 'unavailable'}))
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
         self.stack.enter_context(patch.object(service, "is_openai_api_key_configured", return_value=True))
@@ -196,7 +197,7 @@ class ContextRecoveryTests(unittest.TestCase):
         first, second = self.model_input(0), self.model_input(1)
         self.assertEqual(first["observations"], {})
         self.assertEqual(first["context_status"]["activities"], "not_selected")
-        self.assertEqual(second["observations"], {"activities": CLASS})
+        self.assertEqual(second["observations"], {"activities": {**CLASS, 'study_sessions': {'status': 'unavailable'}}})
         self.assertEqual(second["context_status"]["activities"], "provided")
         self.assertEqual(second["context_recovery_remaining"], 0)
         self.assertEqual(result["agent_context"]["context_recovery"]["attempts"], MAX_CONTEXT_RECOVERY_RETRIES)
@@ -254,7 +255,7 @@ class ContextRecoveryTests(unittest.TestCase):
                 self.assertEqual(result["agent_context"]["context_status"]["activities"], expected)
                 self.assertEqual(result["agent_context"]["context_recovery"]["status"], "completed")
                 self.assertEqual(self.model_input(1)["context_recovery_feedback"], missing()["missing_context"])
-                self.assertEqual(self.model_input(1)["observations"]["activities"], data)
+                self.assertEqual(self.model_input(1)["observations"]["activities"], {**data, 'study_sessions': {'status': 'unavailable'}})
                 self.assertIsNotNone(result["message"])
                 self.client.responses.parse.reset_mock()
 

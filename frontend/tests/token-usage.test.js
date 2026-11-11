@@ -67,3 +67,21 @@ test('model labels stay escaped and cannot inject HTML', () => {
   assert.match(html, /&lt;script&gt;/)
   assert.doesNotMatch(html, /<script>/)
 })
+
+test('inspector shows session observation coverage and distinguishes automatic missed outcomes', async () => {
+  const Inspector = (await load('AgentContextInspector.jsx', { TokenUsagePanel: Panel })).AgentContextInspector
+  const context = { authority_note: 'Current observations take priority.', routing: { label: 'Stage 1' },
+    context_sources: [], memory_message: 'Not requested.', memory_lookups: [], retrieved_memory: [],
+    study_session_context: { status: 'provided', period: { start: '2026-11-01', end: '2026-11-11' },
+      count: 33, recorded_count: 3, automatic_missed_count: 28, actual_minutes: 90,
+      truncated: true, period_limited: true } }
+  const html = renderToStaticMarkup(jsx(Inspector, { context }))
+  assert.match(html, /Study Session Context/)
+  assert.match(html, /2026-11-01.*2026-11-11/)
+  assert.match(html, /33 sessions · 3 recorded/)
+  assert.match(html, /28 automatically missed/)
+  assert.match(html, /90 actual minutes/)
+  assert.match(html, /totals include the full period/)
+  assert.match(html, /does not prove you skipped it/)
+  assert.match(html, /at most 31 days/)
+})

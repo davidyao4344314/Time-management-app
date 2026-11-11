@@ -16,6 +16,7 @@ def collect_agent_observations(
     exam_filter="all",
     file_reader=None,
     activity_ids=(),
+    study_history_builder=None,
 ):
     """Keep factual app state separate from the current request and recent turns.
 
@@ -28,6 +29,9 @@ def collect_agent_observations(
             connection, scope=selection["activities_scope"],
             **({'activity_ids': activity_ids} if activity_ids else {}),
         )
+        if study_history_builder is not None and context['activities'].get('status') != 'unavailable':
+            context['activities'] = {**context['activities'],
+                                     'study_sessions': study_history_builder(connection)}
     if selection["include_exams"] and "exams" not in excluded_sources:
         context["exams"] = exam_builder(
             connection, scope=selection["exam_scope"],

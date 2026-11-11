@@ -10,6 +10,7 @@ from backend.app.ai.context.intent import (
     MEMORY_ROUTING_INSTRUCTIONS,
     EXAM_SCOPE_INSTRUCTIONS,
     FILE_ROUTING_INSTRUCTIONS,
+    STUDY_HISTORY_INSTRUCTIONS,
 )
 
 
@@ -29,7 +30,7 @@ def classify_stage_three(client, user_message, recent_turns, stage_one, stage_tw
     }
     response = parse_with_usage(client, "stage_3",
         model=STAGE_THREE_MODEL,
-        instructions=STAGE_THREE_INSTRUCTIONS + MEMORY_ROUTING_INSTRUCTIONS + EXAM_SCOPE_INSTRUCTIONS + FILE_ROUTING_INSTRUCTIONS,
+        instructions=STAGE_THREE_INSTRUCTIONS + MEMORY_ROUTING_INSTRUCTIONS + EXAM_SCOPE_INSTRUCTIONS + FILE_ROUTING_INSTRUCTIONS + STUDY_HISTORY_INSTRUCTIONS,
         input=[{"role": "user", "content": json.dumps(routing_input, ensure_ascii=False)}],
         text_format=AgentRoutingDecision,
         reasoning={"effort": STAGE_THREE_REASONING_EFFORT},
